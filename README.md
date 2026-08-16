@@ -1,4 +1,4 @@
-# SeaBridge Founder OS
+# SeaBridge
 
 **Master Enterprise Edition V1.0**
 
