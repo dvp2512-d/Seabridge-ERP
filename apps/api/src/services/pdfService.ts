@@ -90,6 +90,17 @@ function money(value: unknown, symbol: string): string {
   return `${symbol}${(Number.isFinite(n) ? n : 0).toFixed(2)}`;
 }
 
+/**
+ * Round a value to 2dp for arithmetic. Separate from money(), which formats a
+ * string for display - mixing the two silently produces string concatenation
+ * instead of addition.
+ */
+function round2(value: unknown): number {
+  const n = Number(value ?? 0);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n * 100) / 100;
+}
+
 function drawItemsHeader(doc: Doc, yPos: number, columns: [string, number][]): number {
   doc.fillColor(COLORS.navy).rect(PAGE.left, yPos, PAGE.width, 20).fill();
   doc.fillColor('#fff').fontSize(9);
@@ -191,7 +202,12 @@ export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
     );
 
     let apportioned = 0;
-    const rows = items.map((item: any, index: number) => {
+    const rows: {
+      item: any;
+      qty: number;
+      unitPrice: number;
+      total: number;
+    }[] = items.map((item: any, index: number) => {
       const lineTotal = Number(item.totalPrice ?? 0);
       const qty = Number(item.quantity ?? 0);
       const isLast = index === items.length - 1;
@@ -199,9 +215,9 @@ export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
       // Give the last line whatever is left so the apportionment is exact.
       let share: number;
       if (isLast) {
-        share = money(additionalCharges - apportioned);
+        share = round2(additionalCharges - apportioned);
       } else {
-        share = money(
+        share = round2(
           lineSubtotal > 0
             ? additionalCharges * (lineTotal / lineSubtotal)
             : additionalCharges / Math.max(items.length, 1)
@@ -211,15 +227,17 @@ export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
 
       // Round the unit price first, then derive the total from it, so the
       // multiplication printed on the page is exactly right.
-      const unitPrice = qty > 0 ? money((lineTotal + share) / qty) : 0;
-      const total = qty > 0 ? money(unitPrice * qty) : money(lineTotal + share);
+      const unitPrice = qty > 0 ? round2((lineTotal + share) / qty) : 0;
+      const total = qty > 0 ? round2(unitPrice * qty) : round2(lineTotal + share);
 
       return { item, qty, unitPrice, total };
     });
 
-    const documentTotal = money(rows.reduce((sum, r) => sum + r.total, 0));
+    const documentTotal = round2(
+      rows.reduce((sum: number, r) => sum + r.total, 0)
+    );
 
-    rows.forEach(({ item, qty, unitPrice, total }, index) => {
+    rows.forEach(({ item, qty, unitPrice, total }, index: number) => {
       const startedNewPage = yPos + 20 > PAGE.contentBottom;
       yPos = ensureSpace(doc, yPos, 20);
       if (startedNewPage) {
