@@ -2,9 +2,10 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
-import { ValidationError, NotFoundError } from '../middleware/errorHandler';
+import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
 import { createOrderFromQuotation } from '../services/orderService';
+import { buildPackingListDocument } from '../services/exportDocuments';
 
 const router: Router = Router();
 
@@ -107,7 +108,10 @@ router.post('/', can('OPERATIONS_MANAGE'), async (req, res, next) => {
       orderDate: z.string().optional(),
       expectedDate: z.string().optional(),
       poNumber: z.string().optional(),
-      notes: z.string().optional(),
+      // Printed in the header of every export document
+      dispatchMethod: z.string().optional(),
+      shipmentType: z.string().optional(),
+      variationPercent: z.number().min(0).max(100).optional(),      notes: z.string().optional(),
     });
 
     const validation = schema.safeParse(req.body);
@@ -135,7 +139,10 @@ router.put('/:id', can('OPERATIONS_MANAGE'), async (req, res, next) => {
       status: z.enum(['CONFIRMED', 'IN_PRODUCTION', 'READY_TO_SHIP', 'SHIPPED', 'DELIVERED', 'CANCELLED']).optional(),
       expectedDate: z.string().transform(s => new Date(s)).optional(),
       poNumber: z.string().optional(),
-      notes: z.string().optional(),
+      // Printed in the header of every export document
+      dispatchMethod: z.string().optional(),
+      shipmentType: z.string().optional(),
+      variationPercent: z.number().min(0).max(100).optional(),      notes: z.string().optional(),
     });
 
     const validation = schema.safeParse(req.body);
@@ -252,6 +259,85 @@ router.put('/:orderId/documents/:docId', can('OPERATIONS_MANAGE'), async (req, r
     });
 
     res.json({ success: true, data: document });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Packing List PDF, following the Packing List sheet of MASTER DRAFT.xlsx.
+ * Generated from the order so it is available before a shipment exists; vessel
+ * and port details are pulled from the first shipment when one exists.
+ */
+router.get('/:id/packing-list', can('OPERATIONS_VIEW'), async (req, res, next) => {
+  try {
+    const order = await prisma.exportOrder.findUnique({
+      where: { id: req.params.id },
+      include: {
+        buyer: { include: { country: true, contacts: { where: { isPrimary: true } } } },
+        items: { include: { product: true } },
+        shipments: { include: { originPort: true, destinationPort: true } },
+        invoices: { select: { invoiceNumber: true }, orderBy: { createdAt: 'asc' } },
+      },
+    });
+
+    if (!order) throw new NotFoundError('Order');
+
+    const company = await prisma.companyProfile.findFirst();
+    if (!company) {
+      throw new AppError(
+        'Company profile is not set up. Seed the database or add it in Settings before generating documents.',
+        400
+      );
+    }
+
+    const pdfBuffer = await buildPackingListDocument(order, company);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="PackingList-${order.orderNumber}.pdf"`
+    );
+    res.send(pdfBuffer);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Record packing figures against an order line. These feed the Packing List and
+ * the weight summary printed on commercial and proforma invoices.
+ */
+const packingSchema = z.object({
+  numberOfPackages: z.number().int().positive().nullable().optional(),
+  packageWeight: z.number().positive().nullable().optional(),
+  netWeight: z.number().positive().nullable().optional(),
+  grossWeight: z.number().positive().nullable().optional(),
+});
+
+router.put('/:id/items/:itemId/packing', can('OPERATIONS_MANAGE'), async (req, res, next) => {
+  try {
+    const data = packingSchema.parse(req.body);
+
+    const item = await prisma.orderItem.findFirst({
+      where: { id: req.params.itemId, orderId: req.params.id },
+    });
+    if (!item) throw new NotFoundError('Order item');
+
+    // Gross must cover net, otherwise the packing list contradicts itself.
+    const net = data.netWeight ?? Number(item.netWeight ?? 0);
+    const gross = data.grossWeight ?? Number(item.grossWeight ?? 0);
+    if (net && gross && gross < net) {
+      throw new AppError('Gross weight cannot be less than net weight', 400);
+    }
+
+    const updated = await prisma.orderItem.update({
+      where: { id: req.params.itemId },
+      data,
+      include: { product: true },
+    });
+
+    res.json({ success: true, data: updated });
   } catch (error) {
     next(error);
   }

@@ -144,6 +144,52 @@ async function main() {
   }
   console.log('✅ Seeded number sequences');
 
+  // Company Profile - the Exporter block, bank details and standard wording
+  // printed on every outgoing document. Values taken from MASTER DRAFT.xlsx.
+  // Only created when absent, so later edits in Settings survive a re-seed.
+  const existingProfile = await prisma.companyProfile.findFirst();
+  if (!existingProfile) {
+    await prisma.companyProfile.create({
+      data: {
+        legalName: 'VISION LIMELITE',
+        tradeName: 'SeaBridge Exports',
+        addressLine1: 'BH-815, 8th Floor Arved Transcube Plaza, Opp. Metro Station',
+        addressLine2: 'Business Hub, Ranip',
+        city: 'Ahmedabad',
+        state: 'Gujarat',
+        postalCode: '380004',
+        country: 'INDIA',
+        originCountry: 'India',
+        gstNumber: '24DUBPP8360J1ZB',
+        iecCode: 'DUBPP8360J',
+        phone: '(+91) 83476 72514',
+        contactPerson: 'Vedant Patel',
+        email: 'info@seabridgeexports.com',
+        bankName: 'Kotak Mahindra Bank',
+        bankBranch: 'Satadhar, Ahmedabad',
+        bankAccountNo: '8347672514',
+        bankBeneficiary: 'VISION LIMELITE',
+        bankSwiftCode: 'KKBKINBBXX',
+        bankIfscCode: 'KKBK0002576',
+        bankChargesNote: 'ALL BANKING CHARGES OUTSIDE INDIA ARE IN ACCOUNT OF APPLICANT',
+        quotationTerms: [
+          'Prices quoted are on Basis as per Incoterms',
+          'Goods supplied shall comply with the applicable food safety regulations of the destination country and relevant international food safety standards.',
+          'Packing as per agreed specification suitable for export shipment',
+          'Shipment within 20 days from the date of receipt of advance payment or operative L/C.',
+          "Inspection will be conducted at seller's premises. Third-party inspection if required will be borne by buyer.",
+          'Seller shall not be liable for delay or non-performance due to circumstances beyond control such as natural calamities, war, strike, government restrictions, etc.',
+          'All disputes shall be subject to Ahmedabad (Gujarat) jurisdiction only.',
+        ].join('\n'),
+        invoiceDeclaration:
+          'We declare that this Invoice shows the actual Price of goods described and that all particulars are true and correct.',
+      },
+    });
+    console.log('✅ Seeded company profile (VISION LIMELITE)');
+  } else {
+    console.log('ℹ️  Company profile already present, left unchanged');
+  }
+
   console.log('🎉 Database seeding completed!');
   console.log('\n📋 Login credentials:');
   console.log('   Email: founder@seabridge.com');

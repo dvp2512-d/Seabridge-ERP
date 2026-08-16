@@ -224,6 +224,12 @@ export const ordersApi = {
   addShipment: (id: string, data: any) => api.post(`/orders/${id}/shipments`, data),
   updateDocument: (orderId: string, docId: string, data: any) => 
     api.put(`/orders/${orderId}/documents/${docId}`, data),
+  /** Packing List PDF, rendered from the Packing List template */
+  downloadPackingList: (id: string) =>
+    api.get(`/orders/${id}/packing-list`, { responseType: 'blob' }),
+  /** Record cartons and net/gross weights against an order line */
+  updateItemPacking: (orderId: string, itemId: string, data: any) =>
+    api.put(`/orders/${orderId}/items/${itemId}/packing`, data),
 };
 
 // ============================================

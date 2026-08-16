@@ -4,7 +4,7 @@ import { prisma, Prisma, InquiryStage } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode, calculateMarginPercent } from '../utils/helpers';
-import { generateQuotationPDF } from '../services/pdfService';
+import { buildQuotationDocument } from '../services/exportDocuments';
 import { createOrderFromQuotation } from '../services/orderService';
 
 const router: Router = Router();
@@ -298,6 +298,10 @@ router.post('/:id/convert-to-order', can('SALES_MANAGE'), async (req, res, next)
     const schema = z.object({
       expectedDeliveryDate: z.string().optional(),
       poNumber: z.string().optional(),
+        // Printed in the header of every export document
+        dispatchMethod: z.string().optional(),
+        shipmentType: z.string().optional(),
+        variationPercent: z.number().min(0).max(100).optional(),
       notes: z.string().optional(),
     });
 
@@ -319,6 +323,9 @@ router.post('/:id/convert-to-order', can('SALES_MANAGE'), async (req, res, next)
         ? new Date(validation.data.expectedDeliveryDate)
         : undefined,
       poNumber: validation.data.poNumber,
+      dispatchMethod: validation.data.dispatchMethod,
+      shipmentType: validation.data.shipmentType,
+      variationPercent: validation.data.variationPercent,
       notes: validation.data.notes,
     });
 
@@ -344,7 +351,16 @@ router.get('/:id/pdf', can('SALES_VIEW'), async (req, res, next) => {
 
     if (!quotation) throw new NotFoundError('Quotation');
 
-    const pdfBuffer = await generateQuotationPDF(quotation);
+    const company = await prisma.companyProfile.findFirst();
+    if (!company) {
+      throw new AppError(
+        'Company profile is not set up. Seed the database or add it in Settings before generating documents.',
+        400
+      );
+    }
+
+    // Rendered from the QUOTE FORMATE sheet of MASTER DRAFT.xlsx
+    const pdfBuffer = await buildQuotationDocument(quotation, company);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${quotation.quotationNumber}.pdf"`);

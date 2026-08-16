@@ -19,6 +19,12 @@ export interface CreateOrderOptions {
   orderDate?: Date;
   expectedDate?: Date;
   poNumber?: string;
+  /** Sea / Air / Road - printed in the header of every export document */
+  dispatchMethod?: string;
+  /** FCL / LCL / Sample Shipment */
+  shipmentType?: string;
+  /** Quantity tolerance printed on proforma and commercial invoices */
+  variationPercent?: number;
   notes?: string;
 }
 
@@ -70,6 +76,9 @@ export async function createOrderFromQuotation(
         poNumber: options.poNumber || null,
         orderDate: options.orderDate ?? new Date(),
         expectedDate: options.expectedDate ?? null,
+        dispatchMethod: options.dispatchMethod ?? null,
+        shipmentType: options.shipmentType ?? null,
+        variationPercent: options.variationPercent ?? null,
         totalValue: quotation.grandTotal,
         // Carry the quotation's currency across instead of defaulting to USD.
         currency: quotation.currency.code,

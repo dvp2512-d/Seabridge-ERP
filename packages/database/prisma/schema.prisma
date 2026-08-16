@@ -165,6 +165,12 @@ model Product {
   categoryId  String   @map("category_id")
   hsnCode     String?  @map("hsn_code")
   unit        String   @default("KG") // KG, MT, PCS, CTN, etc.
+  /// Default packaging, used to prefill order lines and the Packing List.
+  /// e.g. 40 kg HDPE bag -> packageType "BAG", packageNetWeight 40
+  packageType       String?  @map("package_type")
+  packageNetWeight  Decimal? @map("package_net_weight") @db.Decimal(12, 3)
+  /// Packed weight of one unit including the bag/carton itself
+  packageGrossWeight Decimal? @map("package_gross_weight") @db.Decimal(12, 3)
   isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -617,6 +623,12 @@ model ExportOrder {
   incotermId      String      @map("incoterm_id")
   status          OrderStatus @default(CONFIRMED)
   poNumber        String?     @map("po_number")
+  /// Printed in the header block of every export document.
+  /// dispatchMethod: Sea / Air / Road   shipmentType: FCL / LCL / Sample Shipment
+  dispatchMethod  String?     @map("dispatch_method")
+  shipmentType    String?     @map("shipment_type")
+  /// Tolerance printed on Proforma and Commercial invoices, e.g. 10 for +/- 10%
+  variationPercent Decimal?   @map("variation_percent") @db.Decimal(5, 2)
   orderDate       DateTime    @map("order_date")
   expectedDate    DateTime?   @map("expected_date")
   totalValue      Decimal     @map("total_value") @db.Decimal(15, 2)
@@ -648,6 +660,12 @@ model OrderItem {
   unit        String   @default("KG")
   unitPrice   Decimal  @map("unit_price") @db.Decimal(12, 2)
   totalPrice  Decimal  @map("total_price") @db.Decimal(15, 2)
+  /// Packing List figures. Prefilled from the product's packaging defaults and
+  /// editable per line, because the same product may ship in different packing.
+  numberOfPackages Int?     @map("number_of_packages")
+  packageWeight    Decimal? @map("package_weight") @db.Decimal(12, 3)
+  netWeight        Decimal? @map("net_weight") @db.Decimal(12, 3)
+  grossWeight      Decimal? @map("gross_weight") @db.Decimal(12, 3)
   notes       String?
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -753,7 +771,8 @@ model Invoice {
   orderId        String        @map("order_id")
   buyerId        String        @map("buyer_id")
   currencyId     String        @map("currency_id")
-  type           String        @default("EXPORT") // EXPORT, PROFORMA
+  /// EXPORT (commercial), PROFORMA, or SAMPLE - each has its own document template
+  type           String        @default("EXPORT")
   status         InvoiceStatus @default(DRAFT)
   invoiceDate    DateTime      @map("invoice_date")
   dueDate        DateTime      @map("due_date")
@@ -899,6 +918,48 @@ model AuditLog {
   user User? @relation(fields: [userId], references: [id])
 
   @@map("audit_logs")
+}
+
+/// The exporter's own details, printed on every outgoing document.
+/// A single row; the documents read the first record.
+model CompanyProfile {
+  id            String   @id @default(cuid())
+  /// Legal entity name that appears in the Exporter block
+  legalName     String   @map("legal_name")
+  /// Trading name / brand, if different from the legal entity
+  tradeName     String?  @map("trade_name")
+  addressLine1  String?  @map("address_line1")
+  addressLine2  String?  @map("address_line2")
+  city          String?
+  state         String?
+  postalCode    String?  @map("postal_code")
+  country       String   @default("INDIA")
+  /// Printed as "Country of Origin of Goods" on export documents
+  originCountry String   @default("India") @map("origin_country")
+  gstNumber     String?  @map("gst_number")
+  iecCode       String?  @map("iec_code")
+  phone         String?
+  contactPerson String?  @map("contact_person")
+  email         String?
+  website       String?
+
+  // Bank details for the Proforma and Commercial invoice footers
+  bankName          String? @map("bank_name")
+  bankBranch        String? @map("bank_branch")
+  bankAccountNo     String? @map("bank_account_no")
+  bankBeneficiary   String? @map("bank_beneficiary")
+  bankSwiftCode     String? @map("bank_swift_code")
+  bankIfscCode      String? @map("bank_ifsc_code")
+  bankChargesNote   String? @map("bank_charges_note")
+
+  // Standard blocks of wording, editable without a code change
+  quotationTerms    String? @map("quotation_terms")
+  invoiceDeclaration String? @map("invoice_declaration")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("company_profile")
 }
 
 model SystemSetting {

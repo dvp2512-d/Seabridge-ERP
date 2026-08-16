@@ -29,6 +29,8 @@ import {
   FileCheck,
   ClipboardList,
   Receipt,
+  Boxes,
+  Download,
 } from 'lucide-react';
 
 const ORDER_STAGES = ['CONFIRMED', 'IN_PRODUCTION', 'READY_TO_SHIP', 'SHIPPED', 'DELIVERED'];
@@ -46,7 +48,7 @@ export default function OrderDetail() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<'items' | 'procurement' | 'documents' | 'shipments' | 'invoices'>('items');
+  const [activeTab, setActiveTab] = useState<'items' | 'packing' | 'procurement' | 'documents' | 'shipments' | 'invoices'>('items');
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [showProcurementModal, setShowProcurementModal] = useState(false);
   const [showShipmentModal, setShowShipmentModal] = useState(false);
@@ -227,6 +229,7 @@ export default function OrderDetail() {
               <nav className="flex -mb-px overflow-x-auto">
                 {[
                   { key: 'items', label: 'Order Items', icon: Package, count: order.items?.length },
+                  { key: 'packing', label: 'Packing', icon: Boxes, count: order.items?.filter((i: any) => i.numberOfPackages).length },
                   { key: 'procurement', label: 'Procurement', icon: ClipboardList, count: order.procurements?.length },
                   { key: 'documents', label: 'Documents', icon: FileText, count: order.documents?.length },
                   { key: 'shipments', label: 'Shipments', icon: Ship, count: order.shipments?.length },
@@ -257,6 +260,7 @@ export default function OrderDetail() {
             {/* Tab Content */}
             <div className="p-0">
               {activeTab === 'items' && <OrderItemsTab order={order} currency={currency} />}
+            {activeTab === 'packing' && <PackingTab order={order} />}
               {activeTab === 'procurement' && (
                 <ProcurementTab 
                   order={order} 
@@ -549,6 +553,239 @@ function OrderItemsTab({ order, currency }: { order: any; currency: string }) {
           </tr>
         </tfoot>
       </table>
+    </div>
+  );
+}
+
+/**
+ * Packing figures per order line. These drive the Packing List document and the
+ * weight summary printed on the commercial and proforma invoices, so the
+ * Packing List stays empty until they are filled in.
+ */
+function PackingTab({ order }: { order: any }) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    numberOfPackages: '',
+    packageWeight: '',
+    netWeight: '',
+    grossWeight: '',
+  });
+  const [downloading, setDownloading] = useState(false);
+
+  const savePacking = useMutation({
+    mutationFn: ({ itemId, data }: { itemId: string; data: any }) =>
+      ordersApi.updateItemPacking(order.id, itemId, data),
+    onSuccess: () => {
+      toast.success('Packing details saved');
+      queryClient.invalidateQueries({ queryKey: ['order', order.id] });
+      setEditing(null);
+    },
+    onError: (error: any) =>
+      toast.error(error.response?.data?.message || 'Could not save packing details'),
+  });
+
+  const startEdit = (item: any) => {
+    setEditing(item.id);
+    setForm({
+      numberOfPackages: item.numberOfPackages?.toString() ?? '',
+      // Fall back to the product's default packing so it need not be retyped
+      packageWeight: (item.packageWeight ?? item.product?.packageNetWeight)?.toString() ?? '',
+      netWeight: item.netWeight?.toString() ?? '',
+      grossWeight: item.grossWeight?.toString() ?? '',
+    });
+  };
+
+  const submit = (itemId: string) => {
+    // Only send fields that were actually filled, so blanks do not overwrite
+    // existing values with nulls.
+    const data: Record<string, number> = {};
+    if (form.numberOfPackages) data.numberOfPackages = parseInt(form.numberOfPackages);
+    if (form.packageWeight) data.packageWeight = parseFloat(form.packageWeight);
+    if (form.netWeight) data.netWeight = parseFloat(form.netWeight);
+    if (form.grossWeight) data.grossWeight = parseFloat(form.grossWeight);
+
+    if (Object.keys(data).length === 0) {
+      toast.error('Enter at least one packing value');
+      return;
+    }
+    if (data.netWeight && data.grossWeight && data.grossWeight < data.netWeight) {
+      toast.error('Gross weight cannot be less than net weight');
+      return;
+    }
+    savePacking.mutate({ itemId, data });
+  };
+
+  const downloadPackingList = async () => {
+    setDownloading(true);
+    try {
+      const response = await ordersApi.downloadPackingList(order.id);
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `PackingList-${order.orderNumber}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Could not generate the packing list');
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const items = order.items ?? [];
+  const totals = items.reduce(
+    (acc: any, i: any) => ({
+      packages: acc.packages + Number(i.numberOfPackages || 0),
+      net: acc.net + Number(i.netWeight || 0),
+      gross: acc.gross + Number(i.grossWeight || 0),
+    }),
+    { packages: 0, net: 0, gross: 0 }
+  );
+  const anyPacking = items.some((i: any) => i.numberOfPackages || i.netWeight);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <p className="text-sm text-gray-500">
+          Cartons and weights for the Packing List and invoice weight summary.
+        </p>
+        <button
+          onClick={downloadPackingList}
+          disabled={downloading || !anyPacking}
+          className="btn btn-secondary"
+          title={anyPacking ? 'Download the Packing List' : 'Enter packing details first'}
+        >
+          <Download className="w-4 h-4" />
+          {downloading ? 'Generating...' : 'Packing List'}
+        </button>
+      </div>
+
+      {!anyPacking && (
+        <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 text-amber-800 text-sm">
+          <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>
+            No packing details recorded yet. The Packing List needs the number of packages and
+            net/gross weights for each line.
+          </span>
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th className="text-right">No. of Packages</th>
+              <th className="text-right">Bag / Carton per KG</th>
+              <th className="text-right">Net Weight</th>
+              <th className="text-right">Gross Weight</th>
+              <th className="text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item: any) => {
+              const isEditing = editing === item.id;
+              return (
+                <tr key={item.id}>
+                  <td>
+                    <div className="font-medium">{item.product?.name}</div>
+                    <div className="text-xs text-gray-500">
+                      {item.product?.hsnCode || item.product?.code} &middot; {item.quantity} {item.unit}
+                    </div>
+                  </td>
+                  {isEditing ? (
+                    <>
+                      <td>
+                        <input
+                          type="number"
+                          min="1"
+                          className="input text-right w-24"
+                          value={form.numberOfPackages}
+                          onChange={(e) => setForm({ ...form, numberOfPackages: e.target.value })}
+                          aria-label="Number of packages"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          className="input text-right w-24"
+                          value={form.packageWeight}
+                          onChange={(e) => setForm({ ...form, packageWeight: e.target.value })}
+                          aria-label="Weight per package in kg"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          className="input text-right w-24"
+                          value={form.netWeight}
+                          onChange={(e) => setForm({ ...form, netWeight: e.target.value })}
+                          aria-label="Net weight"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.001"
+                          className="input text-right w-24"
+                          value={form.grossWeight}
+                          onChange={(e) => setForm({ ...form, grossWeight: e.target.value })}
+                          aria-label="Gross weight"
+                        />
+                      </td>
+                      <td className="text-right whitespace-nowrap">
+                        <button
+                          onClick={() => submit(item.id)}
+                          disabled={savePacking.isPending}
+                          className="btn btn-primary btn-sm"
+                        >
+                          Save
+                        </button>
+                        <button onClick={() => setEditing(null)} className="btn btn-ghost btn-sm ml-1">
+                          Cancel
+                        </button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="text-right">{item.numberOfPackages ?? '-'}</td>
+                      <td className="text-right">
+                        {item.packageWeight ?? item.product?.packageNetWeight ?? '-'}
+                      </td>
+                      <td className="text-right">{item.netWeight ?? '-'}</td>
+                      <td className="text-right">{item.grossWeight ?? '-'}</td>
+                      <td className="text-right">
+                        <button onClick={() => startEdit(item)} className="btn btn-ghost btn-sm">
+                          <Edit className="w-4 h-4" />
+                          Edit
+                        </button>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="bg-gray-50 font-semibold">
+              <td className="text-right">TOTAL</td>
+              <td className="text-right">{totals.packages || '-'}</td>
+              <td></td>
+              <td className="text-right">{totals.net ? `${totals.net} KGS` : '-'}</td>
+              <td className="text-right">{totals.gross ? `${totals.gross} KGS` : '-'}</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
     </div>
   );
 }

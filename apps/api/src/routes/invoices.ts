@@ -4,7 +4,11 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
-import { generateInvoicePDF } from '../services/pdfService';
+import {
+  buildCommercialInvoiceDocument,
+  buildProformaInvoiceDocument,
+  buildSampleInvoiceDocument,
+} from '../services/exportDocuments';
 
 const router: Router = Router();
 
@@ -110,7 +114,7 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
   try {
     const schema = z.object({
       orderId: z.string().min(1),
-      type: z.enum(['EXPORT', 'PROFORMA']).optional(),
+      type: z.enum(['EXPORT', 'PROFORMA', 'SAMPLE']).optional(),
       invoiceDate: z.string().transform(s => new Date(s)).optional(),
       dueDate: z.string().transform(s => new Date(s)),
       taxAmount: z.number().min(0).optional(),
@@ -279,24 +283,53 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
   }
 });
 
-// Generate PDF
+// Generate PDF.
+// The template used follows the invoice type: EXPORT renders the Commercial
+// Invoice, PROFORMA the Proforma, SAMPLE the Sample Invoice. All three follow
+// the layout in MASTER DRAFT.xlsx.
 router.get('/:id/pdf', can('FINANCE_VIEW'), async (req, res, next) => {
   try {
     const invoice = await prisma.invoice.findUnique({
       where: { id: req.params.id },
       include: {
-        buyer: { include: { country: true } },
-        order: { include: { items: { include: { product: true } } } },
+        buyer: { include: { country: true, contacts: { where: { isPrimary: true } } } },
+        order: {
+          include: {
+            items: { include: { product: true } },
+            shipments: { include: { originPort: true, destinationPort: true } },
+          },
+        },
         currency: true,
       },
     });
 
     if (!invoice) throw new NotFoundError('Invoice');
 
-    const pdfBuffer = await generateInvoicePDF(invoice);
+    const company = await prisma.companyProfile.findFirst();
+    if (!company) {
+      throw new AppError(
+        'Company profile is not set up. Seed the database or add it in Settings before generating documents.',
+        400
+      );
+    }
+
+    const builder =
+      invoice.type === 'PROFORMA'
+        ? buildProformaInvoiceDocument
+        : invoice.type === 'SAMPLE'
+        ? buildSampleInvoiceDocument
+        : buildCommercialInvoiceDocument;
+
+    const pdfBuffer = await builder(invoice, company);
+
+    const label =
+      invoice.type === 'PROFORMA' ? 'Proforma' : invoice.type === 'SAMPLE' ? 'Sample' : 'Commercial';
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${invoice.invoiceNumber}.pdf"`);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${label}-${invoice.invoiceNumber}.pdf"`
+    );
     res.send(pdfBuffer);
   } catch (error) {
     next(error);
