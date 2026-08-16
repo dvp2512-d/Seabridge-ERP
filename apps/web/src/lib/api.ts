@@ -233,6 +233,16 @@ export const ordersApi = {
 };
 
 // ============================================
+// SETTINGS API
+// ============================================
+
+export const settingsApi = {
+  /** Exporter details printed on every outgoing document */
+  getCompany: () => api.get('/settings/company'),
+  updateCompany: (data: any) => api.put('/settings/company', data),
+};
+
+// ============================================
 // INVOICES API
 // ============================================
 

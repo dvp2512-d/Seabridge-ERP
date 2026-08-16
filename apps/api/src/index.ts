@@ -18,6 +18,7 @@ import { invoiceRouter } from './routes/invoices';
 import { dashboardRouter } from './routes/dashboard';
 import { masterDataRouter } from './routes/masterData';
 import { automationRouter } from './routes/automation';
+import { settingsRouter } from './routes/settings';
 
 dotenv.config();
 
@@ -53,6 +54,7 @@ app.use('/api/invoices', invoiceRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/master', masterDataRouter);
 app.use('/api/automation', automationRouter);
+app.use('/api/settings', settingsRouter);
 
 // Error handling
 // 404 for anything that didn't match a route above, then the error handler.

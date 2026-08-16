@@ -1,12 +1,13 @@
 // Settings Page - Complete System Configuration
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/authStore';
-import { authApi, automationApi, getApiErrorMessage } from '@/lib/api';
+import { authApi, automationApi, settingsApi, getApiErrorMessage } from '@/lib/api';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import { cn } from '@/lib/utils';
+import { can } from '@/lib/permissions';
 import {
   User,
   Building2,
@@ -237,54 +238,251 @@ function PasswordChangeModal({ onClose }: { onClose: () => void }) {
 
 // Company Settings
 function CompanySettings() {
+  const queryClient = useQueryClient();
+  const { user } = useAuthStore();
+  const canEdit = can(user?.role as any, 'SETTINGS_MANAGE');
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [loaded, setLoaded] = useState(false);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['company-profile'],
+    queryFn: () => settingsApi.getCompany().then((r: any) => r.data.data),
+  });
+
+  // Seed the form once the profile arrives, without clobbering later edits.
+  useEffect(() => {
+    if (data && !loaded) {
+      const next: Record<string, string> = {};
+      Object.entries(data).forEach(([k, v]) => {
+        if (typeof v === 'string' || typeof v === 'number') next[k] = String(v);
+      });
+      setForm(next);
+      setLoaded(true);
+    }
+  }, [data, loaded]);
+
+  const save = useMutation({
+    mutationFn: (payload: any) => settingsApi.updateCompany(payload),
+    onSuccess: () => {
+      toast.success('Company details saved');
+      queryClient.invalidateQueries({ queryKey: ['company-profile'] });
+    },
+    onError: (error: any) => {
+      const errors = error.response?.data?.errors;
+      toast.error(errors?.[0]?.message || error.response?.data?.message || 'Could not save');
+    },
+  });
+
+  const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm({ ...form, [key]: e.target.value });
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.legalName?.trim()) {
+      toast.error('Legal name is required - it appears on every document');
+      return;
+    }
+    // Drop the fields the API does not accept, and blank strings.
+    const { id, createdAt, updatedAt, ...rest } = form as any;
+    const payload: Record<string, string> = {};
+    Object.entries(rest).forEach(([k, v]) => {
+      if (v !== '' && v !== undefined) payload[k] = v as string;
+    });
+    save.mutate(payload);
+  };
+
+  if (isLoading) return <div className="p-8 text-center text-gray-500">Loading...</div>;
+
   return (
-    <div className="space-y-6">
-      {/* These forms have no backend yet. Rather than offer a Save button that
-          silently discards what the user typed, the fields are read-only and
-          the real source of each value is stated. */}
-      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-start gap-3">
-        <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0" />
-        <div className="text-sm text-yellow-800">
-          <strong>Not editable yet.</strong> These values are currently set in
-          configuration, not in the app. Company name and branding come from the
-          environment file; currency, incoterms and other defaults are managed in{' '}
-          <strong>Master Data</strong>. Editing here is on the roadmap.
+    <form onSubmit={submit} className="space-y-6">
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
+        <AlertTriangle className="w-5 h-5 text-blue-600 flex-shrink-0" />
+        <div className="text-sm text-blue-800">
+          These details are printed on your quotations, invoices and packing lists.
+          Changing them affects every document generated from now on.
         </div>
       </div>
 
       <div className="card">
         <div className="card-header">
-          <h2 className="font-semibold">Company Information</h2>
+          <h2 className="font-semibold">Exporter Details</h2>
         </div>
         <div className="card-body">
           <div className="grid grid-cols-2 gap-4">
+            <FormField
+              label="Legal Name"
+              value={form.legalName ?? ''}
+              onChange={set('legalName')}
+              disabled={!canEdit}
+              required
+              hint="Appears as the Exporter on every document"
+            />
+            <FormField
+              label="Trading Name"
+              value={form.tradeName ?? ''}
+              onChange={set('tradeName')}
+              disabled={!canEdit}
+            />
             <div className="col-span-2">
-              <FormField label="Company Name" value="SeaBridge Exports" readOnly disabled hint="Set by COMPANY_NAME in .env" />
+              <FormField
+                label="Address Line 1"
+                value={form.addressLine1 ?? ''}
+                onChange={set('addressLine1')}
+                disabled={!canEdit}
+              />
             </div>
-            <FormField label="Tax ID / GST" value="" readOnly disabled placeholder="Not configured" />
-            <FormField label="Registration No" value="" readOnly disabled placeholder="Not configured" />
             <div className="col-span-2">
-              <TextareaField label="Address" rows={2} value="" readOnly disabled placeholder="Not configured" />
+              <FormField
+                label="Address Line 2"
+                value={form.addressLine2 ?? ''}
+                onChange={set('addressLine2')}
+                disabled={!canEdit}
+              />
             </div>
-            <FormField label="Phone" value="" readOnly disabled placeholder="Not configured" />
-            <FormField label="Email" value="" readOnly disabled placeholder="Not configured" />
+            <FormField label="City" value={form.city ?? ''} onChange={set('city')} disabled={!canEdit} />
+            <FormField label="State" value={form.state ?? ''} onChange={set('state')} disabled={!canEdit} />
+            <FormField
+              label="Postal Code"
+              value={form.postalCode ?? ''}
+              onChange={set('postalCode')}
+              disabled={!canEdit}
+            />
+            <FormField
+              label="Country"
+              value={form.country ?? ''}
+              onChange={set('country')}
+              disabled={!canEdit}
+            />
+            <FormField
+              label="Country of Origin of Goods"
+              value={form.originCountry ?? ''}
+              onChange={set('originCountry')}
+              disabled={!canEdit}
+              hint="Printed in the document header"
+            />
+            <FormField
+              label="GST Number"
+              value={form.gstNumber ?? ''}
+              onChange={set('gstNumber')}
+              disabled={!canEdit}
+            />
+            <FormField
+              label="IEC Code"
+              value={form.iecCode ?? ''}
+              onChange={set('iecCode')}
+              disabled={!canEdit}
+            />
+            <FormField label="Phone" value={form.phone ?? ''} onChange={set('phone')} disabled={!canEdit} />
+            <FormField
+              label="Contact Person"
+              value={form.contactPerson ?? ''}
+              onChange={set('contactPerson')}
+              disabled={!canEdit}
+            />
+            <FormField
+              label="Email"
+              type="email"
+              value={form.email ?? ''}
+              onChange={set('email')}
+              disabled={!canEdit}
+            />
           </div>
         </div>
       </div>
 
       <div className="card">
         <div className="card-header">
-          <h2 className="font-semibold">Defaults</h2>
-        </div>
-        <div className="card-body">
-          <p className="text-sm text-gray-600">
-            Currencies, incoterms, countries, ports and product categories are all
-            managed under <strong>Master Data</strong>. Payment terms and quotation
-            validity are set per quotation when you create it.
+          <h2 className="font-semibold">Bank Details</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Printed on proforma and commercial invoices so buyers know where to pay.
           </p>
         </div>
+        <div className="card-body">
+          <div className="grid grid-cols-2 gap-4">
+            <FormField
+              label="Bank Name"
+              value={form.bankName ?? ''}
+              onChange={set('bankName')}
+              disabled={!canEdit}
+            />
+            <FormField
+              label="Branch"
+              value={form.bankBranch ?? ''}
+              onChange={set('bankBranch')}
+              disabled={!canEdit}
+            />
+            <FormField
+              label="Account Number"
+              value={form.bankAccountNo ?? ''}
+              onChange={set('bankAccountNo')}
+              disabled={!canEdit}
+            />
+            <FormField
+              label="Beneficiary Name"
+              value={form.bankBeneficiary ?? ''}
+              onChange={set('bankBeneficiary')}
+              disabled={!canEdit}
+            />
+            <FormField
+              label="SWIFT Code"
+              value={form.bankSwiftCode ?? ''}
+              onChange={set('bankSwiftCode')}
+              disabled={!canEdit}
+            />
+            <FormField
+              label="IFSC Code"
+              value={form.bankIfscCode ?? ''}
+              onChange={set('bankIfscCode')}
+              disabled={!canEdit}
+            />
+            <div className="col-span-2">
+              <TextareaField
+                label="Banking Charges Note"
+                rows={2}
+                value={form.bankChargesNote ?? ''}
+                onChange={set('bankChargesNote')}
+                disabled={!canEdit}
+              />
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+
+      <div className="card">
+        <div className="card-header">
+          <h2 className="font-semibold">Standard Wording</h2>
+        </div>
+        <div className="card-body space-y-4">
+          <TextareaField
+            label="Quotation Terms & Conditions"
+            rows={7}
+            value={form.quotationTerms ?? ''}
+            onChange={set('quotationTerms')}
+            disabled={!canEdit}
+            hint="One term per line; each is printed as a bullet"
+          />
+          <TextareaField
+            label="Invoice Declaration"
+            rows={2}
+            value={form.invoiceDeclaration ?? ''}
+            onChange={set('invoiceDeclaration')}
+            disabled={!canEdit}
+          />
+        </div>
+      </div>
+
+      {canEdit ? (
+        <div className="flex justify-end">
+          <button type="submit" className="btn btn-primary" disabled={save.isPending}>
+            {save.isPending ? 'Saving...' : 'Save Company Details'}
+          </button>
+        </div>
+      ) : (
+        <p className="text-sm text-gray-500 text-right">
+          Your role can view these details but not change them.
+        </p>
+      )}
+    </form>
   );
 }
 
