@@ -138,6 +138,39 @@ router.post('/register', async (req, res, next) => {
   }
 });
 
+// Update your own profile.
+// Separate from PUT /users/:id, which requires USER_MANAGE - any signed-in user
+// may edit their own name and phone, but not their role or status.
+router.put('/me', authenticate, async (req, res, next) => {
+  try {
+    const schema = z.object({
+      firstName: z.string().min(1, 'First name is required'),
+      lastName: z.string().min(1, 'Last name is required'),
+      phone: z.string().optional(),
+    });
+
+    const validation = schema.safeParse(req.body);
+    if (!validation.success) throw new ValidationError(validation.error.errors);
+
+    const user = await prisma.user.update({
+      where: { id: req.user!.id },
+      data: validation.data,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        phone: true,
+      },
+    });
+
+    res.json({ success: true, data: user });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Get current user
 router.get('/me', authenticate, async (req, res, next) => {
   try {

@@ -882,16 +882,22 @@ function AddCostModal({
   });
 
   const handleSave = () => {
-    if (!formData.description || !formData.amount) {
-      toast.error('Please fill in all fields');
+    if (!formData.description.trim()) {
+      toast.error('Please enter a description');
       return;
     }
-
+    // "0" is truthy as a string, so an explicit numeric check is needed or a
+    // zero-value row gets added and clutters the quotation.
+    const amount = parseFloat(formData.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('Amount must be greater than zero');
+      return;
+    }
     onSave({
       id: crypto.randomUUID(),
       costType: formData.costType,
       description: formData.description,
-      amount: parseFloat(formData.amount),
+      amount,
       currency: currency?.code || 'USD',
     });
   };

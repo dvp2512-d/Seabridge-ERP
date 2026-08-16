@@ -564,8 +564,8 @@ function OrdersTab({ orders }: { orders: any[] }) {
                   {order.status?.replace(/_/g, ' ')}
                 </span>
               </td>
-              <td>{formatCurrency(order.totalValue || 0)}</td>
-              <td>{formatDate(order.createdAt)}</td>
+              <td>{formatCurrency(order.totalValue || 0, order.currency)}</td>
+              <td>{formatDate(order.orderDate ?? order.createdAt)}</td>
             </tr>
           ))}
           {orders.length === 0 && (

@@ -716,7 +716,10 @@ function ConvertToOrderModal({
             <span className="text-green-700">Total Value:</span>
             <span className="font-medium">
               {formatCurrency(
-                quotation.items?.reduce((s: number, i: any) => s + (i.totalPrice || 0), 0) || 0,
+                // The order is created from the quotation's grand total, which
+                // includes additional costs - not just the line item subtotal.
+                quotation.grandTotal ??
+                  (quotation.items?.reduce((s: number, i: any) => s + Number(i.totalPrice || 0), 0) || 0),
                 quotation.currency?.code
               )}
             </span>

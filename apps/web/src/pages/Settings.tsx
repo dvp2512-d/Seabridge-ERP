@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/authStore';
-import { authApi, automationApi } from '@/lib/api';
+import { authApi, automationApi, getApiErrorMessage } from '@/lib/api';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import { cn } from '@/lib/utils';
@@ -23,6 +23,7 @@ import {
   Eye,
   EyeOff,
   Mail,
+  AlertTriangle,
 } from 'lucide-react';
 
 type SettingsTab = 'profile' | 'company' | 'templates' | 'webhooks' | 'automations' | 'api';
@@ -88,8 +89,31 @@ function ProfileSettings({ user }: { user: any }) {
   const [formData, setFormData] = useState({
     firstName: user?.firstName || '',
     lastName: user?.lastName || '',
+    phone: user?.phone || '',
   });
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const updateUser = useAuthStore((state) => state.updateUser);
+
+  const mutation = useMutation({
+    mutationFn: () => authApi.updateProfile(formData),
+    onSuccess: (response) => {
+      // Update the stored session so the sidebar and initials refresh at once.
+      const updated = response.data?.data;
+      if (updated) {
+        updateUser({ firstName: updated.firstName, lastName: updated.lastName });
+      }
+      toast.success('Profile updated');
+    },
+    onError: (error) => toast.error(getApiErrorMessage(error, 'Failed to update profile')),
+  });
+
+  const handleSave = () => {
+    if (!formData.firstName.trim() || !formData.lastName.trim()) {
+      toast.error('First and last name are required');
+      return;
+    }
+    mutation.mutate();
+  };
 
   return (
     <div className="space-y-6">
@@ -101,14 +125,23 @@ function ProfileSettings({ user }: { user: any }) {
           <div className="grid grid-cols-2 gap-4">
             <FormField
               label="First Name"
+              required
               value={formData.firstName}
               onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
             />
             <FormField
               label="Last Name"
+              required
               value={formData.lastName}
               onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
             />
+            <div className="col-span-2">
+              <FormField
+                label="Phone"
+                value={formData.phone}
+                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+              />
+            </div>
             <div className="col-span-2">
               <FormField
                 label="Email"
@@ -127,7 +160,13 @@ function ProfileSettings({ user }: { user: any }) {
             <button onClick={() => setShowPasswordModal(true)} className="btn btn-secondary">
               Change Password
             </button>
-            <button className="btn btn-primary">Save Changes</button>
+            <button
+              onClick={handleSave}
+              className="btn btn-primary"
+              disabled={mutation.isPending}
+            >
+              {mutation.isPending ? 'Saving...' : 'Save Changes'}
+            </button>
           </div>
         </div>
       </div>
@@ -200,6 +239,19 @@ function PasswordChangeModal({ onClose }: { onClose: () => void }) {
 function CompanySettings() {
   return (
     <div className="space-y-6">
+      {/* These forms have no backend yet. Rather than offer a Save button that
+          silently discards what the user typed, the fields are read-only and
+          the real source of each value is stated. */}
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 flex items-start gap-3">
+        <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0" />
+        <div className="text-sm text-yellow-800">
+          <strong>Not editable yet.</strong> These values are currently set in
+          configuration, not in the app. Company name and branding come from the
+          environment file; currency, incoterms and other defaults are managed in{' '}
+          <strong>Master Data</strong>. Editing here is on the roadmap.
+        </div>
+      </div>
+
       <div className="card">
         <div className="card-header">
           <h2 className="font-semibold">Company Information</h2>
@@ -207,57 +259,29 @@ function CompanySettings() {
         <div className="card-body">
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
-              <FormField label="Company Name" defaultValue="SeaBridge Exports" />
+              <FormField label="Company Name" value="SeaBridge Exports" readOnly disabled hint="Set by COMPANY_NAME in .env" />
             </div>
-            <FormField label="Tax ID / GST" defaultValue="" placeholder="Enter tax ID" />
-            <FormField label="Registration No" defaultValue="" placeholder="Company registration" />
+            <FormField label="Tax ID / GST" value="" readOnly disabled placeholder="Not configured" />
+            <FormField label="Registration No" value="" readOnly disabled placeholder="Not configured" />
             <div className="col-span-2">
-              <TextareaField label="Address" rows={2} defaultValue="" placeholder="Company address" />
+              <TextareaField label="Address" rows={2} value="" readOnly disabled placeholder="Not configured" />
             </div>
-            <FormField label="City" defaultValue="" />
-            <FormField label="Country" defaultValue="India" />
-            <FormField label="Phone" defaultValue="" />
-            <FormField label="Email" defaultValue="" />
-            <div className="col-span-2">
-              <FormField label="Website" defaultValue="" />
-            </div>
-          </div>
-          <div className="mt-6">
-            <button className="btn btn-primary">Save Changes</button>
+            <FormField label="Phone" value="" readOnly disabled placeholder="Not configured" />
+            <FormField label="Email" value="" readOnly disabled placeholder="Not configured" />
           </div>
         </div>
       </div>
 
       <div className="card">
         <div className="card-header">
-          <h2 className="font-semibold">Default Settings</h2>
+          <h2 className="font-semibold">Defaults</h2>
         </div>
         <div className="card-body">
-          <div className="grid grid-cols-2 gap-4">
-            <SelectField
-              label="Default Currency"
-              defaultValue="USD"
-              options={[
-                { value: 'USD', label: 'USD - US Dollar' },
-                { value: 'EUR', label: 'EUR - Euro' },
-                { value: 'INR', label: 'INR - Indian Rupee' },
-              ]}
-            />
-            <SelectField
-              label="Date Format"
-              defaultValue="DD MMM YYYY"
-              options={[
-                { value: 'DD MMM YYYY', label: 'DD MMM YYYY' },
-                { value: 'MM/DD/YYYY', label: 'MM/DD/YYYY' },
-                { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
-              ]}
-            />
-            <FormField label="Default Payment Terms" defaultValue="30 days" />
-            <FormField label="Quotation Validity (days)" type="number" defaultValue="30" />
-          </div>
-          <div className="mt-6">
-            <button className="btn btn-primary">Save Changes</button>
-          </div>
+          <p className="text-sm text-gray-600">
+            Currencies, incoterms, countries, ports and product categories are all
+            managed under <strong>Master Data</strong>. Payment terms and quotation
+            validity are set per quotation when you create it.
+          </p>
         </div>
       </div>
     </div>

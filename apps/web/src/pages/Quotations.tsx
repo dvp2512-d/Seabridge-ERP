@@ -174,13 +174,22 @@ export default function Quotations() {
                   </td>
                   <td>{q._count?.items || 0}</td>
                   <td className="font-medium">{formatCurrency(q.grandTotal, q.currency?.code)}</td>
-                  <td className={cn(
-                    'font-medium',
-                    parseFloat(q.marginPercent) >= 15 ? 'text-green-600' :
-                    parseFloat(q.marginPercent) >= 10 ? 'text-yellow-600' : 'text-red-600'
-                  )}>
-                    {q.marginPercent}%
-                  </td>
+                  {(() => {
+                    // Guard against null/undefined margins on older records,
+                    // which would otherwise render as "null%" or "NaN%".
+                    const pct = Number(q.marginPercent);
+                    const hasMargin = Number.isFinite(pct);
+                    return (
+                      <td className={cn(
+                        'font-medium',
+                        !hasMargin ? 'text-gray-400' :
+                        pct >= 15 ? 'text-green-600' :
+                        pct >= 10 ? 'text-yellow-600' : 'text-red-600'
+                      )}>
+                        {hasMargin ? `${pct.toFixed(1)}%` : '-'}
+                      </td>
+                    );
+                  })()}
                   <td className={cn(
                     isPastDue(q.validUntil) && q.status === 'SENT' ? 'text-red-600 font-medium' : 'text-gray-600'
                   )}>
