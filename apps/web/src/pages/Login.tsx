@@ -50,10 +50,8 @@ export default function Login() {
       {/* Left side - Brand */}
       <div className="hidden lg:flex lg:w-1/2 bg-navy-900 items-center justify-center p-12">
         <div className="max-w-md text-center">
-          <Logo className="h-24 mx-auto mb-8" onDark alt="SeaBridge Exports" />
-          <h1 className="text-4xl font-bold text-white mb-4">
-            SeaBridge Founder OS
-          </h1>
+          {/* The logo carries the company name, so no heading beneath it. */}
+          <Logo className="h-28 mx-auto mb-8" onDark alt="SeaBridge Exports" />
           <p className="text-navy-200 text-lg">
             Your complete business management system for export operations.
             One platform to manage buyers, inquiries, quotations, orders, and finances.
@@ -78,10 +76,9 @@ export default function Login() {
       {/* Right side - Login form */}
       <div className="flex-1 flex items-center justify-center p-8 bg-gray-50">
         <div className="w-full max-w-md">
-          {/* Mobile logo */}
+          {/* Mobile logo - the logo already shows the company name */}
           <div className="lg:hidden text-center mb-8">
-            <Logo className="h-14 mx-auto mb-3" alt="SeaBridge Exports" />
-            <h1 className="text-2xl font-bold text-navy-900">SeaBridge</h1>
+            <Logo className="h-16 mx-auto" alt="SeaBridge Exports" />
           </div>
 
           <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">

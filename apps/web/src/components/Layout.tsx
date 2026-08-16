@@ -88,12 +88,13 @@ export default function Layout({ children }: LayoutProps) {
       >
         {/* Logo */}
         <div className="flex items-center justify-between h-16 px-4 border-b border-navy-800 flex-shrink-0">
-          <Link to="/" className="flex items-center gap-2" onClick={() => setSidebarOpen(false)}>
-            <Logo className="h-9" onDark alt="" />
-            <div>
-              <div className="text-lg font-bold text-white">SeaBridge</div>
-              <div className="text-xs text-navy-300">Founder OS</div>
-            </div>
+          <Link
+            to="/"
+            className="flex items-center min-w-0"
+            onClick={() => setSidebarOpen(false)}
+          >
+            {/* The logo contains the company name, so no text label beside it. */}
+            <Logo className="h-10 max-w-[170px]" onDark alt="SeaBridge Exports - go to dashboard" />
           </Link>
           <button
             className="lg:hidden text-white"
