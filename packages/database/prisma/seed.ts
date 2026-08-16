@@ -175,8 +175,6 @@ async function main() {
         quotationTerms: [
           'Prices quoted are on Basis as per Incoterms',
           'Goods supplied shall comply with the applicable food safety regulations of the destination country and relevant international food safety standards.',
-          'Packing as per agreed specification suitable for export shipment',
-          'Shipment within 20 days from the date of receipt of advance payment or operative L/C.',
           "Inspection will be conducted at seller's premises. Third-party inspection if required will be borne by buyer.",
           'Seller shall not be liable for delay or non-performance due to circumstances beyond control such as natural calamities, war, strike, government restrictions, etc.',
           'All disputes shall be subject to Ahmedabad (Gujarat) jurisdiction only.',

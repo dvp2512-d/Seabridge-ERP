@@ -5,12 +5,12 @@ import { cn } from '@/lib/utils';
 /**
  * Company logo.
  *
- * Served from /logo.png (apps/web/public/logo.png).
+ * Two variants are shipped because the artwork is single-colour:
+ *   /logo.png       white on transparent - for the navy sidebar and login panel
+ *   /logo-blue.png  brand blue on transparent - for white and light surfaces
  *
- * The supplied artwork is WHITE on a transparent background, so it is only
- * legible on a dark surface. On the navy sidebar and the navy login panel it is
- * drawn directly; anywhere light, it sits on a navy plate so it stays readable
- * instead of disappearing into the page.
+ * Picking by surface avoids the navy plate that a white-only logo needed, so the
+ * mark sits directly on the page as it does on the printed documents.
  *
  * If the file is missing or fails to load, it falls back to the ship icon so a
  * header never renders as a broken image.
@@ -47,21 +47,12 @@ export default function Logo({
     );
   }
 
-  const img = (
+  return (
     <img
-      src="/logo.png"
+      src={onDark ? '/logo.png' : '/logo-blue.png'}
       alt={alt}
       onError={() => setFailed(true)}
       className={cn('w-auto object-contain', className ?? 'h-8')}
     />
-  );
-
-  // White artwork needs a dark plate to be visible on light backgrounds.
-  if (onDark) return img;
-
-  return (
-    <span className="inline-flex items-center justify-center rounded-lg bg-navy-900 px-3 py-2">
-      {img}
-    </span>
   );
 }

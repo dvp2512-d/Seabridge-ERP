@@ -212,6 +212,18 @@ async function main() {
     `status ${packingList.status}, ${packingList.buffer?.byteLength ?? 0} bytes`
   );
 
+  // The logo lives in apps/api/assets and is read at runtime. It was once
+  // omitted from the Docker runtime stage, producing logo-less documents that
+  // still passed every text assertion, so check for an embedded image directly.
+  if (packingList.buffer) {
+    const raw = new TextDecoder('latin1').decode(new Uint8Array(packingList.buffer));
+    check(
+      'Packing List embeds the logo image',
+      raw.includes('/Subtype /Image') || raw.includes('/Subtype/Image'),
+      `no image XObject found in ${packingList.buffer.byteLength} bytes`
+    );
+  }
+
   // ---- three invoice types, each producing its own template ----
   for (const [type, label] of [
     ['EXPORT', 'Commercial Invoice'],
@@ -239,6 +251,14 @@ async function main() {
         pdf.status === 200 && sig === '%PDF-' && (pdf.buffer?.byteLength ?? 0) > 1000,
         `status ${pdf.status}, ${pdf.buffer?.byteLength ?? 0} bytes`
       );
+      if (pdf.buffer) {
+        const raw = new TextDecoder('latin1').decode(new Uint8Array(pdf.buffer));
+        check(
+          `${label}: embeds the logo image`,
+          raw.includes('/Subtype /Image') || raw.includes('/Subtype/Image'),
+          `no image XObject in ${pdf.buffer.byteLength} bytes`
+        );
+      }
     }
   }
 

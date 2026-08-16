@@ -262,14 +262,9 @@ export function generateExportDocument(input: ExportDocumentInput): Promise<Buff
   let y = PAGE.margin;
 
   // ---- r1: title band ----
+  // The template puts the logo in C2:F2 rather than beside the title, so the
+  // band carries the document title alone, centred.
   doc.fillColor(COLORS.navy).rect(L, y, W, 26).fill();
-  if (LOGO_EXISTS) {
-    try {
-      doc.image(LOGO_PATH, L + 4, y + 4, { height: 18 });
-    } catch {
-      /* fall through - the title alone is enough */
-    }
-  }
   doc
     .fillColor('#ffffff')
     .font('Helvetica-Bold')
@@ -277,9 +272,14 @@ export function generateExportDocument(input: ExportDocumentInput): Promise<Buff
     .text(input.title.toUpperCase(), L, y + 7, { width: W, align: 'center' });
   y += 26;
 
-  // ---- r2-r4: exporter block (left) + reference pairs (right) ----
+  // ---- r2-r4: exporter block (left) + logo above reference pairs (right) ----
+  // Mirrors the spreadsheet: A2:B4 is the exporter, C2:F2 is the logo, and the
+  // four reference cells occupy C3:D3, E3:F3, C4:D4 and E4:F4 beneath it.
   const halfW = W / 2;
-  const exporterH = 74;
+  const logoH = 30;
+  const refH = 24;
+  const exporterH = logoH + refH * 2;
+
   cell(doc, {
     x: L,
     y,
@@ -291,15 +291,37 @@ export function generateExportDocument(input: ExportDocumentInput): Promise<Buff
     valueSize: 7.5,
   });
 
-  // Four reference slots stacked as two rows of two
+  // Logo cell. The artwork is dark on transparent, so it sits on white here.
+  doc.strokeColor(COLORS.line).lineWidth(0.5).rect(L + halfW, y, halfW, logoH).stroke();
+  if (LOGO_EXISTS) {
+    try {
+      // Fit inside the cell with a small inset, preserving aspect ratio.
+      doc.image(LOGO_PATH, L + halfW + 4, y + 3, {
+        fit: [halfW - 8, logoH - 6],
+        align: 'center',
+        valign: 'center',
+      });
+    } catch {
+      /* fall through to the wordmark below */
+    }
+  } else {
+    doc
+      .fillColor(COLORS.navy)
+      .font('Helvetica-Bold')
+      .fontSize(11)
+      .text(input.company?.tradeName ?? input.company?.legalName ?? '', L + halfW + 4, y + 10, {
+        width: halfW - 8,
+        align: 'center',
+      });
+  }
+
   const refs = input.references.slice(0, 4);
   const refW = halfW / 2;
-  const refH = exporterH / 2;
   for (let i = 0; i < 4; i++) {
     const r = refs[i];
     cell(doc, {
       x: L + halfW + (i % 2) * refW,
-      y: y + Math.floor(i / 2) * refH,
+      y: y + logoH + Math.floor(i / 2) * refH,
       w: refW,
       h: refH,
       label: r?.label ?? '',

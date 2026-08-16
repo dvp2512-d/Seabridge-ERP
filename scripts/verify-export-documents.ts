@@ -44,8 +44,6 @@ const company = {
   quotationTerms: [
     'Prices quoted are on Basis as per Incoterms',
     'Goods supplied shall comply with the applicable food safety regulations of the destination country.',
-    '40 Kgs HDPE Bags with inner liner suitable for export shipment',
-    'Shipment within 20 days from the date of receipt of advance payment or operative L/C.',
     'All disputes shall be subject to Ahmedabad (Gujarat) jurisdiction only.',
   ].join('\n'),
   invoiceDeclaration:
