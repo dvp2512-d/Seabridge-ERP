@@ -102,8 +102,9 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
     const componentSchema = z.object({
       parameterId: z.string().optional().nullable(),
       name: z.string().min(1),
-      calcType: z.enum(['FIXED', 'PER_UNIT', 'PERCENT_OF_COST']),
+      calcType: z.enum(['FIXED', 'PER_UNIT', 'PERCENT_OF_COST', 'PERCENT_OF_PRODUCT']),
       isMargin: z.boolean().optional(),
+      isProductPrice: z.boolean().optional(),
       sortOrder: z.number().int().optional(),
       value: z.number().finite(),
     });
@@ -172,6 +173,7 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
                 name: component.name,
                 calcType: component.calcType,
                 isMargin: component.isMargin,
+                isProductPrice: component.isProductPrice,
                 sortOrder: component.sortOrder ?? index,
                 value: component.value,
                 amount: component.amount,

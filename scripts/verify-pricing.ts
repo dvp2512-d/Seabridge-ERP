@@ -37,66 +37,92 @@ function checkTrue(name: string, cond: boolean) {
 
 /** Build the same component list for both implementations. */
 function make(
-  rows: [string, PricingComponent['calcType'], number, boolean?][]
+  rows: [string, PricingComponent['calcType'], number, boolean?, boolean?][]
 ): { client: PricingComponent[]; server: PricingComponentInput[] } {
   return {
-    client: rows.map(([name, calcType, value, isMargin], i) => ({
+    client: rows.map(([name, calcType, value, isMargin, isProductPrice], i) => ({
       key: String(i),
       name,
       calcType,
       value: String(value),
       isMargin: isMargin ?? false,
+      isProductPrice: isProductPrice ?? false,
       sortOrder: i,
     })),
-    server: rows.map(([name, calcType, value, isMargin], i) => ({
+    server: rows.map(([name, calcType, value, isMargin, isProductPrice], i) => ({
       name,
       calcType,
       value,
       isMargin: isMargin ?? false,
+      isProductPrice: isProductPrice ?? false,
       sortOrder: i,
     })),
   };
 }
 
 console.log('--- Worked example: 25 MT of rice ---');
-// Supplier 850/MT  = 21,250
+// Supplier 850/MT  = 21,250   <- BASE for margin
 // Packaging 20/MT  =    500
 // CHA fixed        =    450
 // Local transport  =    300
 // Sea freight      =  1,200
-// Insurance 0.5%   of cost components
 // Inspection fixed =    250
-// Margin 15%       of cost components
+// Insurance 0.5%   of all cost components
+// Margin 15%       of the SUPPLIER PRICE ONLY
 const qty = 25;
 const ex = make([
-  ['Product Price (Supplier)', 'PER_UNIT', 850],
+  ['Product Price (Supplier)', 'PER_UNIT', 850, false, true],
   ['Packaging & Processing', 'PER_UNIT', 20],
   ['CHA / Customs', 'FIXED', 450],
   ['Local Transportation', 'FIXED', 300],
   ['Transportation - Sea', 'FIXED', 1200],
   ['Insurance', 'PERCENT_OF_COST', 0.5],
   ['Inspection', 'FIXED', 250],
-  ['Our Margin', 'PERCENT_OF_COST', 15, true],
+  ['Our Margin', 'PERCENT_OF_PRODUCT', 15, true],
 ]);
 
-// Absolute cost base = 21250 + 500 + 450 + 300 + 1200 + 250 = 23,950
-const costBase = 23950;
-const insurance = costBase * 0.005;      // 119.75
-const marginAmt = costBase * 0.15;       // 3592.50
-const expectedCost = costBase + insurance;      // 24,069.75
-const expectedTotal = expectedCost + marginAmt; // 27,662.25
+const productBase = 21250;                       // supplier price only
+const costBase = 23950;                          // all absolute cost components
+const insurance = costBase * 0.005;              // 119.75
+const marginAmt = productBase * 0.15;            // 3187.50
+const expectedCost = costBase + insurance;       // 24,069.75
+const expectedTotal = expectedCost + marginAmt;  // 27,257.25
 
 const c = clientCalc(qty, ex.client);
 const s = serverCalc(qty, ex.server);
 
-check('cost base excludes percentages and margin', s.totalCost - insurance, costBase);
-check('insurance = 0.5% of cost base', s.components[5].amount, insurance);
-check('margin = 15% of cost base', s.margin, marginAmt);
+check('margin is 15% of the supplier price only', s.margin, marginAmt);
+check('margin ignores freight and other costs', s.margin, 3187.5);
+check('insurance is still 0.5% of all costs', s.components[5].amount, insurance);
 check('total cost', s.totalCost, expectedCost);
 check('line total (buyer pays)', s.totalPrice, expectedTotal);
 check('per unit final price', s.unitPrice, expectedTotal / qty);
 check('per unit cost', s.unitCost, expectedCost / qty);
 check('margin percent of sell price', s.marginPercent, (marginAmt / expectedTotal) * 100);
+
+console.log('\n--- margin basis is independent of other costs ---');
+// Adding freight must not change the margin amount, only the total.
+const noFreight = serverCalc(10, make([
+  ['Supplier', 'PER_UNIT', 100, false, true],
+  ['Margin', 'PERCENT_OF_PRODUCT', 20, true],
+]).server);
+const withFreight = serverCalc(10, make([
+  ['Supplier', 'PER_UNIT', 100, false, true],
+  ['Freight', 'FIXED', 5000],
+  ['Margin', 'PERCENT_OF_PRODUCT', 20, true],
+]).server);
+check('margin without freight', noFreight.margin, 200);
+check('margin unchanged when freight is added', withFreight.margin, 200);
+check('total rises by exactly the freight', withFreight.totalPrice - noFreight.totalPrice, 5000);
+
+console.log('\n--- % of total cost still available for insurance-style charges ---');
+const ofCost = serverCalc(10, make([
+  ['Supplier', 'PER_UNIT', 100, false, true],
+  ['Freight', 'FIXED', 500],
+  ['Insurance', 'PERCENT_OF_COST', 10],
+]).server);
+// cost base = 1000 + 500 = 1500, insurance = 150
+check('% of total cost uses every cost component', ofCost.components[2].amount, 150);
 
 console.log('\n--- client and server agree ---');
 check('totalPrice matches', c.totalPrice, s.totalPrice);
@@ -152,13 +178,13 @@ check('NaN value is treated as 0', nan.totalPrice, 0);
 
 console.log('\n--- quotation totals ---');
 const totals = calculateQuotationTotals([
-  { totalPrice: 27662.25, totalCost: 24069.75, margin: 3592.5 },
+  { totalPrice: 27257.25, totalCost: 24069.75, margin: 3187.5 },
   { totalPrice: 1000, totalCost: 800, margin: 200 },
 ]);
-check('subtotal sums the lines', totals.subtotal, 28662.25);
-check('grand total equals subtotal (no second charge)', totals.grandTotal, 28662.25);
+check('subtotal sums the lines', totals.subtotal, 28257.25);
+check('grand total equals subtotal (no second charge)', totals.grandTotal, 28257.25);
 check('total cost sums the lines', totals.totalCost, 24869.75);
-check('total margin sums the lines', totals.totalMargin, 3792.5);
+check('total margin sums the lines', totals.totalMargin, 3387.5);
 
 console.log(
   failures === 0

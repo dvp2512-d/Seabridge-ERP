@@ -314,9 +314,10 @@ router.post('/pricing-parameters', can('MASTER_MANAGE'), async (req, res, next) 
       name: z.string().min(1),
       description: z.string().optional(),
       sortOrder: z.number().int().optional(),
-      calcType: z.enum(['FIXED', 'PER_UNIT', 'PERCENT_OF_COST']),
+      calcType: z.enum(['FIXED', 'PER_UNIT', 'PERCENT_OF_COST', 'PERCENT_OF_PRODUCT']),
       defaultValue: z.number().finite().optional().nullable(),
       isMargin: z.boolean().optional(),
+      isProductPrice: z.boolean().optional(),
     });
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
@@ -346,9 +347,10 @@ router.put('/pricing-parameters/:id', can('MASTER_MANAGE'), async (req, res, nex
       name: z.string().min(1).optional(),
       description: z.string().optional(),
       sortOrder: z.number().int().optional(),
-      calcType: z.enum(['FIXED', 'PER_UNIT', 'PERCENT_OF_COST']).optional(),
+      calcType: z.enum(['FIXED', 'PER_UNIT', 'PERCENT_OF_COST', 'PERCENT_OF_PRODUCT']).optional(),
       defaultValue: z.number().finite().optional().nullable(),
       isMargin: z.boolean().optional(),
+      isProductPrice: z.boolean().optional(),
       isActive: z.boolean().optional(),
     });
     const validation = schema.safeParse(req.body);

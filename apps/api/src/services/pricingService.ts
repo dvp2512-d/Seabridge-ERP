@@ -25,13 +25,19 @@
  * before anything is stored.
  */
 
-export type PricingCalcType = 'FIXED' | 'PER_UNIT' | 'PERCENT_OF_COST';
+export type PricingCalcType =
+  | 'FIXED'
+  | 'PER_UNIT'
+  | 'PERCENT_OF_COST'
+  | 'PERCENT_OF_PRODUCT';
 
 export interface PricingComponentInput {
   parameterId?: string | null;
   name: string;
   calcType: PricingCalcType;
   isMargin?: boolean;
+  /** Marks the product/supplier price - the base for PERCENT_OF_PRODUCT. */
+  isProductPrice?: boolean;
   sortOrder?: number;
   /** What the user typed: a lump sum, a per-unit rate, or a percentage. */
   value: number;
@@ -39,6 +45,7 @@ export interface PricingComponentInput {
 
 export interface PricingComponentResult extends PricingComponentInput {
   isMargin: boolean;
+  isProductPrice: boolean;
   sortOrder: number;
   /** What this component contributed to the line total. */
   amount: number;
@@ -75,9 +82,15 @@ function percent(n: number): number {
 /**
  * Price a single line item from its components.
  *
- * PERCENT_OF_COST is applied to the sum of all non-margin, non-percentage
- * components. Percentages therefore never compound with each other, so the
- * order in which the user arranges them cannot change the result.
+ * Two percentage bases are supported, both computed from the absolute
+ * (non-percentage) components so percentages never compound and the order of
+ * rows cannot change the result:
+ *
+ *   PERCENT_OF_PRODUCT - percentage of the product/supplier price only.
+ *                        This is what margin uses: 15% margin on an 850/unit
+ *                        supplier price is 127.50/unit, regardless of freight.
+ *   PERCENT_OF_COST    - percentage of every cost component, used for things
+ *                        like insurance that are levied on the full value.
  */
 export function calculateLinePricing(
   quantity: number,
@@ -89,6 +102,7 @@ export function calculateLinePricing(
   const base = components.map((component, index) => {
     const value = Number.isFinite(component.value) ? component.value : 0;
     const isMargin = component.isMargin ?? false;
+    const isProductPrice = component.isProductPrice ?? false;
     const sortOrder = component.sortOrder ?? index;
 
     let amount: number | null;
@@ -100,25 +114,34 @@ export function calculateLinePricing(
         amount = value * qty;
         break;
       case 'PERCENT_OF_COST':
-        amount = null; // needs the cost base from pass 1
+      case 'PERCENT_OF_PRODUCT':
+        amount = null; // resolved in pass 2
         break;
       default:
         amount = value;
     }
 
-    return { ...component, isMargin, sortOrder, amount };
+    return { ...component, isMargin, isProductPrice, sortOrder, amount };
   });
 
-  // The base that percentages apply to: absolute cost components only.
-  const costBase = base
-    .filter((c) => !c.isMargin && c.amount !== null)
+  const absolute = base.filter((c) => c.amount !== null);
+
+  // Base for PERCENT_OF_COST: all absolute cost components.
+  const costBase = absolute
+    .filter((c) => !c.isMargin)
     .reduce((sum, c) => sum + (c.amount as number), 0);
 
-  // Pass 2: resolve percentages.
-  const resolved: PricingComponentResult[] = base.map((c) => ({
-    ...c,
-    amount: money(c.amount === null ? (costBase * c.value) / 100 : c.amount),
-  }));
+  // Base for PERCENT_OF_PRODUCT: only components flagged as the product price.
+  const productBase = absolute
+    .filter((c) => c.isProductPrice)
+    .reduce((sum, c) => sum + (c.amount as number), 0);
+
+  // Pass 2: resolve percentages against their respective base.
+  const resolved: PricingComponentResult[] = base.map((c) => {
+    if (c.amount !== null) return { ...c, amount: money(c.amount) };
+    const basis = c.calcType === 'PERCENT_OF_PRODUCT' ? productBase : costBase;
+    return { ...c, amount: money((basis * c.value) / 100) };
+  });
 
   const totalCost = money(
     resolved.filter((c) => !c.isMargin).reduce((sum, c) => sum + c.amount, 0)

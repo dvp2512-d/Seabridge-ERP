@@ -156,6 +156,7 @@ export default function NewQuotation() {
           name: c.name,
           calcType: c.calcType,
           isMargin: c.isMargin,
+          isProductPrice: c.isProductPrice,
           sortOrder: c.sortOrder,
           value: parseFloat(c.value) || 0,
         })),
@@ -459,6 +460,7 @@ function ItemPricingModal({
       name: p.name,
       calcType: p.calcType as PricingCalcType,
       isMargin: Boolean(p.isMargin),
+      isProductPrice: Boolean(p.isProductPrice),
       sortOrder: p.sortOrder ?? index,
       value: p.defaultValue != null ? String(p.defaultValue) : '',
     }));
@@ -501,6 +503,7 @@ function ItemPricingModal({
         name: '',
         calcType: 'FIXED',
         isMargin: false,
+        isProductPrice: false,
         sortOrder: prev.length > 0 ? Math.max(...prev.map((c) => c.sortOrder)) + 1 : 0,
         value: '',
       },
@@ -621,9 +624,10 @@ function ItemPricingModal({
                 <tr>
                   <th className="w-8">#</th>
                   <th>Component</th>
-                  <th className="w-40">Type</th>
+                  <th className="w-44">Type</th>
                   <th className="w-28 text-right">Value</th>
-                  <th className="w-16 text-center">Margin</th>
+                  <th className="w-16 text-center" title="This is the product price that % of product price is calculated on">Base</th>
+                  <th className="w-16 text-center" title="Counts as profit, not cost">Margin</th>
                   <th className="w-32 text-right">Amount</th>
                   <th className="w-10"></th>
                 </tr>
@@ -671,6 +675,17 @@ function ItemPricingModal({
                     <td className="text-center">
                       <input
                         type="checkbox"
+                        checked={component.isProductPrice}
+                        onChange={(e) =>
+                          updateComponent(component.key, { isProductPrice: e.target.checked })
+                        }
+                        aria-label="This is the product price margin is calculated on"
+                        className="rounded"
+                      />
+                    </td>
+                    <td className="text-center">
+                      <input
+                        type="checkbox"
                         checked={component.isMargin}
                         onChange={(e) =>
                           updateComponent(component.key, { isMargin: e.target.checked })
@@ -701,7 +716,7 @@ function ItemPricingModal({
                 ))}
                 {components.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="text-center py-6 text-gray-500">
+                    <td colSpan={8} className="text-center py-6 text-gray-500">
                       No components. Click "Add Component" to start.
                     </td>
                   </tr>
@@ -710,8 +725,9 @@ function ItemPricingModal({
             </table>
           </div>
           <p className="text-xs text-gray-500 mt-2">
-            "% of cost" applies to the total of the absolute cost components, so percentages
-            never compound and the order of rows cannot change the result.
+            Tick <strong>Base</strong> on the product / supplier price row — that is what
+            "% of product price" (your margin) is calculated on. "% of total cost" applies to
+            every cost component. Percentages never compound, so row order cannot change the total.
           </p>
         </div>
 
