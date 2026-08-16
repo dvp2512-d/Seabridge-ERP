@@ -767,6 +767,14 @@ function ItemPricingModal({
                         placeholder="0"
                         onChange={(e) => updateComponent(component.key, { value: e.target.value })}
                       />
+                      {/* Spell out what the typed number means for this row */}
+                      <div className="text-xs text-gray-400 mt-0.5 text-right">
+                        {component.calcType === 'PER_UNIT'
+                          ? `per ${unit || 'unit'}`
+                          : component.calcType === 'FIXED'
+                          ? 'total for line'
+                          : '%'}
+                      </div>
                       {/* Pick an agreed rate from the masters instead of typing it */}
                       {(() => {
                         const presets = presetsFor(component);
@@ -777,7 +785,12 @@ function ItemPricingModal({
                             value=""
                             onChange={(e) => {
                               if (!e.target.value) return;
-                              updateComponent(component.key, { value: e.target.value });
+                              // Supplier prices are per-unit rates, so switch the
+                              // row's basis to match when one is picked.
+                              updateComponent(component.key, {
+                                value: e.target.value,
+                                ...(component.isProductPrice ? { calcType: 'PER_UNIT' as PricingCalcType } : {}),
+                              });
                             }}
                           >
                             <option value="">Use saved rate…</option>

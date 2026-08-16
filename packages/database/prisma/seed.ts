@@ -147,17 +147,24 @@ async function main() {
   // Seed Pricing Parameters - the components that build up a quotation line
   // price. These are defaults only; they can be added to, renamed, reordered or
   // deactivated from Settings without affecting quotations already created.
+  // calcType meaning:
+  //   PER_UNIT           - the value is a rate, multiplied by the line quantity
+  //   FIXED              - the value IS the total for that component on the line
+  //   PERCENT_OF_PRODUCT - % of the product (supplier) price
+  //   PERCENT_OF_COST    - % of all cost components
+  // Additional costs default to FIXED so you enter the total for the component,
+  // not a per-unit rate. Any row can still be switched to per unit on the line.
   const pricingParameters = [
-    { name: 'Product Price (Supplier)', sortOrder: 1, calcType: 'PER_UNIT',           isMargin: false, isProductPrice: true, description: 'Base cost from the supplier, per unit' },
-    { name: 'Packaging & Processing',   sortOrder: 2, calcType: 'PER_UNIT',           isMargin: false, description: 'Packing materials, processing and handling, per unit' },
+    { name: 'Product Price (Supplier)', sortOrder: 1, calcType: 'PER_UNIT',           isMargin: false, isProductPrice: true, description: 'Supplier rate per unit, multiplied by quantity' },
+    { name: 'Packaging & Processing',   sortOrder: 2, calcType: 'FIXED',              isMargin: false, description: 'Total packing, processing and handling cost for this line' },
     { name: 'Our Margin',               sortOrder: 3, calcType: 'PERCENT_OF_PRODUCT', isMargin: true,  description: 'Profit, as a percentage of the product (supplier) price', defaultValue: 15 },
-    { name: 'CHA / Customs',            sortOrder: 4, calcType: 'FIXED',              isMargin: false, description: 'Customs house agent and clearance charges' },
-    { name: 'Local Transportation',     sortOrder: 5, calcType: 'FIXED',              isMargin: false, description: 'Factory or warehouse to port' },
-    { name: 'Transportation (Air / Sea / Road)', sortOrder: 6, calcType: 'FIXED',     isMargin: false, description: 'Main freight leg' },
+    { name: 'CHA / Customs',            sortOrder: 4, calcType: 'FIXED',              isMargin: false, description: 'Total customs house agent and clearance charges' },
+    { name: 'Local Transportation',     sortOrder: 5, calcType: 'FIXED',              isMargin: false, description: 'Total factory or warehouse to port cost' },
+    { name: 'Transportation (Air / Sea / Road)', sortOrder: 6, calcType: 'FIXED',     isMargin: false, description: 'Total main freight cost' },
     { name: 'Insurance',                sortOrder: 7, calcType: 'PERCENT_OF_COST',    isMargin: false, description: 'Cargo insurance, as a percentage of total cost', defaultValue: 0.5 },
-    { name: 'Inspection',               sortOrder: 8, calcType: 'FIXED',              isMargin: false, description: 'Third party inspection or certification' },
-    { name: 'Commission',               sortOrder: 9, calcType: 'FIXED',              isMargin: false, description: 'Agent or broker commission' },
-    { name: 'Other',                    sortOrder: 10, calcType: 'FIXED',             isMargin: false, description: 'Anything not covered above' },
+    { name: 'Inspection',               sortOrder: 8, calcType: 'FIXED',              isMargin: false, description: 'Total third party inspection or certification cost' },
+    { name: 'Commission',               sortOrder: 9, calcType: 'FIXED',              isMargin: false, description: 'Total agent or broker commission' },
+    { name: 'Other',                    sortOrder: 10, calcType: 'FIXED',             isMargin: false, description: 'Any other total cost for this line' },
   ] as const;
 
   for (const parameter of pricingParameters) {

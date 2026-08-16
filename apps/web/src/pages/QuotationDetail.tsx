@@ -217,7 +217,7 @@ export default function QuotationDetail() {
               <nav className="flex -mb-px">
                 {[
                   { key: 'items', label: 'Line Items', icon: Package },
-                  { key: 'costs', label: 'Additional Costs', icon: DollarSign },
+                  { key: 'costs', label: 'Pricing Breakdown', icon: DollarSign },
                 ].map((tab) => (
                   <button
                     key={tab.key}
