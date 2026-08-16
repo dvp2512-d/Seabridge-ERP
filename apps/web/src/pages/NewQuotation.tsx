@@ -753,7 +753,7 @@ function ItemCostingModal({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4 mt-3">
+          <div className="mt-3">
             <FormField
               label="Supplier Price (per unit)"
               required
@@ -763,25 +763,26 @@ function ItemCostingModal({
               onChange={(e) => setFormData({ ...formData, supplierPrice: e.target.value })}
               placeholder="Cost from supplier"
             />
+          </div>
+        </div>
+
+        {/* Additional Cost, Margin & Pricing */}
+        <div className="bg-green-50 rounded-lg p-4">
+          <h3 className="font-semibold text-green-900 mb-3 flex items-center gap-2">
+            <Percent className="w-5 h-5" />
+            Additional Cost, Margin &amp; Selling Price
+          </h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <FormField
               label="Additional Cost (per unit)"
               type="number"
               step="0.01"
+              min={0}
               value={formData.additionalCost}
               onChange={(e) => setFormData({ ...formData, additionalCost: e.target.value })}
-              placeholder="Packaging, handling..."
-              hint="Packaging, processing, etc."
+              placeholder="0.00"
+              hint="Packaging, handling, processing"
             />
-          </div>
-        </div>
-
-        {/* Margin & Pricing */}
-        <div className="bg-green-50 rounded-lg p-4">
-          <h3 className="font-semibold text-green-900 mb-3 flex items-center gap-2">
-            <Percent className="w-5 h-5" />
-            Margin & Selling Price
-          </h3>
-          <div className="grid grid-cols-3 gap-4">
             <FormField
               label="Margin %"
               type="number"
@@ -797,6 +798,9 @@ function ItemCostingModal({
               <div className="input bg-gray-100 font-bold text-green-700">
                 {formatCurrency(calculations.unitPrice, currency?.code)}
               </div>
+              <p className="mt-1 text-sm text-gray-500">
+                Cost {formatCurrency(calculations.unitCost, currency?.code)}/unit
+              </p>
             </div>
             <div>
               <label className="label">Total Price</label>
