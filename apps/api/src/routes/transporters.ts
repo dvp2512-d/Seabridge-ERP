@@ -26,6 +26,8 @@ router.get('/', can('MASTER_VIEW'), async (req, res, next) => {
 
     const transporters = await prisma.transporter.findMany({
       where,
+      // Rates are included so quotations can offer them as selectable values.
+      include: { transportRates: { where: { isActive: true }, orderBy: { origin: 'asc' } } },
       orderBy: { name: 'asc' },
     });
 

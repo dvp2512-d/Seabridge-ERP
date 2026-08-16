@@ -156,7 +156,8 @@ async function main() {
     { name: 'Transportation (Air / Sea / Road)', sortOrder: 6, calcType: 'FIXED',     isMargin: false, description: 'Main freight leg' },
     { name: 'Insurance',                sortOrder: 7, calcType: 'PERCENT_OF_COST',    isMargin: false, description: 'Cargo insurance, as a percentage of total cost', defaultValue: 0.5 },
     { name: 'Inspection',               sortOrder: 8, calcType: 'FIXED',              isMargin: false, description: 'Third party inspection or certification' },
-    { name: 'Other',                    sortOrder: 9, calcType: 'FIXED',              isMargin: false, description: 'Anything not covered above' },
+    { name: 'Commission',               sortOrder: 9, calcType: 'FIXED',              isMargin: false, description: 'Agent or broker commission' },
+    { name: 'Other',                    sortOrder: 10, calcType: 'FIXED',             isMargin: false, description: 'Anything not covered above' },
   ] as const;
 
   for (const parameter of pricingParameters) {

@@ -9,6 +9,8 @@ import {
   buyersApi,
   masterApi,
   productsApi,
+  chaApi,
+  transportersApi,
   getApiErrorMessage,
 } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
@@ -477,8 +479,62 @@ function ItemPricingModal({
     enabled: !!productId,
   });
 
+  // CHA and transporter masters, so their agreed rates can be selected instead
+  // of typed from memory.
+  const { data: chas = [] } = useQuery({
+    queryKey: ['chas-with-rates'],
+    queryFn: async () => (await chaApi.list({ limit: 100 })).data?.data ?? [],
+  });
+
+  const { data: transporters = [] } = useQuery({
+    queryKey: ['transporters-with-rates'],
+    queryFn: async () => (await transportersApi.list({ limit: 100 })).data?.data ?? [],
+  });
+
   const selectedProduct = products.find((p: any) => p.id === productId);
   const supplierPrices = productDetail?.supplierPrices ?? [];
+
+  /**
+   * Values that can be picked for a given component instead of typing.
+   * Which list is offered is decided from the component itself, so it keeps
+   * working for components the user renames or adds.
+   */
+  const presetsFor = (component: PricingComponent): { label: string; value: number }[] => {
+    if (component.isProductPrice) {
+      return supplierPrices.map((sp: any) => ({
+        label: `${sp.supplier?.name}: ${formatCurrency(sp.price, sp.currency)}/${sp.unit}`,
+        value: Number(sp.price),
+      }));
+    }
+
+    const name = component.name.toLowerCase();
+
+    if (/cha|custom|clearance/.test(name)) {
+      return chas.flatMap((cha: any) =>
+        (cha.chaRates ?? []).map((rate: any) => ({
+          label: `${cha.name} - ${String(rate.serviceType).replace(/_/g, ' ')}: ${formatCurrency(rate.rate, rate.currency)}`,
+          value: Number(rate.rate),
+        }))
+      );
+    }
+
+    if (/transport|freight|shipping|sea|air|road/.test(name)) {
+      return transporters.flatMap((t: any) =>
+        (t.transportRates ?? []).map((rate: any) => ({
+          label: `${t.name} - ${rate.origin} to ${rate.destination}: ${formatCurrency(rate.rate, rate.currency)}`,
+          value: Number(rate.rate),
+        }))
+      );
+    }
+
+    return [];
+  };
+
+  /** Parameters not yet used on this line, so the same one isn't added twice. */
+  const availableParameters = (currentName: string) =>
+    parameters.filter(
+      (p: any) => p.name === currentName || !components.some((c) => c.name === p.name)
+    );
 
   // Follow the product's own unit unless the user has overridden it.
   useEffect(() => {
@@ -495,30 +551,36 @@ function ItemPricingModal({
   };
 
   const addComponent = () => {
+    // Default to the first parameter not already on this line, so the common
+    // case needs no typing at all. Falls back to a blank custom row.
+    const unused = parameters.find(
+      (p: any) => !components.some((c) => c.name === p.name)
+    );
     setComponents((prev) => [
       ...prev,
       {
-        key: `custom-${Date.now()}`,
-        parameterId: null,
-        name: '',
-        calcType: 'FIXED',
-        isMargin: false,
-        isProductPrice: false,
+        key: `row-${Date.now()}`,
+        parameterId: unused?.id ?? null,
+        name: unused?.name ?? '',
+        calcType: (unused?.calcType as PricingCalcType) ?? 'FIXED',
+        isMargin: Boolean(unused?.isMargin),
+        isProductPrice: Boolean(unused?.isProductPrice),
         sortOrder: prev.length > 0 ? Math.max(...prev.map((c) => c.sortOrder)) + 1 : 0,
-        value: '',
+        value: unused?.defaultValue != null ? String(unused.defaultValue) : '',
       },
     ]);
   };
 
-  /** Prefill the supplier component from the product's supplier price list. */
+  /** Fill the base (product price) component from the product's supplier list. */
   const applySupplierPrice = (price: number) => {
-    const supplierRow =
-      components.find((c) => /supplier/i.test(c.name)) ?? components[0];
-    if (!supplierRow) return;
-    updateComponent(supplierRow.key, {
-      value: String(price),
-      calcType: 'PER_UNIT',
-    });
+    const target =
+      components.find((c) => c.isProductPrice) ??
+      components.find((c) => /supplier/i.test(c.name));
+    if (!target) {
+      toast.error('No product price component on this line to fill');
+      return;
+    }
+    updateComponent(target.key, { value: String(price), calcType: 'PER_UNIT' });
     toast.success(`Applied ${formatCurrency(price, currencyCode)} per unit`);
   };
 
@@ -637,12 +699,46 @@ function ItemPricingModal({
                   <tr key={component.key}>
                     <td className="text-gray-400">{index + 1}</td>
                     <td>
-                      <input
-                        className="input py-1"
-                        value={component.name}
-                        placeholder="Component name"
-                        onChange={(e) => updateComponent(component.key, { name: e.target.value })}
-                      />
+                      <select
+                        className="select py-1"
+                        value={
+                          parameters.some((p: any) => p.name === component.name)
+                            ? component.name
+                            : '__custom__'
+                        }
+                        onChange={(e) => {
+                          if (e.target.value === '__custom__') {
+                            updateComponent(component.key, { parameterId: null, name: '' });
+                            return;
+                          }
+                          // Adopt the selected parameter's basis and default value.
+                          const p = parameters.find((x: any) => x.name === e.target.value);
+                          if (!p) return;
+                          updateComponent(component.key, {
+                            parameterId: p.id,
+                            name: p.name,
+                            calcType: p.calcType as PricingCalcType,
+                            isMargin: Boolean(p.isMargin),
+                            isProductPrice: Boolean(p.isProductPrice),
+                            value:
+                              component.value ||
+                              (p.defaultValue != null ? String(p.defaultValue) : ''),
+                          });
+                        }}
+                      >
+                        {availableParameters(component.name).map((p: any) => (
+                          <option key={p.id} value={p.name}>{p.name}</option>
+                        ))}
+                        <option value="__custom__">Custom…</option>
+                      </select>
+                      {!parameters.some((p: any) => p.name === component.name) && (
+                        <input
+                          className="input py-1 mt-1"
+                          value={component.name}
+                          placeholder="Custom component name"
+                          onChange={(e) => updateComponent(component.key, { name: e.target.value })}
+                        />
+                      )}
                     </td>
                     <td>
                       <select
@@ -671,6 +767,26 @@ function ItemPricingModal({
                         placeholder="0"
                         onChange={(e) => updateComponent(component.key, { value: e.target.value })}
                       />
+                      {/* Pick an agreed rate from the masters instead of typing it */}
+                      {(() => {
+                        const presets = presetsFor(component);
+                        if (presets.length === 0) return null;
+                        return (
+                          <select
+                            className="select py-1 mt-1 text-xs"
+                            value=""
+                            onChange={(e) => {
+                              if (!e.target.value) return;
+                              updateComponent(component.key, { value: e.target.value });
+                            }}
+                          >
+                            <option value="">Use saved rate…</option>
+                            {presets.map((preset, i) => (
+                              <option key={i} value={preset.value}>{preset.label}</option>
+                            ))}
+                          </select>
+                        );
+                      })()}
                     </td>
                     <td className="text-center">
                       <input
