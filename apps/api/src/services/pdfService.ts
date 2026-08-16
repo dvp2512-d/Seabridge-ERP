@@ -207,7 +207,7 @@ export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
     }
 
     // Totals
-    yPos = ensureSpace(doc, yPos, 80) + 10;
+    yPos = ensureSpace(doc, yPos, 100) + 10;
     doc
       .strokeColor(COLORS.gray)
       .lineWidth(0.5)
@@ -220,6 +220,22 @@ export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
     doc
       .fillColor('#000')
       .text(money(quotation.subtotal, symbol), 450, yPos, { align: 'right', width: 100 });
+
+    // Additional charges (CHA, freight, insurance...) are part of what the buyer
+    // pays, so they must appear here. Without this line the subtotal and grand
+    // total would differ with nothing to explain the gap.
+    const additionalCharges = (quotation.costs ?? []).reduce(
+      (sum: number, cost: any) => sum + Number(cost.amount ?? 0),
+      0
+    );
+
+    if (additionalCharges > 0) {
+      yPos += 18;
+      doc.fillColor(COLORS.gray).fontSize(10).text('Additional Charges:', 350, yPos);
+      doc
+        .fillColor('#000')
+        .text(money(additionalCharges, symbol), 450, yPos, { align: 'right', width: 100 });
+    }
 
     yPos += 20;
     doc.fillColor(COLORS.navy).fontSize(11).text('Grand Total:', 350, yPos);
