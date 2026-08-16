@@ -14,6 +14,7 @@ import {
   generateExportDocument,
   amountInWords,
   money,
+  round2,
   qty,
   formatDate,
   num,
@@ -79,23 +80,77 @@ function packingSummary(items: any[], variationPercent?: unknown): string | null
 
 export function buildQuotationDocument(quotation: any, company: any) {
   const currency = quotation.currency?.code ?? 'USD';
+  const items = quotation.items ?? [];
+
+  // Additional costs are billed to the buyer but belong to the quotation as a
+  // whole. The template has a single TOTAL row (=SUM of the line amounts) and no
+  // charges line, so the charges are apportioned into the unit prices by value
+  // share. That keeps Qty x Unit Price = Amount on every line.
+  //
+  // Two decimals cannot always reconcile: 40.00 over a quantity of 3 gives
+  // 13.33, and 13.33 x 3 = 39.99, losing a cent. So the unit price is computed
+  // at the smallest precision from 2 to 4 decimals that makes the line amounts
+  // sum to the true grand total, which is what export invoices do in practice.
   const additional = (quotation.costs ?? []).reduce((s: number, c: any) => s + num(c.amount), 0);
+  const lineSubtotal = items.reduce((s: number, i: any) => s + num(i.totalPrice), 0);
+  const trueTotal = round2(lineSubtotal + additional);
+
+  /** Apportion charges and price every line at the given decimal precision. */
+  const priceAt = (decimals: number) => {
+    const factor = Math.pow(10, decimals);
+    let apportioned = 0;
+
+    const priced = items.map((item: any, index: number) => {
+      const qtyValue = num(item.quantity);
+      const lineTotal = num(item.totalPrice);
+
+      let share: number;
+      if (index === items.length - 1) {
+        // The last line absorbs the remainder so the apportionment is exact.
+        share = round2(additional - apportioned);
+      } else {
+        share = round2(
+          lineSubtotal > 0
+            ? additional * (lineTotal / lineSubtotal)
+            : additional / Math.max(items.length, 1)
+        );
+        apportioned += share;
+      }
+
+      const rawUnit = qtyValue > 0 ? (lineTotal + share) / qtyValue : 0;
+      const unitPrice = Math.round((rawUnit + Number.EPSILON) * factor) / factor;
+      return {
+        ...item,
+        printUnitPrice: unitPrice,
+        printDecimals: decimals,
+        printAmount: round2(unitPrice * qtyValue),
+      };
+    });
+
+    const total = round2(priced.reduce((s: number, i: any) => s + i.printAmount, 0));
+    return { priced, total };
+  };
+
+  let result = priceAt(2);
+  for (const decimals of [3, 4]) {
+    if (Math.abs(result.total - trueTotal) < 0.005) break;
+    result = priceAt(decimals);
+  }
+
+  const priced = result.priced;
+  const documentTotal = result.total;
 
   const columns: DocumentColumn[] = [
     { header: 'Product Code', width: 0.13, value: (i) => i.product?.hsnCode ?? i.product?.code ?? '-' },
     { header: 'Description of Goods', width: 0.4, value: (i) => i.product?.name ?? '-' },
     { header: 'QTY', width: 0.1, align: 'right', value: (i) => qty(i.quantity) },
     { header: 'Unit Type', width: 0.1, align: 'center', value: (i) => i.unit ?? 'KG' },
-    { header: `Price (${currency})`, width: 0.12, align: 'right', value: (i) => money(i.unitPrice) },
-    { header: 'Amount', width: 0.15, align: 'right', value: (i) => money(i.totalPrice) },
+    { header: `Price (${currency})`, width: 0.12, align: 'right', value: (i) => money(i.printUnitPrice, i.printDecimals ?? 2) },
+    { header: 'Amount', width: 0.15, align: 'right', value: (i) => money(i.printAmount) },
   ];
 
-  const totals: [string, string][] = [];
-  if (additional > 0) {
-    totals.push(['SUBTOTAL', `${currency} ${money(quotation.subtotal)}`]);
-    totals.push(['ADDITIONAL CHARGES', `${currency} ${money(additional)}`]);
-  }
-  totals.push(['TOTAL', `${currency} ${money(quotation.grandTotal)}`]);
+  // Single TOTAL row, as in the template.
+  const totals: [string, string][] = [['TOTAL', `${currency} ${money(documentTotal)}`]];
 
   const footerBlocks: FooterBlock[] = [];
   if (company?.quotationTerms) {
@@ -136,9 +191,9 @@ export function buildQuotationDocument(quotation: any, company: any) {
     portOfDischarge: null,
     vesselOrFlight: quotation.incoterm?.code ? `Incoterm : ${quotation.incoterm.code}` : null,
     columns,
-    items: quotation.items ?? [],
+    items: priced,
     totals,
-    amountInWordsLine: amountInWords(num(quotation.grandTotal), currency),
+    amountInWordsLine: amountInWords(documentTotal, currency),
     footerBlocks,
   });
 }

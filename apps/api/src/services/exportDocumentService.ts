@@ -65,6 +65,14 @@ function money(value: unknown, decimals = 2): string {
   });
 }
 
+/**
+ * Round to two decimals for ARITHMETIC. Distinct from money(), which returns a
+ * formatted string - mixing the two has broken this code before.
+ */
+function round2(value: unknown): number {
+  return Math.round((num(value) + Number.EPSILON) * 100) / 100;
+}
+
 /** Trim trailing zeros so quantities read 100 rather than 100.00. */
 function qty(value: unknown): string {
   const n = num(value);
@@ -584,4 +592,4 @@ export function generateExportDocument(input: ExportDocumentInput): Promise<Buff
   return done;
 }
 
-export { money, qty, formatDate, num };
+export { money, round2, qty, formatDate, num };
