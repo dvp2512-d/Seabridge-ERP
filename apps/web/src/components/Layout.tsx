@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
 import { cn, getInitials } from '@/lib/utils';
 import { can, type Permission } from '@/lib/permissions';
+import Logo from '@/components/ui/Logo';
 import {
   LayoutDashboard,
   Users,
@@ -17,7 +18,6 @@ import {
   X,
   ChevronDown,
   Building2,
-  Ship,
   ClipboardList,
   Anchor,
   Database,
@@ -89,7 +89,7 @@ export default function Layout({ children }: LayoutProps) {
         {/* Logo */}
         <div className="flex items-center justify-between h-16 px-4 border-b border-navy-800 flex-shrink-0">
           <Link to="/" className="flex items-center gap-2" onClick={() => setSidebarOpen(false)}>
-            <Ship className="w-8 h-8 text-gold-500" />
+            <Logo className="h-9" onDark alt="" />
             <div>
               <div className="text-lg font-bold text-white">SeaBridge</div>
               <div className="text-xs text-navy-300">Founder OS</div>

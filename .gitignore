@@ -100,3 +100,6 @@ desktop.ini
 # Ignore it so it can never be committed. Safe to delete the folder.
 /Seabridge-ERP/
 /seabridge-ERP/
+
+# Locally generated sample documents for eyeballing output
+/samples/

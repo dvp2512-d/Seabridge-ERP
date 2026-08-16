@@ -1,4 +1,6 @@
 import PDFDocument from 'pdfkit';
+import fs from 'fs';
+import path from 'path';
 
 // SeaBridge brand colors
 const COLORS = {
@@ -84,6 +86,62 @@ function ensureSpace(doc: Doc, yPos: number, needed = 20): number {
   return PAGE.continuationTop;
 }
 
+/**
+ * Company logo for PDF letterheads.
+ *
+ * Resolved once at module load. Kept optional on purpose: if the file is absent
+ * the documents fall back to the text wordmark rather than failing to generate,
+ * so a missing asset can never stop an invoice going out.
+ *
+ * Place the artwork at apps/api/assets/logo.png. The API Dockerfile copies
+ * apps/api wholesale, so it ships with the image automatically.
+ */
+const LOGO_PATH = path.resolve(__dirname, '../../assets/logo.png');
+const LOGO_EXISTS = (() => {
+  try {
+    return fs.existsSync(LOGO_PATH);
+  } catch {
+    return false;
+  }
+})();
+
+/**
+ * Draw the letterhead.
+ *
+ * The logo artwork is white on transparency, so it would be invisible on the
+ * white page. It is placed on a navy band across the top, which also gives the
+ * documents a consistent branded header. Both documents position their content
+ * below a fixed offset, so the header occupies the same height whether the logo
+ * loads or not.
+ */
+function drawLetterhead(doc: Doc) {
+  if (LOGO_EXISTS) {
+    try {
+      // Navy band behind the white logo, full bleed across the page width.
+      doc.fillColor(COLORS.navy).rect(0, 0, doc.page.width, 92).fill();
+      // Constrained by height so any source resolution scales predictably.
+      doc.image(LOGO_PATH, PAGE.left, 26, { height: 40 });
+      return;
+    } catch {
+      // Corrupt or unsupported image - fall through to the text wordmark.
+    }
+  }
+
+  doc
+    .fillColor(COLORS.navy)
+    .fontSize(24)
+    .text('SEABRIDGE EXPORTS', PAGE.left, 50)
+    .fontSize(10)
+    .fillColor(COLORS.gray)
+    .text('Excellence in Global Trade', PAGE.left, 78);
+}
+
+/**
+ * Colour for the document title. When the navy letterhead band is drawn the
+ * title sits on top of it, so navy-on-navy would be invisible.
+ */
+const HEADER_TEXT = LOGO_EXISTS ? '#ffffff' : COLORS.navy;
+
 /** Prisma returns Decimal objects; normalise before formatting. */
 function money(value: unknown, symbol: string): string {
   const n = Number(value ?? 0);
@@ -120,18 +178,13 @@ export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
 
   try {
     // Header
-    doc
-      .fillColor(COLORS.navy)
-      .fontSize(24)
-      .text('SEABRIDGE EXPORTS', PAGE.left, 50)
-      .fontSize(10)
-      .fillColor(COLORS.gray)
-      .text('Excellence in Global Trade', PAGE.left, 78);
+    drawLetterhead(doc);
+
 
     doc
-      .fillColor(COLORS.navy)
+      .fillColor(HEADER_TEXT)
       .fontSize(16)
-      .text('QUOTATION', 400, 50, { align: 'right' })
+      .text('QUOTATION', 400, 40, { align: 'right' })
       .fontSize(11)
       .text(quotation.quotationNumber, 400, 70, { align: 'right' });
 
@@ -346,18 +399,13 @@ export async function generateInvoicePDF(invoice: any): Promise<Buffer> {
 
   try {
     // Header
-    doc
-      .fillColor(COLORS.navy)
-      .fontSize(24)
-      .text('SEABRIDGE EXPORTS', PAGE.left, 50)
-      .fontSize(10)
-      .fillColor(COLORS.gray)
-      .text('Excellence in Global Trade', PAGE.left, 78);
+    drawLetterhead(doc);
+
 
     doc
-      .fillColor(COLORS.navy)
+      .fillColor(HEADER_TEXT)
       .fontSize(16)
-      .text(invoice.type === 'PROFORMA' ? 'PROFORMA INVOICE' : 'INVOICE', 380, 50, {
+      .text(invoice.type === 'PROFORMA' ? 'PROFORMA INVOICE' : 'INVOICE', 380, 40, {
         align: 'right',
         width: 182,
       })
