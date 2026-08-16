@@ -170,7 +170,56 @@ export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
     ]);
 
     const items = quotation.items ?? [];
-    items.forEach((item: any, index: number) => {
+
+    /**
+     * The buyer's document must reconcile: quantity x unit price = line total,
+     * and the line totals must add up to the grand total.
+     *
+     * Additional charges (CHA, freight, insurance...) are recorded against the
+     * quotation as a whole, so they are apportioned across the lines in
+     * proportion to line value and folded into the unit price. The unit price
+     * shown is therefore all-inclusive - the number the buyer actually pays per
+     * unit - which is what Grand Total / Quantity gives on a single-line quote.
+     */
+    const additionalCharges = (quotation.costs ?? []).reduce(
+      (sum: number, cost: any) => sum + Number(cost.amount ?? 0),
+      0
+    );
+    const lineSubtotal = items.reduce(
+      (sum: number, item: any) => sum + Number(item.totalPrice ?? 0),
+      0
+    );
+
+    let apportioned = 0;
+    const rows = items.map((item: any, index: number) => {
+      const lineTotal = Number(item.totalPrice ?? 0);
+      const qty = Number(item.quantity ?? 0);
+      const isLast = index === items.length - 1;
+
+      // Give the last line whatever is left so the apportionment is exact.
+      let share: number;
+      if (isLast) {
+        share = money(additionalCharges - apportioned);
+      } else {
+        share = money(
+          lineSubtotal > 0
+            ? additionalCharges * (lineTotal / lineSubtotal)
+            : additionalCharges / Math.max(items.length, 1)
+        );
+        apportioned += share;
+      }
+
+      // Round the unit price first, then derive the total from it, so the
+      // multiplication printed on the page is exactly right.
+      const unitPrice = qty > 0 ? money((lineTotal + share) / qty) : 0;
+      const total = qty > 0 ? money(unitPrice * qty) : money(lineTotal + share);
+
+      return { item, qty, unitPrice, total };
+    });
+
+    const documentTotal = money(rows.reduce((sum, r) => sum + r.total, 0));
+
+    rows.forEach(({ item, qty, unitPrice, total }, index) => {
       const startedNewPage = yPos + 20 > PAGE.contentBottom;
       yPos = ensureSpace(doc, yPos, 20);
       if (startedNewPage) {
@@ -190,10 +239,10 @@ export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
         .fillColor('#000')
         .fontSize(9)
         .text(item.product?.name || '', 55, yPos, { width: 190 })
-        .text(String(item.quantity ?? ''), 250, yPos)
+        .text(String(qty || ''), 250, yPos)
         .text(item.unit || 'KG', 300, yPos)
-        .text(money(item.unitPrice, symbol), 350, yPos)
-        .text(money(item.totalPrice, symbol), 450, yPos, {
+        .text(money(unitPrice, symbol), 350, yPos)
+        .text(money(total, symbol), 450, yPos, {
           align: 'right',
           width: 100,
         });
@@ -207,7 +256,7 @@ export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
     }
 
     // Totals
-    yPos = ensureSpace(doc, yPos, 100) + 10;
+    yPos = ensureSpace(doc, yPos, 90) + 10;
     doc
       .strokeColor(COLORS.gray)
       .lineWidth(0.5)
@@ -216,32 +265,23 @@ export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
       .stroke();
 
     yPos += 10;
-    doc.fillColor(COLORS.gray).fontSize(10).text('Subtotal:', 350, yPos);
-    doc
-      .fillColor('#000')
-      .text(money(quotation.subtotal, symbol), 450, yPos, { align: 'right', width: 100 });
-
-    // Additional charges (CHA, freight, insurance...) are part of what the buyer
-    // pays, so they must appear here. Without this line the subtotal and grand
-    // total would differ with nothing to explain the gap.
-    const additionalCharges = (quotation.costs ?? []).reduce(
-      (sum: number, cost: any) => sum + Number(cost.amount ?? 0),
-      0
-    );
-
-    if (additionalCharges > 0) {
-      yPos += 18;
-      doc.fillColor(COLORS.gray).fontSize(10).text('Additional Charges:', 350, yPos);
-      doc
-        .fillColor('#000')
-        .text(money(additionalCharges, symbol), 450, yPos, { align: 'right', width: 100 });
-    }
-
-    yPos += 20;
     doc.fillColor(COLORS.navy).fontSize(11).text('Grand Total:', 350, yPos);
     doc
       .fillColor(COLORS.navy)
-      .text(money(quotation.grandTotal, symbol), 450, yPos, { align: 'right', width: 100 });
+      .text(money(documentTotal, symbol), 450, yPos, { align: 'right', width: 100 });
+
+    if (additionalCharges > 0) {
+      yPos += 16;
+      doc
+        .fillColor(COLORS.gray)
+        .fontSize(8)
+        .text(
+          'Unit prices are inclusive of all applicable charges.',
+          350,
+          yPos,
+          { align: 'right', width: 200 }
+        );
+    }
 
     // Terms
     yPos = ensureSpace(doc, yPos + 40, 60);
