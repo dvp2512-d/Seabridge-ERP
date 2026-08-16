@@ -114,11 +114,13 @@ export default function QuotationDetail() {
   // relation as an array so take the first entry if it exists.
   const linkedOrder = quotation.orders?.[0] ?? null;
 
-  // Totals come straight from the stored line figures. Every cost component is
-  // already inside each line's price, so nothing is added again here.
+  // Calculate totals. Additional costs are recorded under total cost and billed
+  // on to the buyer, but they do not earn margin - margin is from line items only.
   const itemsTotal = quotation.items?.reduce((sum: number, item: any) => sum + Number(item.totalPrice || 0), 0) || 0;
-  const totalCost = quotation.items?.reduce((sum: number, item: any) => sum + Number(item.totalCost || 0), 0) || 0;
-  const margin = quotation.items?.reduce((sum: number, item: any) => sum + Number(item.margin || 0), 0) || 0;
+  const itemsCost = quotation.items?.reduce((sum: number, item: any) => sum + Number(item.totalCost || 0), 0) || 0;
+  const additionalCosts = quotation.costs?.reduce((sum: number, cost: any) => sum + Number(cost.amount || 0), 0) || 0;
+  const totalCost = itemsCost + additionalCosts;
+  const margin = itemsTotal - itemsCost;
   const marginPercent = itemsTotal > 0 ? (margin / itemsTotal) * 100 : 0;
 
   return (
@@ -217,7 +219,7 @@ export default function QuotationDetail() {
               <nav className="flex -mb-px">
                 {[
                   { key: 'items', label: 'Line Items', icon: Package },
-                  { key: 'costs', label: 'Pricing Breakdown', icon: DollarSign },
+                  { key: 'costs', label: 'Additional Costs', icon: DollarSign },
                 ].map((tab) => (
                   <button
                     key={tab.key}
@@ -290,102 +292,41 @@ export default function QuotationDetail() {
               </div>
             )}
 
-            {/* Pricing breakdown - internal only, never shown to the buyer */}
+            {/* Costs Tab */}
             {activeTab === 'costs' && (
-              <div className="card-body space-y-6">
-                <p className="text-sm text-gray-500">
-                  How each line price was built. This breakdown is internal and does not
-                  appear on the PDF sent to the buyer.
-                </p>
-
-                {quotation.items?.map((item: any) => {
-                  const qty = Number(item.quantity) || 0;
-                  return (
-                    <div key={item.id} className="border rounded-lg overflow-hidden">
-                      <div className="bg-gray-50 px-4 py-2 flex items-center justify-between">
-                        <div>
-                          <span className="font-medium">{item.product?.name}</span>
-                          <span className="text-sm text-gray-500 ml-2">
-                            {qty} {item.unit}
-                          </span>
-                        </div>
-                        <span className="text-sm font-semibold">
-                          {formatCurrency(item.totalPrice, currency)}
-                        </span>
-                      </div>
-                      <table className="table">
-                        <thead>
-                          <tr>
-                            <th>Component</th>
-                            <th>Basis</th>
-                            <th className="text-right">Value</th>
-                            <th className="text-right">Amount</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {item.costs?.length > 0 ? (
-                            item.costs.map((component: any) => (
-                              <tr key={component.id}>
-                                <td>
-                                  {component.name}
-                                  {component.isMargin && (
-                                    <span className="badge badge-success ml-2 text-xs">margin</span>
-                                  )}
-                                </td>
-                                <td className="text-gray-500 text-xs">
-                                  {component.calcType === 'PER_UNIT' ? 'per unit'
-                                    : component.calcType === 'PERCENT_OF_COST' ? '% of cost'
-                                    : 'fixed'}
-                                </td>
-                                <td className="text-right text-gray-600">
-                                  {component.calcType === 'PERCENT_OF_COST'
-                                    ? `${Number(component.value)}%`
-                                    : formatCurrency(component.value, currency)}
-                                </td>
-                                <td className={cn(
-                                  'text-right font-medium',
-                                  component.isMargin ? 'text-green-700' : ''
-                                )}>
-                                  {formatCurrency(component.amount, currency)}
-                                </td>
-                              </tr>
-                            ))
-                          ) : (
-                            <tr>
-                              <td colSpan={4} className="text-center py-4 text-gray-500 text-sm">
-                                No component breakdown stored for this line.
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                        <tfoot>
-                          <tr className="bg-gray-50">
-                            <td colSpan={3} className="text-right text-gray-500">Cost</td>
-                            <td className="text-right">{formatCurrency(item.totalCost, currency)}</td>
-                          </tr>
-                          <tr className="bg-gray-50">
-                            <td colSpan={3} className="text-right text-gray-500">Margin</td>
-                            <td className="text-right text-green-700">
-                              {formatCurrency(item.margin, currency)}
-                            </td>
-                          </tr>
-                          <tr className="bg-navy-50">
-                            <td colSpan={3} className="text-right font-semibold">
-                              Line total ÷ {qty} {item.unit} =
-                            </td>
-                            <td className="text-right font-bold">
-                              {formatCurrency(item.unitPrice, currency)}/unit
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  );
-                })}
-
-                {(!quotation.items || quotation.items.length === 0) && (
-                  <p className="text-center py-8 text-gray-500">No line items.</p>
-                )}
+              <div className="overflow-x-auto">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Type</th>
+                      <th>Description</th>
+                      <th className="text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {quotation.costs?.length > 0 ? quotation.costs.map((cost: any, idx: number) => (
+                      <tr key={idx}>
+                        <td><span className="badge badge-navy">{cost.costType}</span></td>
+                        <td>{cost.description}</td>
+                        <td className="text-right font-medium">{formatCurrency(cost.amount, cost.currency)}</td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan={3} className="text-center py-8 text-gray-500">
+                          No additional costs recorded
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                  {quotation.costs?.length > 0 && (
+                    <tfoot>
+                      <tr className="bg-gray-50">
+                        <td colSpan={2} className="text-right font-semibold">Total Additional Costs</td>
+                        <td className="text-right font-bold">{formatCurrency(additionalCosts, currency)}</td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
               </div>
             )}
 
@@ -420,6 +361,8 @@ export default function QuotationDetail() {
           {/* Costing Summary */}
           <CostingSummaryCard
             itemsTotal={itemsTotal}
+            itemsCost={itemsCost}
+            additionalCosts={additionalCosts}
             totalCost={totalCost}
             margin={margin}
             marginPercent={marginPercent}
@@ -460,12 +403,16 @@ export default function QuotationDetail() {
 // Costing Summary Card Component
 function CostingSummaryCard({
   itemsTotal,
+  itemsCost,
+  additionalCosts,
   totalCost,
   margin,
   marginPercent,
   currency,
 }: {
   itemsTotal: number;
+  itemsCost: number;
+  additionalCosts: number;
   totalCost: number;
   margin: number;
   marginPercent: number;
@@ -481,9 +428,19 @@ function CostingSummaryCard({
       </div>
       <div className="card-body space-y-3">
         <div className="flex justify-between text-sm">
-          <span className="text-gray-500">Grand Total (buyer pays)</span>
+          <span className="text-gray-500">Items Total</span>
           <span className="font-semibold">{formatCurrency(itemsTotal, currency)}</span>
         </div>
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-500">Items Cost</span>
+          <span>{formatCurrency(itemsCost, currency)}</span>
+        </div>
+        {additionalCosts > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-500">Additional Costs</span>
+            <span>{formatCurrency(additionalCosts, currency)}</span>
+          </div>
+        )}
         <hr />
         <div className="flex justify-between text-sm">
           <span className="text-gray-500">Total Cost</span>

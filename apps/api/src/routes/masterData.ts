@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
-import { ValidationError, NotFoundError } from '../middleware/errorHandler';
+import { ValidationError } from '../middleware/errorHandler';
 
 const router: Router = Router();
 
@@ -286,108 +286,6 @@ router.put('/product-categories/:id', can('MASTER_MANAGE'), async (req, res, nex
 // ============================================
 // DROPDOWN OPTIONS (for forms)
 // ============================================
-
-// ============================================
-// PRICING PARAMETERS
-// ============================================
-// The components that build up a quotation line price. Editing these never
-// changes quotations that already exist - each line item keeps its own snapshot.
-
-router.get('/pricing-parameters', can('MASTER_VIEW'), async (req, res, next) => {
-  try {
-    const { includeInactive } = req.query;
-    const where = includeInactive === 'true' ? {} : { isActive: true };
-
-    const parameters = await prisma.pricingParameter.findMany({
-      where,
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-    });
-    res.json({ success: true, data: parameters });
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.post('/pricing-parameters', can('MASTER_MANAGE'), async (req, res, next) => {
-  try {
-    const schema = z.object({
-      name: z.string().min(1),
-      description: z.string().optional(),
-      sortOrder: z.number().int().optional(),
-      calcType: z.enum(['FIXED', 'PER_UNIT', 'PERCENT_OF_COST', 'PERCENT_OF_PRODUCT']),
-      defaultValue: z.number().finite().optional().nullable(),
-      isMargin: z.boolean().optional(),
-      isProductPrice: z.boolean().optional(),
-    });
-    const validation = schema.safeParse(req.body);
-    if (!validation.success) throw new ValidationError(validation.error.errors);
-
-    // Append to the end unless an explicit position was given.
-    let sortOrder = validation.data.sortOrder;
-    if (sortOrder === undefined) {
-      const last = await prisma.pricingParameter.findFirst({
-        orderBy: { sortOrder: 'desc' },
-        select: { sortOrder: true },
-      });
-      sortOrder = (last?.sortOrder ?? 0) + 1;
-    }
-
-    const parameter = await prisma.pricingParameter.create({
-      data: { ...validation.data, sortOrder },
-    });
-    res.status(201).json({ success: true, data: parameter });
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.put('/pricing-parameters/:id', can('MASTER_MANAGE'), async (req, res, next) => {
-  try {
-    const schema = z.object({
-      name: z.string().min(1).optional(),
-      description: z.string().optional(),
-      sortOrder: z.number().int().optional(),
-      calcType: z.enum(['FIXED', 'PER_UNIT', 'PERCENT_OF_COST', 'PERCENT_OF_PRODUCT']).optional(),
-      defaultValue: z.number().finite().optional().nullable(),
-      isMargin: z.boolean().optional(),
-      isProductPrice: z.boolean().optional(),
-      isActive: z.boolean().optional(),
-    });
-    const validation = schema.safeParse(req.body);
-    if (!validation.success) throw new ValidationError(validation.error.errors);
-
-    const existing = await prisma.pricingParameter.findUnique({
-      where: { id: req.params.id },
-      select: { id: true },
-    });
-    if (!existing) throw new NotFoundError('Pricing parameter');
-
-    const parameter = await prisma.pricingParameter.update({
-      where: { id: req.params.id },
-      data: validation.data,
-    });
-    res.json({ success: true, data: parameter });
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.delete('/pricing-parameters/:id', can('MASTER_MANAGE'), async (req, res, next) => {
-  try {
-    const existing = await prisma.pricingParameter.findUnique({
-      where: { id: req.params.id },
-      select: { id: true },
-    });
-    if (!existing) throw new NotFoundError('Pricing parameter');
-
-    // Hard delete is safe: quotation line items store their own copy of the
-    // component, so removing the master row cannot alter past quotations.
-    await prisma.pricingParameter.delete({ where: { id: req.params.id } });
-    res.json({ success: true, message: 'Pricing parameter deleted' });
-  } catch (error) {
-    next(error);
-  }
-});
 
 router.get('/dropdowns', can('MASTER_VIEW'), async (req, res, next) => {
   try {

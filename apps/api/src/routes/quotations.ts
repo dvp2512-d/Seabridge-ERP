@@ -3,10 +3,9 @@ import { z } from 'zod';
 import { prisma, Prisma, InquiryStage } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
-import { generateCode } from '../utils/helpers';
+import { generateCode, calculateMarginPercent } from '../utils/helpers';
 import { generateQuotationPDF } from '../services/pdfService';
 import { createOrderFromQuotation } from '../services/orderService';
-import { calculateLinePricing, calculateQuotationTotals } from '../services/pricingService';
 
 const router: Router = Router();
 
@@ -81,9 +80,8 @@ router.get('/:id', can('SALES_VIEW'), async (req, res, next) => {
         inquiry: { select: { id: true, inquiryNumber: true } },
         currency: true,
         incoterm: true,
-        items: {
-          include: { product: true, costs: { orderBy: { sortOrder: 'asc' } } },
-        },
+        items: { include: { product: true } },
+        costs: true,
         // Needed so the UI can tell whether this quotation is already an order.
         orders: { select: { id: true, orderNumber: true, status: true } },
       },
@@ -99,16 +97,6 @@ router.get('/:id', can('SALES_VIEW'), async (req, res, next) => {
 // Create quotation
 router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
   try {
-    const componentSchema = z.object({
-      parameterId: z.string().optional().nullable(),
-      name: z.string().min(1),
-      calcType: z.enum(['FIXED', 'PER_UNIT', 'PERCENT_OF_COST', 'PERCENT_OF_PRODUCT']),
-      isMargin: z.boolean().optional(),
-      isProductPrice: z.boolean().optional(),
-      sortOrder: z.number().int().optional(),
-      value: z.number().finite(),
-    });
-
     const schema = z.object({
       inquiryId: z.string().optional(),
       buyerId: z.string().min(1),
@@ -123,75 +111,73 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
         productId: z.string().min(1),
         quantity: z.number().finite().positive(),
         unit: z.string().optional(),
+        unitCost: z.number().finite().min(0),
+        unitPrice: z.number().finite().positive(),
         specifications: z.string().optional(),
-        // The price is derived from these; the client never sets it directly.
-        components: z.array(componentSchema).min(1),
       })).min(1),
+      costs: z.array(z.object({
+        costType: z.string().min(1),
+        description: z.string().min(1),
+        amount: z.number().finite().min(0),
+        currency: z.string().optional(),
+      })).optional(),
     });
 
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
-    const { items, ...data } = validation.data;
+    const { items, costs, ...data } = validation.data;
     const quotationNumber = await generateCode('QUOTATION', 'QT');
 
-    // Price every line server-side. Whatever the browser calculated for its
-    // live preview is ignored - these figures are the ones that get stored.
-    const pricedLines = items.map((item) => {
-      const pricing = calculateLinePricing(item.quantity, item.components);
-      return { item, pricing };
+    // Calculate totals
+    let subtotal = 0;
+    let itemsCost = 0;
+    const processedItems = items.map(item => {
+      const itemTotalCost = item.unitCost * item.quantity;
+      const itemTotalPrice = item.unitPrice * item.quantity;
+      const margin = itemTotalPrice - itemTotalCost;
+      const marginPercent = calculateMarginPercent(itemTotalCost, itemTotalPrice);
+
+      subtotal += itemTotalPrice;
+      itemsCost += itemTotalCost;
+
+      return {
+        ...item,
+        totalCost: itemTotalCost,
+        totalPrice: itemTotalPrice,
+        margin,
+        marginPercent,
+      };
     });
 
-    const totals = calculateQuotationTotals(pricedLines.map((l) => l.pricing));
+    const additionalCosts = costs?.reduce((sum, c) => sum + c.amount, 0) || 0;
+
+    // Additional costs (CHA, transport, insurance...) are recorded under total
+    // cost and billed on to the buyer, but they do NOT earn margin. Margin comes
+    // from the line items only, so adding a shipment cost never reduces it.
+    const totalCost = itemsCost + additionalCosts;
+    const totalMargin = subtotal - itemsCost;
+    const grandTotal = subtotal + additionalCosts;
+    const marginPercent = calculateMarginPercent(itemsCost, subtotal);
 
     const quotation = await prisma.quotation.create({
       data: {
         ...data,
         quotationNumber,
-        subtotal: totals.subtotal,
-        totalCost: totals.totalCost,
-        totalMargin: totals.totalMargin,
-        marginPercent: totals.marginPercent,
-        grandTotal: totals.grandTotal,
-        items: {
-          create: pricedLines.map(({ item, pricing }) => ({
-            productId: item.productId,
-            quantity: item.quantity,
-            unit: item.unit,
-            specifications: item.specifications,
-            unitCost: pricing.unitCost,
-            unitPrice: pricing.unitPrice,
-            totalCost: pricing.totalCost,
-            totalPrice: pricing.totalPrice,
-            margin: pricing.margin,
-            marginPercent: pricing.marginPercent,
-            // Snapshot the components so editing the master parameter list
-            // later never rewrites a quotation that has already been sent.
-            costs: {
-              create: pricing.components.map((component, index) => ({
-                parameterId: component.parameterId ?? null,
-                name: component.name,
-                calcType: component.calcType,
-                isMargin: component.isMargin,
-                isProductPrice: component.isProductPrice,
-                sortOrder: component.sortOrder ?? index,
-                value: component.value,
-                amount: component.amount,
-              })),
-            },
-          })),
-        },
+        subtotal,
+        totalCost,
+        totalMargin,
+        marginPercent,
+        grandTotal,
+        items: { create: processedItems },
+        costs: costs ? { create: costs } : undefined,
       },
       include: {
         buyer: true,
         currency: true,
         incoterm: true,
-        items: {
-          include: {
-            product: true,
-            costs: { orderBy: { sortOrder: 'asc' } },
-          },
-        },
+        items: { include: { product: true } },
+        costs: true,
       },
     });
 
@@ -351,9 +337,8 @@ router.get('/:id/pdf', can('SALES_VIEW'), async (req, res, next) => {
         buyer: { include: { country: true, contacts: { where: { isPrimary: true } } } },
         currency: true,
         incoterm: true,
-        items: {
-          include: { product: true, costs: { orderBy: { sortOrder: 'asc' } } },
-        },
+        items: { include: { product: true } },
+        costs: true,
       },
     });
 
