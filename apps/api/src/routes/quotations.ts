@@ -80,6 +80,8 @@ router.get('/:id', can('SALES_VIEW'), async (req, res, next) => {
         inquiry: { select: { id: true, inquiryNumber: true } },
         currency: true,
         incoterm: true,
+        portOfLoading: { include: { country: true } },
+        portOfDischarge: { include: { country: true } },
         items: { include: { product: true } },
         costs: true,
         // Needed so the UI can tell whether this quotation is already an order.
@@ -103,6 +105,11 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
       currencyId: z.string().min(1),
       incotermId: z.string().min(1),
       validUntil: z.string().transform(s => new Date(s)),
+      // Shipping details
+      dispatchMethod: z.string().optional(),
+      shipmentType: z.string().optional(),
+      portOfLoadingId: z.string().optional(),
+      portOfDischargeId: z.string().optional(),
       deliveryTerms: z.string().optional(),
       paymentTerms: z.string().optional(),
       notes: z.string().optional(),
@@ -201,6 +208,11 @@ router.put('/:id', can('SALES_MANAGE'), async (req, res, next) => {
     const schema = z.object({
       status: z.enum(['DRAFT', 'SENT', 'REVISED', 'ACCEPTED', 'REJECTED', 'EXPIRED']).optional(),
       validUntil: z.string().transform(s => new Date(s)).optional(),
+      // Shipping details
+      dispatchMethod: z.string().nullable().optional(),
+      shipmentType: z.string().nullable().optional(),
+      portOfLoadingId: z.string().nullable().optional(),
+      portOfDischargeId: z.string().nullable().optional(),
       deliveryTerms: z.string().optional(),
       paymentTerms: z.string().optional(),
       notes: z.string().optional(),
@@ -344,6 +356,8 @@ router.get('/:id/pdf', can('SALES_VIEW'), async (req, res, next) => {
         buyer: { include: { country: true, contacts: { where: { isPrimary: true } } } },
         currency: true,
         incoterm: true,
+        portOfLoading: { include: { country: true } },
+        portOfDischarge: { include: { country: true } },
         items: { include: { product: true } },
         costs: true,
       },

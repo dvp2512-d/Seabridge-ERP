@@ -99,6 +99,8 @@ model Port {
   country              Country    @relation(fields: [countryId], references: [id])
   shipmentsOrigin      Shipment[] @relation("ShipmentOriginPort")
   shipmentsDestination Shipment[] @relation("ShipmentDestinationPort")
+  quotationsLoading    Quotation[] @relation("QuotationPortOfLoading")
+  quotationsDischarge  Quotation[] @relation("QuotationPortOfDischarge")
 
   @@map("ports")
 }
@@ -108,17 +110,69 @@ model Currency {
   code         String   @unique // ISO 4217
   name         String
   symbol       String
+  /// DEPRECATED: superseded by the dated ExchangeRate history. Kept so existing
+  /// rows are not lost; do not read this for any calculation.
   exchangeRate Decimal  @default(1) @map("exchange_rate") @db.Decimal(10, 4)
+  /// True for the company's own reporting currency (INR for an Indian exporter).
+  /// Aggregates convert into this rather than assuming a hardcoded USD.
+  isBaseCurrency Boolean @default(false) @map("is_base_currency")
   isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   // Relations
-  buyers     Buyer[]
-  quotations Quotation[]
-  invoices   Invoice[]
+  buyers        Buyer[]
+  quotations    Quotation[]
+  invoices      Invoice[]
+  inquiries     Inquiry[]
+  exchangeRates ExchangeRate[]
 
   @@map("currencies")
+}
+
+/// A notified exchange rate, effective from a given date.
+///
+/// CBIC notifies rates for 22 currencies twice a month (1st and 3rd Thursday),
+/// effective from midnight of the following day, and publishes a separate rate
+/// for imports and for exports. Customs values a shipping bill using the rate
+/// in force on the relevant date, so rates are stored as a dated history rather
+/// than a single mutable number - a document issued last month must keep the
+/// rate it was issued under.
+///
+/// No rate is ever assumed. If none is on record for a date, callers are
+/// expected to fail rather than fall back to 1.0, which would silently
+/// misstate a customs value.
+model ExchangeRate {
+  id         String @id @default(cuid())
+  currencyId String @map("currency_id")
+
+  /// Rupees per one unit of the foreign currency, for imported goods
+  importRate Decimal @map("import_rate") @db.Decimal(12, 4)
+  /// Rupees per one unit of the foreign currency, for exported goods.
+  /// This is the one that applies to our shipping bills.
+  exportRate Decimal @map("export_rate") @db.Decimal(12, 4)
+
+  /// First date this rate applies to, inclusive
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  /// Last date this rate applies to, inclusive. Null means still in force.
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+
+  /// CBIC | RBI | MARKET | MANUAL - where the figure came from
+  source String @default("CBIC")
+  /// e.g. "Notification No. 55/2026-Customs (N.T.)"
+  notificationRef String? @map("notification_ref")
+  notes           String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  currency Currency @relation(fields: [currencyId], references: [id])
+
+  /// One rate per currency per source per start date
+  @@unique([currencyId, source, effectiveFrom])
+  @@index([currencyId, effectiveFrom])
+  @@index([effectiveFrom])
+  @@map("exchange_rates")
 }
 
 model Incoterm {
@@ -451,6 +505,9 @@ model Inquiry {
   priority        InquiryPriority @default(MEDIUM)
   source          String?         // EMAIL, PHONE, WEBSITE, EXHIBITION
   expectedValue   Decimal?        @map("expected_value") @db.Decimal(15, 2)
+  /// Currency of expectedValue and the items' target prices. Without this the
+  /// pipeline total cannot be converted or even interpreted.
+  currencyId      String?         @map("currency_id")
   expectedDate    DateTime?       @map("expected_date")
   requirements    String?
   notes           String?
@@ -463,6 +520,7 @@ model Inquiry {
 
   // Relations
   buyer       Buyer         @relation(fields: [buyerId], references: [id])
+  currency    Currency?     @relation(fields: [currencyId], references: [id])
   salesOwner  User          @relation("InquirySalesOwner", fields: [salesOwnerId], references: [id])
   createdBy   User          @relation("InquiryCreatedBy", fields: [createdById], references: [id])
   items       InquiryItem[]
@@ -532,6 +590,13 @@ model Quotation {
   incotermId       String          @map("incoterm_id")
   status           QuotationStatus @default(DRAFT)
   validUntil       DateTime        @map("valid_until")
+  /// Shipping details - these flow to the order when quotation is converted
+  /// dispatchMethod: Sea / Air / Road / Rail / Courier
+  dispatchMethod       String?  @map("dispatch_method")
+  /// shipmentType: FCL / LCL / Sample Shipment / Bulk
+  shipmentType         String?  @map("shipment_type")
+  portOfLoadingId      String?  @map("port_of_loading_id")
+  portOfDischargeId    String?  @map("port_of_discharge_id")
   deliveryTerms    String?         @map("delivery_terms")
   paymentTerms     String?         @map("payment_terms")
   subtotal         Decimal         @default(0) @db.Decimal(15, 2)
@@ -548,13 +613,15 @@ model Quotation {
   updatedAt        DateTime        @updatedAt @map("updated_at")
 
   // Relations
-  inquiry  Inquiry?        @relation(fields: [inquiryId], references: [id])
-  buyer    Buyer           @relation(fields: [buyerId], references: [id])
-  currency Currency        @relation(fields: [currencyId], references: [id])
-  incoterm Incoterm        @relation(fields: [incotermId], references: [id])
-  items    QuotationItem[]
-  costs    QuotationCost[]
-  orders   ExportOrder[]
+  inquiry          Inquiry?        @relation(fields: [inquiryId], references: [id])
+  buyer            Buyer           @relation(fields: [buyerId], references: [id])
+  currency         Currency        @relation(fields: [currencyId], references: [id])
+  incoterm         Incoterm        @relation(fields: [incotermId], references: [id])
+  portOfLoading    Port?           @relation("QuotationPortOfLoading", fields: [portOfLoadingId], references: [id])
+  portOfDischarge  Port?           @relation("QuotationPortOfDischarge", fields: [portOfDischargeId], references: [id])
+  items            QuotationItem[]
+  costs            QuotationCost[]
+  orders           ExportOrder[]
 
   @@map("quotations")
 }
@@ -781,7 +848,12 @@ model Invoice {
   totalAmount    Decimal       @map("total_amount") @db.Decimal(15, 2)
   paidAmount     Decimal       @default(0) @map("paid_amount") @db.Decimal(15, 2)
   balanceAmount  Decimal       @map("balance_amount") @db.Decimal(15, 2)
+  /// CBIC export rate in force on the invoice date, in rupees per unit of the
+  /// invoice currency. Stamped at issue so the document stays reproducible even
+  /// after a new notification supersedes the rate.
   exchangeRate   Decimal       @default(1) @map("exchange_rate") @db.Decimal(10, 4)
+  exchangeRateRef String?      @map("exchange_rate_ref")
+  exchangeRateDate DateTime?   @map("exchange_rate_date") @db.Date
   notes          String?
   termsConditions String?      @map("terms_conditions")
   pdfPath        String?       @map("pdf_path")

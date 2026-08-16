@@ -543,6 +543,42 @@ function QuickInfoCard({ quotation }: { quotation: any }) {
             </div>
           </div>
         )}
+        {quotation.dispatchMethod && (
+          <div className="flex items-center gap-3">
+            <Package className="w-4 h-4 text-gray-400" />
+            <div>
+              <div className="text-xs text-gray-500">Method of Dispatch</div>
+              <div className="font-medium">{quotation.dispatchMethod}</div>
+            </div>
+          </div>
+        )}
+        {quotation.shipmentType && (
+          <div className="flex items-center gap-3">
+            <Package className="w-4 h-4 text-gray-400" />
+            <div>
+              <div className="text-xs text-gray-500">Type of Shipment</div>
+              <div className="font-medium">{quotation.shipmentType}</div>
+            </div>
+          </div>
+        )}
+        {quotation.portOfLoading && (
+          <div className="flex items-center gap-3">
+            <MapPin className="w-4 h-4 text-gray-400" />
+            <div>
+              <div className="text-xs text-gray-500">Port of Loading</div>
+              <div className="font-medium">{quotation.portOfLoading.name} ({quotation.portOfLoading.code})</div>
+            </div>
+          </div>
+        )}
+        {quotation.portOfDischarge && (
+          <div className="flex items-center gap-3">
+            <MapPin className="w-4 h-4 text-gray-400" />
+            <div>
+              <div className="text-xs text-gray-500">Port of Discharge</div>
+              <div className="font-medium">{quotation.portOfDischarge.name} ({quotation.portOfDischarge.code})</div>
+            </div>
+          </div>
+        )}
         {quotation.validUntil && new Date(quotation.validUntil) < new Date() && (
           <div className="flex items-center gap-3">
             <Clock className="w-4 h-4 text-red-400" />

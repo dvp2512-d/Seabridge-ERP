@@ -58,6 +58,11 @@ export default function NewQuotation() {
     date.setDate(date.getDate() + 30);
     return date.toISOString().split('T')[0];
   });
+  // Shipping details
+  const [dispatchMethod, setDispatchMethod] = useState('');
+  const [shipmentType, setShipmentType] = useState('');
+  const [portOfLoadingId, setPortOfLoadingId] = useState('');
+  const [portOfDischargeId, setPortOfDischargeId] = useState('');
   const [paymentTerms, setPaymentTerms] = useState('');
   const [deliveryTerms, setDeliveryTerms] = useState('');
   const [notes, setNotes] = useState('');
@@ -79,6 +84,11 @@ export default function NewQuotation() {
   const { data: dropdowns } = useQuery({
     queryKey: ['dropdowns'],
     queryFn: () => masterApi.getDropdowns(),
+  });
+
+  const { data: portsData } = useQuery({
+    queryKey: ['ports'],
+    queryFn: () => masterApi.getPorts({ limit: 500 }),
   });
 
   const { data: buyersData } = useQuery({
@@ -189,6 +199,11 @@ export default function NewQuotation() {
       currencyId,
       incotermId,
       validUntil,
+      // Shipping details
+      dispatchMethod: dispatchMethod || undefined,
+      shipmentType: shipmentType || undefined,
+      portOfLoadingId: portOfLoadingId || undefined,
+      portOfDischargeId: portOfDischargeId || undefined,
       paymentTerms,
       deliveryTerms,
       notes,
@@ -281,6 +296,51 @@ export default function NewQuotation() {
                   type="date"
                   value={validUntil}
                   onChange={(e) => setValidUntil(e.target.value)}
+                />
+                <SelectField
+                  label="Method of Dispatch"
+                  value={dispatchMethod}
+                  onChange={(e) => setDispatchMethod(e.target.value)}
+                  options={[
+                    { value: 'Sea', label: 'Sea' },
+                    { value: 'Air', label: 'Air' },
+                    { value: 'Road', label: 'Road' },
+                    { value: 'Rail', label: 'Rail' },
+                    { value: 'Courier', label: 'Courier' },
+                  ]}
+                  placeholder="Select Dispatch Method"
+                />
+                <SelectField
+                  label="Type of Shipment"
+                  value={shipmentType}
+                  onChange={(e) => setShipmentType(e.target.value)}
+                  options={[
+                    { value: 'FCL', label: 'FCL (Full Container Load)' },
+                    { value: 'LCL', label: 'LCL (Less than Container Load)' },
+                    { value: 'Bulk', label: 'Bulk' },
+                    { value: 'Sample Shipment', label: 'Sample Shipment' },
+                  ]}
+                  placeholder="Select Shipment Type"
+                />
+                <SelectField
+                  label="Port of Loading"
+                  value={portOfLoadingId}
+                  onChange={(e) => setPortOfLoadingId(e.target.value)}
+                  options={(portsData?.data?.data || []).map((p: any) => ({
+                    value: p.id,
+                    label: `${p.name} (${p.code})${p.country ? ` - ${p.country.name}` : ''}`,
+                  }))}
+                  placeholder="Select Port of Loading"
+                />
+                <SelectField
+                  label="Port of Discharge"
+                  value={portOfDischargeId}
+                  onChange={(e) => setPortOfDischargeId(e.target.value)}
+                  options={(portsData?.data?.data || []).map((p: any) => ({
+                    value: p.id,
+                    label: `${p.name} (${p.code})${p.country ? ` - ${p.country.name}` : ''}`,
+                  }))}
+                  placeholder="Select Port of Discharge"
                 />
                 <FormField
                   label="Payment Terms"

@@ -76,8 +76,9 @@ export async function createOrderFromQuotation(
         poNumber: options.poNumber || null,
         orderDate: options.orderDate ?? new Date(),
         expectedDate: options.expectedDate ?? null,
-        dispatchMethod: options.dispatchMethod ?? null,
-        shipmentType: options.shipmentType ?? null,
+        // Copy shipping details from quotation, allow override from options
+        dispatchMethod: options.dispatchMethod ?? quotation.dispatchMethod ?? null,
+        shipmentType: options.shipmentType ?? quotation.shipmentType ?? null,
         variationPercent: options.variationPercent ?? null,
         totalValue: quotation.grandTotal,
         // Carry the quotation's currency across instead of defaulting to USD.
