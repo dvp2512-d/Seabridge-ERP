@@ -1,0 +1,1025 @@
+// SeaBridge Founder OS - Database Schema
+// PostgreSQL with Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// AUTHENTICATION & USERS
+// ============================================
+
+enum UserRole {
+  FOUNDER
+  SALES
+  OPERATIONS
+  FINANCE
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  firstName    String     @map("first_name")
+  lastName     String     @map("last_name")
+  role         UserRole   @default(SALES)
+  status       UserStatus @default(ACTIVE)
+  phone        String?
+  avatar       String?
+  lastLoginAt  DateTime?  @map("last_login_at")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  // Relations
+  employee         Employee?
+  createdInquiries Inquiry[]       @relation("InquiryCreatedBy")
+  ownedInquiries   Inquiry[]       @relation("InquirySalesOwner")
+  tasks            Task[]          @relation("TaskAssignee")
+  createdTasks     Task[]          @relation("TaskCreatedBy")
+  communications   Communication[]
+  auditLogs        AuditLog[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("sessions")
+}
+
+// ============================================
+// MASTER DATA - GEOGRAPHY
+// ============================================
+
+model Country {
+  id        String   @id @default(cuid())
+  code      String   @unique // ISO 3166-1 alpha-2
+  name      String
+  region    String?
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  buyers     Buyer[]
+  ports      Port[]
+  suppliers  Supplier[]
+
+  @@map("countries")
+}
+
+model Port {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  countryId String   @map("country_id")
+  type      String   @default("SEA") // SEA, AIR, LAND
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  country              Country    @relation(fields: [countryId], references: [id])
+  shipmentsOrigin      Shipment[] @relation("ShipmentOriginPort")
+  shipmentsDestination Shipment[] @relation("ShipmentDestinationPort")
+
+  @@map("ports")
+}
+
+model Currency {
+  id           String   @id @default(cuid())
+  code         String   @unique // ISO 4217
+  name         String
+  symbol       String
+  exchangeRate Decimal  @default(1) @map("exchange_rate") @db.Decimal(10, 4)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  buyers     Buyer[]
+  quotations Quotation[]
+  invoices   Invoice[]
+
+  @@map("currencies")
+}
+
+model Incoterm {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  quotations Quotation[]
+  orders     ExportOrder[]
+
+  @@map("incoterms")
+}
+
+
+
+// ============================================
+// MASTER DATA - PRODUCTS
+// ============================================
+
+model ProductCategory {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  products Product[]
+
+  @@map("product_categories")
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  code        String   @unique
+  name        String
+  description String?
+  categoryId  String   @map("category_id")
+  hsnCode     String?  @map("hsn_code")
+  unit        String   @default("KG") // KG, MT, PCS, CTN, etc.
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  category       ProductCategory  @relation(fields: [categoryId], references: [id])
+  supplierPrices SupplierPrice[]
+  inquiryItems   InquiryItem[]
+  quotationItems QuotationItem[]
+  orderItems     OrderItem[]
+
+  @@map("products")
+}
+
+
+
+// ============================================
+// MASTER DATA - SUPPLIERS & SERVICE PROVIDERS
+// ============================================
+
+model Supplier {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  name          String
+  contactPerson String?  @map("contact_person")
+  email         String?
+  phone         String?
+  address       String?
+  countryId     String?  @map("country_id")
+  gstNumber     String?  @map("gst_number")
+  panNumber     String?  @map("pan_number")
+  bankDetails   String?  @map("bank_details")
+  paymentTerms  String?  @map("payment_terms")
+  rating        Int?     @default(0) // 1-5 rating
+  notes         String?
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  country        Country?        @relation(fields: [countryId], references: [id])
+  supplierPrices SupplierPrice[]
+  procurements   Procurement[]
+
+  @@map("suppliers")
+}
+
+model SupplierPrice {
+  id          String   @id @default(cuid())
+  supplierId  String   @map("supplier_id")
+  productId   String   @map("product_id")
+  price       Decimal  @db.Decimal(12, 2)
+  currency    String   @default("INR")
+  unit        String   @default("KG")
+  minQuantity Decimal? @map("min_quantity") @db.Decimal(12, 2)
+  validFrom   DateTime @map("valid_from")
+  validTo     DateTime? @map("valid_to")
+  notes       String?
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  supplier Supplier @relation(fields: [supplierId], references: [id])
+  product  Product  @relation(fields: [productId], references: [id])
+
+  @@map("supplier_prices")
+}
+
+model CHA {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  name          String
+  contactPerson String?  @map("contact_person")
+  email         String?
+  phone         String?
+  address       String?
+  licenseNumber String?  @map("license_number")
+  rating        Int?     @default(0)
+  notes         String?
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  chaRates  CHARate[]
+  shipments Shipment[]
+
+  @@map("cha_agents")
+}
+
+model CHARate {
+  id            String   @id @default(cuid())
+  chaId         String   @map("cha_id")
+  serviceType   String   @map("service_type") // CUSTOMS_CLEARANCE, DOCUMENTATION, etc.
+  rate          Decimal  @db.Decimal(12, 2)
+  currency      String   @default("INR")
+  containerType String?  @map("container_type") // 20FT, 40FT, LCL
+  validFrom     DateTime @map("valid_from")
+  validTo       DateTime? @map("valid_to")
+  notes         String?
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  cha CHA @relation(fields: [chaId], references: [id])
+
+  @@map("cha_rates")
+}
+
+model Transporter {
+  id            String   @id @default(cuid())
+  code          String   @unique
+  name          String
+  contactPerson String?  @map("contact_person")
+  email         String?
+  phone         String?
+  address       String?
+  serviceType   String   @default("ROAD") @map("service_type") // ROAD, RAIL, SEA, AIR
+  rating        Int?     @default(0)
+  notes         String?
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  transportRates TransportRate[]
+  shipments      Shipment[]
+
+  @@map("transporters")
+}
+
+model TransportRate {
+  id            String   @id @default(cuid())
+  transporterId String   @map("transporter_id")
+  origin        String
+  destination   String
+  rate          Decimal  @db.Decimal(12, 2)
+  currency      String   @default("INR")
+  containerType String?  @map("container_type")
+  transitDays   Int?     @map("transit_days")
+  validFrom     DateTime @map("valid_from")
+  validTo       DateTime? @map("valid_to")
+  notes         String?
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  transporter Transporter @relation(fields: [transporterId], references: [id])
+
+  @@map("transport_rates")
+}
+
+
+
+// ============================================
+// CRM - BUYER MANAGEMENT
+// ============================================
+
+enum BuyerStatus {
+  LEAD
+  PROSPECT
+  ACTIVE
+  INACTIVE
+  CHURNED
+}
+
+model Buyer {
+  id              String      @id @default(cuid())
+  code            String      @unique
+  companyName     String      @map("company_name")
+  tradeName       String?     @map("trade_name")
+  countryId       String      @map("country_id")
+  address         String?
+  city            String?
+  state           String?
+  postalCode      String?     @map("postal_code")
+  website         String?
+  industry        String?
+  status          BuyerStatus @default(LEAD)
+  source          String?     // EXHIBITION, REFERRAL, WEBSITE, etc.
+  currencyId      String?     @map("currency_id")
+  paymentTerms    String?     @map("payment_terms")
+  creditLimit     Decimal?    @map("credit_limit") @db.Decimal(15, 2)
+  creditDays      Int?        @map("credit_days")
+  taxId           String?     @map("tax_id")
+  notes           String?
+  totalRevenue    Decimal     @default(0) @map("total_revenue") @db.Decimal(15, 2)
+  totalOrders     Int         @default(0) @map("total_orders")
+  lastOrderDate   DateTime?   @map("last_order_date")
+  isActive        Boolean     @default(true) @map("is_active")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  country        Country         @relation(fields: [countryId], references: [id])
+  currency       Currency?       @relation(fields: [currencyId], references: [id])
+  contacts       BuyerContact[]
+  communications Communication[]
+  inquiries      Inquiry[]
+  quotations     Quotation[]
+  orders         ExportOrder[]
+  invoices       Invoice[]
+
+  @@map("buyers")
+}
+
+model BuyerContact {
+  id          String   @id @default(cuid())
+  buyerId     String   @map("buyer_id")
+  firstName   String   @map("first_name")
+  lastName    String?  @map("last_name")
+  designation String?
+  email       String?
+  phone       String?
+  mobile      String?
+  isPrimary   Boolean  @default(false) @map("is_primary")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  buyer Buyer @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+
+  @@map("buyer_contacts")
+}
+
+model Communication {
+  id        String   @id @default(cuid())
+  buyerId   String   @map("buyer_id")
+  userId    String   @map("user_id")
+  type      String   // EMAIL, CALL, MEETING, WHATSAPP, etc.
+  subject   String?
+  content   String?
+  direction String   @default("OUTBOUND") // INBOUND, OUTBOUND
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  buyer Buyer @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@map("communications")
+}
+
+
+
+// ============================================
+// SALES - INQUIRY & PIPELINE
+// ============================================
+
+enum InquiryStage {
+  NEW
+  REQUIREMENT_GATHERED
+  PRICING_IN_PROGRESS
+  QUOTATION_SENT
+  NEGOTIATION
+  WON
+  LOST
+  ON_HOLD
+}
+
+enum InquiryPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Inquiry {
+  id              String          @id @default(cuid())
+  inquiryNumber   String          @unique @map("inquiry_number")
+  buyerId         String          @map("buyer_id")
+  salesOwnerId    String          @map("sales_owner_id")
+  createdById     String          @map("created_by_id")
+  stage           InquiryStage    @default(NEW)
+  priority        InquiryPriority @default(MEDIUM)
+  source          String?         // EMAIL, PHONE, WEBSITE, EXHIBITION
+  expectedValue   Decimal?        @map("expected_value") @db.Decimal(15, 2)
+  expectedDate    DateTime?       @map("expected_date")
+  requirements    String?
+  notes           String?
+  lostReason      String?         @map("lost_reason")
+  nextFollowUp    DateTime?       @map("next_follow_up")
+  nextAction      String?         @map("next_action")
+  closedAt        DateTime?       @map("closed_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  buyer       Buyer         @relation(fields: [buyerId], references: [id])
+  salesOwner  User          @relation("InquirySalesOwner", fields: [salesOwnerId], references: [id])
+  createdBy   User          @relation("InquiryCreatedBy", fields: [createdById], references: [id])
+  items       InquiryItem[]
+  quotations  Quotation[]
+  followUps   FollowUp[]
+
+  @@map("inquiries")
+}
+
+model InquiryItem {
+  id              String   @id @default(cuid())
+  inquiryId       String   @map("inquiry_id")
+  productId       String   @map("product_id")
+  quantity        Decimal  @db.Decimal(12, 2)
+  unit            String   @default("KG")
+  targetPrice     Decimal? @map("target_price") @db.Decimal(12, 2)
+  specifications  String?
+  notes           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  inquiry Inquiry @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@map("inquiry_items")
+}
+
+model FollowUp {
+  id          String    @id @default(cuid())
+  inquiryId   String    @map("inquiry_id")
+  scheduledAt DateTime  @map("scheduled_at")
+  completedAt DateTime? @map("completed_at")
+  type        String    // CALL, EMAIL, MEETING, VISIT
+  notes       String?
+  outcome     String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  inquiry Inquiry @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+
+  @@map("follow_ups")
+}
+
+
+
+// ============================================
+// COSTING & QUOTATION
+// ============================================
+
+enum QuotationStatus {
+  DRAFT
+  SENT
+  REVISED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+model Quotation {
+  id               String          @id @default(cuid())
+  quotationNumber  String          @unique @map("quotation_number")
+  inquiryId        String?         @map("inquiry_id")
+  buyerId          String          @map("buyer_id")
+  currencyId       String          @map("currency_id")
+  incotermId       String          @map("incoterm_id")
+  status           QuotationStatus @default(DRAFT)
+  validUntil       DateTime        @map("valid_until")
+  deliveryTerms    String?         @map("delivery_terms")
+  paymentTerms     String?         @map("payment_terms")
+  subtotal         Decimal         @default(0) @db.Decimal(15, 2)
+  totalCost        Decimal         @default(0) @map("total_cost") @db.Decimal(15, 2)
+  totalMargin      Decimal         @default(0) @map("total_margin") @db.Decimal(15, 2)
+  marginPercent    Decimal         @default(0) @map("margin_percent") @db.Decimal(5, 2)
+  grandTotal       Decimal         @default(0) @map("grand_total") @db.Decimal(15, 2)
+  notes            String?
+  termsConditions  String?         @map("terms_conditions")
+  sentAt           DateTime?       @map("sent_at")
+  acceptedAt       DateTime?       @map("accepted_at")
+  pdfPath          String?         @map("pdf_path")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  inquiry  Inquiry?        @relation(fields: [inquiryId], references: [id])
+  buyer    Buyer           @relation(fields: [buyerId], references: [id])
+  currency Currency        @relation(fields: [currencyId], references: [id])
+  incoterm Incoterm        @relation(fields: [incotermId], references: [id])
+  items    QuotationItem[]
+  costs    QuotationCost[]
+  orders   ExportOrder[]
+
+  @@map("quotations")
+}
+
+model QuotationItem {
+  id              String  @id @default(cuid())
+  quotationId     String  @map("quotation_id")
+  productId       String  @map("product_id")
+  quantity        Decimal @db.Decimal(12, 2)
+  unit            String  @default("KG")
+  unitCost        Decimal @map("unit_cost") @db.Decimal(12, 2)
+  unitPrice       Decimal @map("unit_price") @db.Decimal(12, 2)
+  totalCost       Decimal @map("total_cost") @db.Decimal(15, 2)
+  totalPrice      Decimal @map("total_price") @db.Decimal(15, 2)
+  margin          Decimal @default(0) @db.Decimal(15, 2)
+  marginPercent   Decimal @default(0) @map("margin_percent") @db.Decimal(5, 2)
+  specifications  String?
+  notes           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id])
+
+  @@map("quotation_items")
+}
+
+model QuotationCost {
+  id          String   @id @default(cuid())
+  quotationId String   @map("quotation_id")
+  costType    String   @map("cost_type") // SUPPLIER, CHA, TRANSPORT, PACKAGING, OTHER
+  description String
+  amount      Decimal  @db.Decimal(12, 2)
+  currency    String   @default("INR")
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  @@map("quotation_costs")
+}
+
+
+
+// ============================================
+// EXPORT OPERATIONS
+// ============================================
+
+enum OrderStatus {
+  CONFIRMED
+  IN_PRODUCTION
+  READY_TO_SHIP
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+model ExportOrder {
+  id              String      @id @default(cuid())
+  orderNumber     String      @unique @map("order_number")
+  quotationId     String      @map("quotation_id")
+  buyerId         String      @map("buyer_id")
+  incotermId      String      @map("incoterm_id")
+  status          OrderStatus @default(CONFIRMED)
+  poNumber        String?     @map("po_number")
+  orderDate       DateTime    @map("order_date")
+  expectedDate    DateTime?   @map("expected_date")
+  totalValue      Decimal     @map("total_value") @db.Decimal(15, 2)
+  currency        String      @default("USD")
+  paymentTerms    String?     @map("payment_terms")
+  deliveryTerms   String?     @map("delivery_terms")
+  notes           String?
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  quotation    Quotation     @relation(fields: [quotationId], references: [id])
+  buyer        Buyer         @relation(fields: [buyerId], references: [id])
+  incoterm     Incoterm      @relation(fields: [incotermId], references: [id])
+  items        OrderItem[]
+  procurements Procurement[]
+  documents    Document[]
+  shipments    Shipment[]
+  invoices     Invoice[]
+
+  @@map("export_orders")
+}
+
+model OrderItem {
+  id          String   @id @default(cuid())
+  orderId     String   @map("order_id")
+  productId   String   @map("product_id")
+  quantity    Decimal  @db.Decimal(12, 2)
+  unit        String   @default("KG")
+  unitPrice   Decimal  @map("unit_price") @db.Decimal(12, 2)
+  totalPrice  Decimal  @map("total_price") @db.Decimal(15, 2)
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  order   ExportOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product     @relation(fields: [productId], references: [id])
+
+  @@map("order_items")
+}
+
+model Procurement {
+  id           String    @id @default(cuid())
+  orderId      String    @map("order_id")
+  supplierId   String    @map("supplier_id")
+  poNumber     String?   @unique @map("po_number")
+  status       String    @default("PENDING") // PENDING, ORDERED, RECEIVED, PARTIAL
+  orderDate    DateTime? @map("order_date")
+  expectedDate DateTime? @map("expected_date")
+  receivedDate DateTime? @map("received_date")
+  totalAmount  Decimal   @map("total_amount") @db.Decimal(15, 2)
+  currency     String    @default("INR")
+  notes        String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  order    ExportOrder @relation(fields: [orderId], references: [id])
+  supplier Supplier    @relation(fields: [supplierId], references: [id])
+
+  @@map("procurements")
+}
+
+model Document {
+  id           String   @id @default(cuid())
+  orderId      String   @map("order_id")
+  documentType String   @map("document_type") // INVOICE, PACKING_LIST, BL, COO, etc.
+  documentNo   String?  @map("document_no")
+  status       String   @default("PENDING") // PENDING, IN_PROGRESS, COMPLETED
+  filePath     String?  @map("file_path")
+  notes        String?
+  dueDate      DateTime? @map("due_date")
+  completedAt  DateTime? @map("completed_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  order ExportOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("documents")
+}
+
+model Shipment {
+  id                String      @id @default(cuid())
+  orderId           String      @map("order_id")
+  shipmentNumber    String      @unique @map("shipment_number")
+  chaId             String?     @map("cha_id")
+  transporterId     String?     @map("transporter_id")
+  originPortId      String?     @map("origin_port_id")
+  destinationPortId String?     @map("destination_port_id")
+  status            String      @default("PENDING") // PENDING, BOOKED, IN_TRANSIT, ARRIVED, DELIVERED
+  containerNumber   String?     @map("container_number")
+  containerType     String?     @map("container_type") // 20FT, 40FT, 40HC, LCL
+  blNumber          String?     @map("bl_number")
+  vesselName        String?     @map("vessel_name")
+  etd               DateTime?
+  eta               DateTime?
+  actualDeparture   DateTime?   @map("actual_departure")
+  actualArrival     DateTime?   @map("actual_arrival")
+  freightCost       Decimal?    @map("freight_cost") @db.Decimal(12, 2)
+  notes             String?
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  order           ExportOrder  @relation(fields: [orderId], references: [id])
+  cha             CHA?         @relation(fields: [chaId], references: [id])
+  transporter     Transporter? @relation(fields: [transporterId], references: [id])
+  originPort      Port?        @relation("ShipmentOriginPort", fields: [originPortId], references: [id])
+  destinationPort Port?        @relation("ShipmentDestinationPort", fields: [destinationPortId], references: [id])
+
+  @@map("shipments")
+}
+
+
+
+// ============================================
+// FINANCE
+// ============================================
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+model Invoice {
+  id             String        @id @default(cuid())
+  invoiceNumber  String        @unique @map("invoice_number")
+  orderId        String        @map("order_id")
+  buyerId        String        @map("buyer_id")
+  currencyId     String        @map("currency_id")
+  type           String        @default("EXPORT") // EXPORT, PROFORMA
+  status         InvoiceStatus @default(DRAFT)
+  invoiceDate    DateTime      @map("invoice_date")
+  dueDate        DateTime      @map("due_date")
+  subtotal       Decimal       @db.Decimal(15, 2)
+  taxAmount      Decimal       @default(0) @map("tax_amount") @db.Decimal(15, 2)
+  totalAmount    Decimal       @map("total_amount") @db.Decimal(15, 2)
+  paidAmount     Decimal       @default(0) @map("paid_amount") @db.Decimal(15, 2)
+  balanceAmount  Decimal       @map("balance_amount") @db.Decimal(15, 2)
+  exchangeRate   Decimal       @default(1) @map("exchange_rate") @db.Decimal(10, 4)
+  notes          String?
+  termsConditions String?      @map("terms_conditions")
+  pdfPath        String?       @map("pdf_path")
+  sentAt         DateTime?     @map("sent_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  order    ExportOrder @relation(fields: [orderId], references: [id])
+  buyer    Buyer       @relation(fields: [buyerId], references: [id])
+  currency Currency    @relation(fields: [currencyId], references: [id])
+  payments Payment[]
+
+  @@map("invoices")
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  invoiceId     String   @map("invoice_id")
+  paymentNumber String   @unique @map("payment_number")
+  amount        Decimal  @db.Decimal(15, 2)
+  currency      String   @default("USD")
+  exchangeRate  Decimal  @default(1) @map("exchange_rate") @db.Decimal(10, 4)
+  paymentDate   DateTime @map("payment_date")
+  paymentMode   String   @map("payment_mode") // WIRE, LC, TT, CHEQUE
+  reference     String?
+  bankDetails   String?  @map("bank_details")
+  notes         String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@map("payments")
+}
+
+model Expense {
+  id           String   @id @default(cuid())
+  expenseNumber String  @unique @map("expense_number")
+  category     String   // FREIGHT, CHA, PACKAGING, TRAVEL, OFFICE, OTHER
+  description  String
+  amount       Decimal  @db.Decimal(12, 2)
+  currency     String   @default("INR")
+  expenseDate  DateTime @map("expense_date")
+  vendorName   String?  @map("vendor_name")
+  invoiceRef   String?  @map("invoice_ref")
+  status       String   @default("PENDING") // PENDING, APPROVED, PAID
+  notes        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("expenses")
+}
+
+
+
+// ============================================
+// TEAM & TASKS
+// ============================================
+
+model Employee {
+  id           String   @id @default(cuid())
+  userId       String   @unique @map("user_id")
+  employeeCode String   @unique @map("employee_code")
+  department   String
+  designation  String
+  joiningDate  DateTime @map("joining_date")
+  reportingTo  String?  @map("reporting_to")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("employees")
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model Task {
+  id          String       @id @default(cuid())
+  title       String
+  description String?
+  assigneeId  String       @map("assignee_id")
+  createdById String       @map("created_by_id")
+  priority    TaskPriority @default(MEDIUM)
+  status      TaskStatus   @default(PENDING)
+  dueDate     DateTime?    @map("due_date")
+  completedAt DateTime?    @map("completed_at")
+  relatedType String?      @map("related_type") // INQUIRY, ORDER, SHIPMENT, etc.
+  relatedId   String?      @map("related_id")
+  notes       String?
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  // Relations
+  assignee  User @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  createdBy User @relation("TaskCreatedBy", fields: [createdById], references: [id])
+
+  @@map("tasks")
+}
+
+// ============================================
+// SYSTEM & AUDIT
+// ============================================
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?  @map("user_id")
+  action     String   // CREATE, UPDATE, DELETE
+  entityType String   @map("entity_type")
+  entityId   String   @map("entity_id")
+  oldValues  Json?    @map("old_values")
+  newValues  Json?    @map("new_values")
+  ipAddress  String?  @map("ip_address")
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User? @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  type      String   @default("STRING") // STRING, NUMBER, BOOLEAN, JSON
+  category  String   @default("GENERAL")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
+
+model NumberSequence {
+  id          String   @id @default(cuid())
+  entityType  String   @unique @map("entity_type") // INQUIRY, QUOTATION, ORDER, INVOICE, etc.
+  prefix      String
+  currentNo   Int      @default(0) @map("current_no")
+  padLength   Int      @default(5) @map("pad_length")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("number_sequences")
+}
+
+
+
+// ============================================
+// AUTOMATION & INTEGRATIONS
+// ============================================
+
+model Webhook {
+  id          String   @id @default(cuid())
+  name        String
+  url         String
+  secret      String?
+  events      String[] // Array of event names
+  isActive    Boolean  @default(true) @map("is_active")
+  lastTriggered DateTime? @map("last_triggered")
+  lastStatus  Int?     @map("last_status")
+  failCount   Int      @default(0) @map("fail_count")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("webhooks")
+}
+
+model WebhookLog {
+  id          String   @id @default(cuid())
+  webhookId   String   @map("webhook_id")
+  event       String
+  payload     Json
+  status      Int
+  response    String?
+  error       String?
+  duration    Int?     // Response time in ms
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("webhook_logs")
+}
+
+model Template {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // EMAIL, QUOTATION, INVOICE, DOCUMENT
+  subject     String?
+  content     String
+  variables   String[] // Available variables for this template
+  isDefault   Boolean  @default(false) @map("is_default")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("templates")
+}
+
+model AutomationRule {
+  id          String   @id @default(cuid())
+  name        String
+  trigger     String   // Event that triggers this rule
+  conditions  Json?    // Conditions to match
+  actions     Json     // Actions to perform
+  isActive    Boolean  @default(true) @map("is_active")
+  lastRun     DateTime? @map("last_run")
+  runCount    Int      @default(0) @map("run_count")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("automation_rules")
+}
+
+model EmailQueue {
+  id          String   @id @default(cuid())
+  to          String
+  cc          String?
+  bcc         String?
+  subject     String
+  body        String
+  templateId  String?  @map("template_id")
+  status      String   @default("PENDING") // PENDING, SENT, FAILED
+  attempts    Int      @default(0)
+  error       String?
+  sentAt      DateTime? @map("sent_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("email_queue")
+}
+
+model ApiKey {
+  id          String   @id @default(cuid())
+  name        String
+  key         String   @unique
+  secret      String
+  permissions String[] // List of allowed endpoints/actions
+  isActive    Boolean  @default(true) @map("is_active")
+  lastUsed    DateTime? @map("last_used")
+  expiresAt   DateTime? @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("api_keys")
+}

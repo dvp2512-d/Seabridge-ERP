@@ -1,0 +1,102 @@
+# ---------- Dependencies ----------
+node_modules/
+.pnp
+.pnp.js
+.yarn/
+jspm_packages/
+
+# Lockfiles from other package managers (this repo uses npm workspaces)
+bun.lock
+bun.lockb
+yarn.lock
+pnpm-lock.yaml
+
+# ---------- Build outputs ----------
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+.turbo/
+.vite/
+
+# ---------- Environment / secrets ----------
+# Never commit real credentials. Commit .env.example instead.
+.env
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+.env.*.local
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.json
+credentials.json
+
+# ---------- Prisma ----------
+# Keep prisma/migrations - they are part of the source.
+# Only ignore generated client output and local database files.
+packages/database/prisma/*.db
+packages/database/prisma/*.db-journal
+packages/database/generated/
+**/.prisma/
+
+# ---------- Logs ----------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ---------- Testing / coverage ----------
+coverage/
+.nyc_output/
+*.lcov
+
+# ---------- Runtime storage ----------
+storage/
+uploads/
+tmp/
+temp/
+
+# ---------- Editors / IDE ----------
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+.history/
+
+# ---------- OS ----------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ---------- Docker ----------
+.docker/
+
+# ---------- Misc ----------
+*.tgz
+*.zip
+*.bak
+*.orig
+
+# ---------- Accidental nested clones ----------
+# Cloning the repo into itself creates a nested copy with its own .git.
+# Ignore it so it can never be committed. Safe to delete the folder.
+/Seabridge-ERP/
+/seabridge-ERP/

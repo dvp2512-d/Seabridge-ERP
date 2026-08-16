@@ -1,0 +1,41 @@
+{
+  "name": "seabridge-erp",
+  "version": "1.0.0",
+  "description": "SeaBridge Founder OS - Enterprise Business Management System",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm run dev -w apps/api",
+    "dev:web": "npm run dev -w apps/web",
+    "build": "npm run build -w packages/database && npm run build -w apps/api && npm run build -w apps/web",
+    "build:api": "npm run build -w apps/api",
+    "build:web": "npm run build -w apps/web",
+    "typecheck": "npm run typecheck -w apps/api && npm run typecheck -w apps/web",
+    "verify": "npm run typecheck && npm run verify:contract && npm run verify:pdf && npm run verify:logic",
+    "verify:contract": "node scripts/check-api-contract.mjs",
+    "verify:pdf": "node scripts/verify-pdf.mjs",
+    "verify:logic": "npx tsx scripts/verify-logic.ts",
+    "db:generate": "npm run generate -w packages/database",
+    "db:migrate": "npm run migrate -w packages/database",
+    "db:deploy": "npm run migrate:prod -w packages/database",
+    "db:push": "npm run push -w packages/database",
+    "db:seed": "npm run seed -w packages/database",
+    "db:studio": "npm run studio -w packages/database",
+    "db:validate": "npm run validate -w packages/database",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:build": "docker compose build",
+    "docker:logs": "docker compose logs -f"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "tsx": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

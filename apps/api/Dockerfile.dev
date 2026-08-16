@@ -1,0 +1,35 @@
+# Development Dockerfile for the API
+#
+# Debian "slim" rather than Alpine: Prisma's native query engine needs OpenSSL
+# and fails on Alpine/musl at runtime.
+FROM node:20-bookworm-slim
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy manifests first so dependency installation is cached
+COPY package*.json ./
+COPY apps/api/package*.json ./apps/api/
+COPY packages/database/package*.json ./packages/database/
+
+RUN npm install
+
+# Copy source
+COPY packages/database ./packages/database
+COPY apps/api ./apps/api
+
+# Generate the Prisma client and compile the database package.
+# @seabridge/database resolves to dist/index.js at runtime, so this is required
+# even in development where the API itself runs through ts-node-dev.
+WORKDIR /app/packages/database
+RUN npx prisma generate
+RUN npm run build
+
+WORKDIR /app/apps/api
+
+EXPOSE 4000
+
+CMD ["npm", "run", "dev"]

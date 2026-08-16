@@ -1,0 +1,101 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: seabridge-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-seabridge}
+      # Credentials come from .env (gitignored) so they are never committed.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set - copy .env.example to .env first}
+      POSTGRES_DB: ${POSTGRES_DB:-seabridge_erp}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-seabridge} -d ${POSTGRES_DB:-seabridge_erp}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - seabridge-network
+
+  # Redis for caching and sessions
+  redis:
+    image: redis:7-alpine
+    container_name: seabridge-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - seabridge-network
+
+  # Backend API
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: seabridge-api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-seabridge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-seabridge_erp}
+      REDIS_URL: redis://redis:6379
+      # Anyone who knows this value can forge a login token for any user.
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is not set - copy .env.example to .env first}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      PORT: 4000
+      # The browser reaches the API through the web container's nginx proxy, so
+      # requests are same-origin. This only matters for direct cross-origin calls.
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # Redis is started for future use but no code depends on it, so the API is
+      # not blocked on its health. Add a service_healthy condition here if you
+      # later introduce caching or sessions.
+      redis:
+        condition: service_started
+    networks:
+      - seabridge-network
+
+  # Frontend Web App
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # VITE_* variables are baked in at build time, not read at runtime.
+        # Empty means the bundle uses the relative "/api" path, which nginx
+        # proxies to the api service (see apps/web/nginx.conf).
+        VITE_API_URL: "${VITE_API_URL-}"
+    container_name: seabridge-web
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    networks:
+      - seabridge-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  seabridge-network:
+    driver: bridge
