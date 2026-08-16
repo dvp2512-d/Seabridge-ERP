@@ -115,6 +115,14 @@ export const masterApi = {
   createProductCategory: (data: any) => api.post('/master/product-categories', data),
   updateProductCategory: (id: string, data: any) =>
     api.put(`/master/product-categories/${id}`, data),
+
+  // Pricing Parameters - the components that build up a quotation line price
+  getPricingParameters: (includeInactive = false) =>
+    api.get('/master/pricing-parameters', { params: { includeInactive } }),
+  createPricingParameter: (data: any) => api.post('/master/pricing-parameters', data),
+  updatePricingParameter: (id: string, data: any) =>
+    api.put(`/master/pricing-parameters/${id}`, data),
+  deletePricingParameter: (id: string) => api.delete(`/master/pricing-parameters/${id}`),
 };
 
 // ============================================

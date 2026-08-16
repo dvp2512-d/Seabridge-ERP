@@ -144,6 +144,30 @@ async function main() {
   }
   console.log('✅ Seeded number sequences');
 
+  // Seed Pricing Parameters - the components that build up a quotation line
+  // price. These are defaults only; they can be added to, renamed, reordered or
+  // deactivated from Settings without affecting quotations already created.
+  const pricingParameters = [
+    { name: 'Product Price (Supplier)', sortOrder: 1, calcType: 'PER_UNIT',        isMargin: false, description: 'Base cost from the supplier, per unit' },
+    { name: 'Packaging & Processing',   sortOrder: 2, calcType: 'PER_UNIT',        isMargin: false, description: 'Packing materials, processing and handling, per unit' },
+    { name: 'Our Margin',               sortOrder: 3, calcType: 'PERCENT_OF_COST', isMargin: true,  description: 'Profit, as a percentage of the total cost components', defaultValue: 15 },
+    { name: 'CHA / Customs',            sortOrder: 4, calcType: 'FIXED',           isMargin: false, description: 'Customs house agent and clearance charges' },
+    { name: 'Local Transportation',     sortOrder: 5, calcType: 'FIXED',           isMargin: false, description: 'Factory or warehouse to port' },
+    { name: 'Transportation (Air / Sea / Road)', sortOrder: 6, calcType: 'FIXED',  isMargin: false, description: 'Main freight leg' },
+    { name: 'Insurance',                sortOrder: 7, calcType: 'PERCENT_OF_COST', isMargin: false, description: 'Cargo insurance, as a percentage of cost', defaultValue: 0.5 },
+    { name: 'Inspection',               sortOrder: 8, calcType: 'FIXED',           isMargin: false, description: 'Third party inspection or certification' },
+    { name: 'Other',                    sortOrder: 9, calcType: 'FIXED',           isMargin: false, description: 'Anything not covered above' },
+  ] as const;
+
+  for (const parameter of pricingParameters) {
+    await prisma.pricingParameter.upsert({
+      where: { name: parameter.name },
+      update: {},
+      create: parameter as any,
+    });
+  }
+  console.log('✅ Seeded pricing parameters');
+
   console.log('🎉 Database seeding completed!');
   console.log('\n📋 Login credentials:');
   console.log('   Email: founder@seabridge.com');

@@ -547,7 +547,6 @@ model Quotation {
   currency Currency        @relation(fields: [currencyId], references: [id])
   incoterm Incoterm        @relation(fields: [incotermId], references: [id])
   items    QuotationItem[]
-  costs    QuotationCost[]
   orders   ExportOrder[]
 
   @@map("quotations")
@@ -573,25 +572,67 @@ model QuotationItem {
   // Relations
   quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
   product   Product   @relation(fields: [productId], references: [id])
+  costs     QuotationItemCost[]
 
   @@map("quotation_items")
 }
 
-model QuotationCost {
-  id          String   @id @default(cuid())
-  quotationId String   @map("quotation_id")
-  costType    String   @map("cost_type") // SUPPLIER, CHA, TRANSPORT, PACKAGING, OTHER
-  description String
-  amount      Decimal  @db.Decimal(12, 2)
-  currency    String   @default("INR")
-  notes       String?
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+// ============================================
+// PRICING STRUCTURE
+// ============================================
+
+enum PricingCalcType {
+  // Value is a lump sum for the whole line (e.g. sea freight per shipment)
+  FIXED
+  // Value is per unit and gets multiplied by the line quantity
+  PER_UNIT
+  // Value is a percentage of the sum of all non-margin cost components
+  PERCENT_OF_COST
+}
+
+/// Master list of the components that build up a quotation line price.
+/// Editable by the user (add / rename / reorder / deactivate) without touching
+/// quotations that were already sent - those keep their own snapshot.
+model PricingParameter {
+  id           String          @id @default(cuid())
+  name         String          @unique
+  description  String?
+  sortOrder    Int             @default(0) @map("sort_order")
+  calcType     PricingCalcType @default(FIXED) @map("calc_type")
+  defaultValue Decimal?        @map("default_value") @db.Decimal(12, 4)
+  /// Margin components are profit, not cost. Kept separate so margin
+  /// reporting stays meaningful once everything is added to the sell price.
+  isMargin     Boolean         @default(false) @map("is_margin")
+  isActive     Boolean         @default(true) @map("is_active")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+
+  @@map("pricing_parameters")
+}
+
+/// One pricing component on one quotation line item.
+/// name/calcType/isMargin are snapshotted from PricingParameter at the time of
+/// quoting so historical quotations never change retroactively.
+model QuotationItemCost {
+  id          String          @id @default(cuid())
+  itemId      String          @map("item_id")
+  parameterId String?         @map("parameter_id")
+  name        String
+  calcType    PricingCalcType @map("calc_type")
+  isMargin    Boolean         @default(false) @map("is_margin")
+  sortOrder   Int             @default(0) @map("sort_order")
+  /// What the user typed (an amount, a per-unit rate, or a percentage)
+  value       Decimal         @db.Decimal(12, 4)
+  /// What it contributed to the line total, after applying calcType
+  amount      Decimal         @db.Decimal(15, 2)
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
 
   // Relations
-  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  item QuotationItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
 
-  @@map("quotation_costs")
+  @@index([itemId])
+  @@map("quotation_item_costs")
 }
 
 
