@@ -89,6 +89,8 @@ router.get('/:id', can('OPERATIONS_VIEW'), async (req, res, next) => {
         procurements: { include: { supplier: true } },
         documents: { orderBy: { documentType: 'asc' } },
         shipments: { include: { cha: true, transporter: true, originPort: true, destinationPort: true } },
+        portOfLoading: { include: { country: true } },
+        portOfDischarge: { include: { country: true } },
         invoices: { orderBy: { createdAt: 'desc' } },
       },
     });
@@ -277,6 +279,8 @@ router.get('/:id/packing-list', can('OPERATIONS_VIEW'), async (req, res, next) =
         buyer: { include: { country: true, contacts: { where: { isPrimary: true } } } },
         items: { include: { product: true } },
         shipments: { include: { originPort: true, destinationPort: true } },
+        portOfLoading: { include: { country: true } },
+        portOfDischarge: { include: { country: true } },
         invoices: { select: { invoiceNumber: true }, orderBy: { createdAt: 'asc' } },
       },
     });

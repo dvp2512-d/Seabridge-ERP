@@ -44,6 +44,7 @@ async function main() {
     { code: 'GB', name: 'United Kingdom', region: 'Europe' },
     { code: 'DE', name: 'Germany', region: 'Europe' },
     { code: 'FR', name: 'France', region: 'Europe' },
+    { code: 'IT', name: 'Italy', region: 'Europe' },
     { code: 'IN', name: 'India', region: 'Asia' },
     { code: 'CN', name: 'China', region: 'Asia' },
     { code: 'JP', name: 'Japan', region: 'Asia' },
@@ -68,7 +69,7 @@ async function main() {
     { code: 'USD', name: 'US Dollar', symbol: '$', exchangeRate: 1 },
     { code: 'EUR', name: 'Euro', symbol: '€', exchangeRate: 0.92 },
     { code: 'GBP', name: 'British Pound', symbol: '£', exchangeRate: 0.79 },
-    { code: 'INR', name: 'Indian Rupee', symbol: '₹', exchangeRate: 83.12 },
+    { code: 'INR', name: 'Indian Rupee', symbol: '₹', exchangeRate: 83.12, isBaseCurrency: true },
     { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', exchangeRate: 3.67 },
     { code: 'JPY', name: 'Japanese Yen', symbol: '¥', exchangeRate: 149.50 },
   ];
@@ -76,7 +77,8 @@ async function main() {
   for (const currency of currencies) {
     await prisma.currency.upsert({
       where: { code: currency.code },
-      update: {},
+        // Only the base-currency flag is refreshed; rates are left alone in case they have been maintained by hand.
+        update: { isBaseCurrency: (currency as any).isBaseCurrency ?? false },
       create: currency,
     });
   }
@@ -100,6 +102,61 @@ async function main() {
     });
   }
   console.log('✅ Seeded incoterms');
+
+  // Seed Ports.
+  // The quotation and shipment screens select from this list, so without it the
+  // port dropdowns are empty on a fresh install. Indian ports of loading plus
+  // the discharge ports these buyers actually use. Type drives the filtering on
+  // the quotation form: a Sea dispatch should not offer an airport.
+  const ports = [
+    // Indian ports of loading - sea
+    { code: 'INNSA', name: 'Nhava Sheva (JNPT)', country: 'IN', type: 'SEA' },
+    { code: 'INMUN', name: 'Mundra', country: 'IN', type: 'SEA' },
+    { code: 'INPAV', name: 'Pipavav', country: 'IN', type: 'SEA' },
+    { code: 'INKAN', name: 'Kandla', country: 'IN', type: 'SEA' },
+    { code: 'INMAA', name: 'Chennai', country: 'IN', type: 'SEA' },
+    { code: 'INCOK', name: 'Cochin', country: 'IN', type: 'SEA' },
+    { code: 'INTUT', name: 'Tuticorin', country: 'IN', type: 'SEA' },
+    // Indian airports of loading
+    { code: 'INAMD', name: 'Ahmedabad', country: 'IN', type: 'AIR' },
+    { code: 'INBOM', name: 'Mumbai (Air)', country: 'IN', type: 'AIR' },
+    { code: 'INDEL', name: 'Delhi (Air)', country: 'IN', type: 'AIR' },
+    // Discharge ports - sea
+    { code: 'AEJEA', name: 'Jebel Ali', country: 'AE', type: 'SEA' },
+    { code: 'ITGOA', name: 'Genoa', country: 'IT', type: 'SEA' },
+    { code: 'GBFXT', name: 'Felixstowe', country: 'GB', type: 'SEA' },
+    { code: 'DEHAM', name: 'Hamburg', country: 'DE', type: 'SEA' },
+    { code: 'USNYC', name: 'New York', country: 'US', type: 'SEA' },
+    { code: 'SAJED', name: 'Jeddah', country: 'SA', type: 'SEA' },
+    { code: 'CNSHA', name: 'Shanghai', country: 'CN', type: 'SEA' },
+    { code: 'JPYOK', name: 'Yokohama', country: 'JP', type: 'SEA' },
+    { code: 'AUSYD', name: 'Sydney', country: 'AU', type: 'SEA' },
+    { code: 'FRMRS', name: 'Marseille', country: 'FR', type: 'SEA' },
+    // Discharge airports
+    { code: 'AEDXB', name: 'Dubai (Air)', country: 'AE', type: 'AIR' },
+    { code: 'ITMXP', name: 'Milan Malpensa', country: 'IT', type: 'AIR' },
+  ];
+
+  for (const port of ports) {
+    const country = await prisma.country.findUnique({ where: { code: port.country } });
+    // Skip rather than fail if a country is missing, so one bad row cannot
+    // abort the whole seed.
+    if (!country) {
+      console.log(`   skipped port ${port.code}: country ${port.country} not found`);
+      continue;
+    }
+    await prisma.port.upsert({
+      where: { code: port.code },
+      update: {},
+      create: {
+        code: port.code,
+        name: port.name,
+        countryId: country.id,
+        type: port.type,
+      },
+    });
+  }
+  console.log('✅ Seeded ports');
 
   // Seed Product Categories
   const categories = [

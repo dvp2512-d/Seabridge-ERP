@@ -101,6 +101,8 @@ model Port {
   shipmentsDestination Shipment[] @relation("ShipmentDestinationPort")
   quotationsLoading    Quotation[] @relation("QuotationPortOfLoading")
   quotationsDischarge  Quotation[] @relation("QuotationPortOfDischarge")
+  ordersLoading        ExportOrder[] @relation("OrderPortOfLoading")
+  ordersDischarge      ExportOrder[] @relation("OrderPortOfDischarge")
 
   @@map("ports")
 }
@@ -694,6 +696,11 @@ model ExportOrder {
   /// dispatchMethod: Sea / Air / Road   shipmentType: FCL / LCL / Sample Shipment
   dispatchMethod  String?     @map("dispatch_method")
   shipmentType    String?     @map("shipment_type")
+  /// Carried from the quotation so invoices and packing lists can print the
+  /// ports before a shipment record exists. A shipment, once created, is the
+  /// more specific source and takes precedence.
+  portOfLoadingId   String?   @map("port_of_loading_id")
+  portOfDischargeId String?   @map("port_of_discharge_id")
   /// Tolerance printed on Proforma and Commercial invoices, e.g. 10 for +/- 10%
   variationPercent Decimal?   @map("variation_percent") @db.Decimal(5, 2)
   orderDate       DateTime    @map("order_date")
@@ -709,6 +716,8 @@ model ExportOrder {
   // Relations
   quotation    Quotation     @relation(fields: [quotationId], references: [id])
   buyer        Buyer         @relation(fields: [buyerId], references: [id])
+  portOfLoading   Port?       @relation("OrderPortOfLoading", fields: [portOfLoadingId], references: [id])
+  portOfDischarge Port?       @relation("OrderPortOfDischarge", fields: [portOfDischargeId], references: [id])
   incoterm     Incoterm      @relation(fields: [incotermId], references: [id])
   items        OrderItem[]
   procurements Procurement[]

@@ -103,3 +103,6 @@ desktop.ini
 
 # Locally generated sample documents for eyeballing output
 /samples/
+
+# Session exports are local artefacts, not source
+ERP.json

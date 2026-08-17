@@ -31,13 +31,26 @@ interface DispatchInfo {
   vesselOrFlight?: string | null;
 }
 
+/**
+ * Format a port for the document header. Buyers and customs identify ports by
+ * name, with the country added when it is known, so "Jebel Ali, UAE".
+ */
+function portName(port: any): string | null {
+  if (!port) return null;
+  const country = port.country?.name;
+  return country ? `${port.name}, ${country}` : port.name;
+}
+
 function dispatchFrom(order: any): DispatchInfo {
   const shipment = order?.shipments?.[0];
   return {
     dispatchMethod: order?.dispatchMethod ?? null,
     shipmentType: order?.shipmentType ?? shipment?.containerType ?? null,
-    portOfLoading: shipment?.originPort?.name ?? null,
-    portOfDischarge: shipment?.destinationPort?.name ?? null,
+    // A shipment is the more specific source once it exists; before that, fall
+    // back to the ports carried over from the quotation so the document is not
+    // left blank.
+    portOfLoading: portName(shipment?.originPort) ?? portName(order?.portOfLoading),
+    portOfDischarge: portName(shipment?.destinationPort) ?? portName(order?.portOfDischarge),
     vesselOrFlight: shipment?.vesselName ?? shipment?.blNumber ?? null,
   };
 }
@@ -185,10 +198,12 @@ export function buildQuotationDocument(quotation: any, company: any) {
       { label: 'Terms / Method Of Payment', value: quotation.paymentTerms ?? '-' },
     ],
     originCountry: company?.originCountry ?? 'India',
-    dispatchMethod: null,
-    shipmentType: null,
-    portOfLoading: null,
-    portOfDischarge: null,
+    // Rows 6 and 7 of the template. These are captured on the quotation itself,
+    // so they print without needing an order or shipment to exist yet.
+    dispatchMethod: quotation.dispatchMethod ?? null,
+    shipmentType: quotation.shipmentType ?? null,
+    portOfLoading: portName(quotation.portOfLoading),
+    portOfDischarge: portName(quotation.portOfDischarge),
     vesselOrFlight: quotation.incoterm?.code ? `Incoterm : ${quotation.incoterm.code}` : null,
     columns,
     items: priced,

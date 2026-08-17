@@ -313,6 +313,8 @@ router.post('/:id/convert-to-order', can('SALES_MANAGE'), async (req, res, next)
         // Printed in the header of every export document
         dispatchMethod: z.string().optional(),
         shipmentType: z.string().optional(),
+        portOfLoadingId: z.string().optional(),
+        portOfDischargeId: z.string().optional(),
         variationPercent: z.number().min(0).max(100).optional(),
       notes: z.string().optional(),
     });
@@ -337,6 +339,8 @@ router.post('/:id/convert-to-order', can('SALES_MANAGE'), async (req, res, next)
       poNumber: validation.data.poNumber,
       dispatchMethod: validation.data.dispatchMethod,
       shipmentType: validation.data.shipmentType,
+      portOfLoadingId: validation.data.portOfLoadingId,
+      portOfDischargeId: validation.data.portOfDischargeId,
       variationPercent: validation.data.variationPercent,
       notes: validation.data.notes,
     });

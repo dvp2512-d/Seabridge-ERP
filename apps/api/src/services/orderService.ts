@@ -23,6 +23,9 @@ export interface CreateOrderOptions {
   dispatchMethod?: string;
   /** FCL / LCL / Sample Shipment */
   shipmentType?: string;
+  /** Override the quotation's ports; otherwise they are inherited */
+  portOfLoadingId?: string;
+  portOfDischargeId?: string;
   /** Quantity tolerance printed on proforma and commercial invoices */
   variationPercent?: number;
   notes?: string;
@@ -79,6 +82,10 @@ export async function createOrderFromQuotation(
         // Copy shipping details from quotation, allow override from options
         dispatchMethod: options.dispatchMethod ?? quotation.dispatchMethod ?? null,
         shipmentType: options.shipmentType ?? quotation.shipmentType ?? null,
+        // Carried across so invoices and packing lists can print the ports
+        // before any shipment record exists.
+        portOfLoadingId: options.portOfLoadingId ?? quotation.portOfLoadingId ?? null,
+        portOfDischargeId: options.portOfDischargeId ?? quotation.portOfDischargeId ?? null,
         variationPercent: options.variationPercent ?? null,
         totalValue: quotation.grandTotal,
         // Carry the quotation's currency across instead of defaulting to USD.

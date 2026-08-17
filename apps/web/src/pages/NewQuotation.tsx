@@ -1,4 +1,9 @@
-// New Quotation Page with Automatic Costing Calculatorimport { useState, useEffect, useMemo } from 'react';import { useNavigate, useSearchParams } from 'react-router-dom';import { useQuery, useMutation } from '@tanstack/react-query';import toast from 'react-hot-toast';import {
+// New Quotation Page with Automatic Costing Calculator
+import { useState, useEffect, useMemo } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
+import {
   quotationsApi,
   inquiriesApi,
   buyersApi,
@@ -6,7 +11,12 @@
   productsApi,
   chaApi,
   transportersApi,
-} from '@/lib/api';import PageHeader from '@/components/ui/PageHeader';import Modal from '@/components/ui/Modal';import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';import { formatCurrency, cn } from '@/lib/utils';import {
+} from '@/lib/api';
+import PageHeader from '@/components/ui/PageHeader';
+import Modal from '@/components/ui/Modal';
+import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
+import { formatCurrency, cn } from '@/lib/utils';
+import {
   Plus,
   Trash2,
   Calculator,
@@ -90,6 +100,44 @@ export default function NewQuotation() {
     queryKey: ['ports'],
     queryFn: () => masterApi.getPorts({ limit: 500 }),
   });
+
+  /**
+   * Ports relevant to the chosen dispatch method. Port.type is SEA, AIR or LAND,
+   * so sending by air should not offer sea ports.
+   *
+   * Ports with no type recorded are always kept, otherwise a gap in master data
+   * would silently make a port unselectable.
+   */
+  const relevantPorts = useMemo(() => {
+    const all: any[] = portsData?.data?.data || [];
+    const wanted: Record<string, string> = {
+      Sea: 'SEA',
+      Air: 'AIR',
+      Road: 'LAND',
+      Rail: 'LAND',
+      Courier: 'AIR',
+    };
+    const type = wanted[dispatchMethod];
+    if (!type) return all;
+    return all.filter((p) => !p.type || p.type === type);
+  }, [portsData, dispatchMethod]);
+
+  const portOptions = useMemo(
+    () =>
+      relevantPorts.map((p: any) => ({
+        value: p.id,
+        label: `${p.name} (${p.code})${p.country ? ` - ${p.country.name}` : ''}`,
+      })),
+    [relevantPorts]
+  );
+
+  // Clear a port that the new dispatch method no longer offers, so a stale
+  // selection cannot be submitted invisibly.
+  useEffect(() => {
+    const ids = new Set(relevantPorts.map((p: any) => p.id));
+    if (portOfLoadingId && !ids.has(portOfLoadingId)) setPortOfLoadingId('');
+    if (portOfDischargeId && !ids.has(portOfDischargeId)) setPortOfDischargeId('');
+  }, [relevantPorts, portOfLoadingId, portOfDischargeId]);
 
   const { data: buyersData } = useQuery({
     queryKey: ['buyers-list'],
@@ -326,20 +374,14 @@ export default function NewQuotation() {
                   label="Port of Loading"
                   value={portOfLoadingId}
                   onChange={(e) => setPortOfLoadingId(e.target.value)}
-                  options={(portsData?.data?.data || []).map((p: any) => ({
-                    value: p.id,
-                    label: `${p.name} (${p.code})${p.country ? ` - ${p.country.name}` : ''}`,
-                  }))}
+                  options={portOptions}
                   placeholder="Select Port of Loading"
                 />
                 <SelectField
                   label="Port of Discharge"
                   value={portOfDischargeId}
                   onChange={(e) => setPortOfDischargeId(e.target.value)}
-                  options={(portsData?.data?.data || []).map((p: any) => ({
-                    value: p.id,
-                    label: `${p.name} (${p.code})${p.country ? ` - ${p.country.name}` : ''}`,
-                  }))}
+                  options={portOptions}
                   placeholder="Select Port of Discharge"
                 />
                 <FormField

@@ -297,6 +297,8 @@ router.get('/:id/pdf', can('FINANCE_VIEW'), async (req, res, next) => {
           include: {
             items: { include: { product: true } },
             shipments: { include: { originPort: true, destinationPort: true } },
+            portOfLoading: { include: { country: true } },
+            portOfDischarge: { include: { country: true } },
           },
         },
         currency: true,
