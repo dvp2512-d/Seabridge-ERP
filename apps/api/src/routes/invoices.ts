@@ -4,7 +4,13 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
-import { buildRateMap, findRate, getBaseCurrency } from '../services/exchangeRateService';
+import {
+  buildRateMap,
+  findRate,
+  getBaseCurrency,
+  toBaseCurrency,
+} from '../services/exchangeRateService';
+import { emitEvent } from '../services/eventService';
 import {
   buildCommercialInvoiceDocument,
   buildProformaInvoiceDocument,
@@ -222,6 +228,8 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
       },
     });
 
+    emitEvent('invoice.created', invoice);
+
     res.status(201).json({ success: true, data: invoice });
   } catch (error) {
     next(error);
@@ -298,6 +306,29 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
     const newBalanceAmount = Math.max(0, Number(invoice.totalAmount) - newPaidAmount);
     const newStatus = newBalanceAmount <= 0.01 ? 'PAID' : 'PARTIALLY_PAID';
 
+    /**
+     * Convert the payment into the base currency for the buyer's running revenue
+     * total. Resolved before the transaction so a rate lookup cannot hold a
+     * database transaction open.
+     *
+     * A payment in a currency with no notified rate still records correctly; it
+     * simply does not move the revenue figure, which is better than corrupting it
+     * with an unconverted amount.
+     */
+    let revenueInBase = 0;
+    try {
+      const converted = await toBaseCurrency(
+        validation.data.amount,
+        invoice.currencyId,
+        validation.data.paymentDate ?? new Date()
+      );
+      revenueInBase = converted.amount;
+    } catch {
+      console.warn(
+        `[payment] no exchange rate for ${invoice.currencyId} on the payment date; buyer revenue not incremented`
+      );
+    }
+
     // Payment, invoice rollup and buyer revenue must all move together.
     const payment = await prisma.$transaction(async (tx) => {
       const created = await tx.payment.create({
@@ -317,13 +348,24 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
         },
       });
 
+      // Buyer revenue accumulates across many payments, which may be in
+      // different currencies, so it is converted into the base currency first.
+      // Incrementing with the raw amount made "top buyers by revenue" a ranking
+      // of mixed units.
       await tx.buyer.update({
         where: { id: invoice.buyerId },
-        data: { totalRevenue: { increment: validation.data.amount } },
+        data: { totalRevenue: { increment: revenueInBase } },
       });
 
       return created;
     });
+
+    // Notify after the transaction commits, so a webhook can never observe a
+    // payment that was subsequently rolled back.
+    emitEvent('payment.recorded', payment);
+    if (newStatus === 'PAID') {
+      emitEvent('invoice.paid', { id: req.params.id, invoiceNumber: invoice.invoiceNumber });
+    }
 
     res.status(201).json({ success: true, data: payment });
   } catch (error) {

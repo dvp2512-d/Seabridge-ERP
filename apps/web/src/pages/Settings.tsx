@@ -1022,16 +1022,44 @@ function AutomationsSettings() {
     },
   });
 
-  // Predefined automation templates
+  // Starting points for a rule. Only task creation is supported, so every
+  // suggestion here is something the engine can actually carry out - offering an
+  // email action would imply a capability that does not exist.
   const automationTemplates = [
-    { name: 'Auto follow-up reminder', trigger: 'inquiry.created', description: 'Create task for follow-up after new inquiry' },
-    { name: 'Quotation expiry alert', trigger: 'quotation.expiring', description: 'Notify when quotation is about to expire' },
-    { name: 'Invoice overdue notification', trigger: 'invoice.overdue', description: 'Send reminder when invoice becomes overdue' },
-    { name: 'Order confirmation email', trigger: 'order.created', description: 'Send confirmation email to buyer' },
+    {
+      name: 'Follow up on a new inquiry',
+      trigger: 'inquiry.created',
+      description: 'Create a task to contact the buyer',
+    },
+    {
+      name: 'Chase an accepted quotation',
+      trigger: 'quotation.accepted',
+      description: 'Create a task to raise the order',
+    },
+    {
+      name: 'Prepare documents for a new order',
+      trigger: 'order.created',
+      description: 'Create a task to collect the export paperwork',
+    },
+    {
+      name: 'Reconcile a received payment',
+      trigger: 'payment.recorded',
+      description: 'Create a task to match the payment against the bank',
+    },
   ];
 
   return (
     <div className="space-y-6">
+      {/* State the one action the engine performs, so nobody configures a rule
+          expecting an email that will never be sent. */}
+      <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-50 border border-blue-200">
+        <AlertTriangle className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
+        <div className="text-sm text-blue-800">
+          <strong>Rules create tasks.</strong> When the chosen event happens, a task is added to
+          someone's list. Sending email is not supported, so a rule cannot contact a buyer directly.
+        </div>
+      </div>
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold">Automation Rules</h2>

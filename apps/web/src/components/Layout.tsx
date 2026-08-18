@@ -22,6 +22,9 @@ import {
   Anchor,
   Database,
   TrendingUp,
+  Receipt,
+  CheckSquare,
+  UserCog,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -50,6 +53,9 @@ const navigation: {
   { name: 'Invoices', href: '/invoices', icon: DollarSign, permission: 'FINANCE_VIEW' },
   { name: 'Master Data', href: '/master-data', icon: Database, permission: 'MASTER_MANAGE' },
   { name: 'Exchange Rates', href: '/exchange-rates', icon: TrendingUp, permission: 'MASTER_VIEW' },
+  { name: 'Expenses', href: '/expenses', icon: Receipt, permission: 'FINANCE_VIEW' },
+  { name: 'Tasks', href: '/tasks', icon: CheckSquare, permission: 'OPERATIONS_VIEW' },
+  { name: 'Users', href: '/users', icon: UserCog, permission: 'SETTINGS_MANAGE' },
 ];
 
 export default function Layout({ children }: LayoutProps) {

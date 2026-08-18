@@ -252,6 +252,44 @@ export const exchangeRatesApi = {
 };
 
 // ============================================
+// EXPENSES, TASKS, AUDIT
+// ============================================
+
+export const expensesApi = {
+  list: (params?: any) => api.get('/expenses', { params }),
+  get: (id: string) => api.get(`/expenses/${id}`),
+  create: (data: any) => api.post('/expenses', data),
+  update: (id: string, data: any) => api.put(`/expenses/${id}`, data),
+  setStatus: (id: string, status: string) => api.put(`/expenses/${id}/status`, { status }),
+  remove: (id: string) => api.delete(`/expenses/${id}`),
+  options: () => api.get('/expenses/meta/options'),
+};
+
+export const tasksApi = {
+  list: (params?: any) => api.get('/tasks', { params }),
+  get: (id: string) => api.get(`/tasks/${id}`),
+  create: (data: any) => api.post('/tasks', data),
+  update: (id: string, data: any) => api.put(`/tasks/${id}`, data),
+  remove: (id: string) => api.delete(`/tasks/${id}`),
+  options: () => api.get('/tasks/meta/options'),
+};
+
+export const auditApi = {
+  /** Read-only: entries are written by middleware, never through the API */
+  list: (params?: any) => api.get('/audit', { params }),
+  forEntity: (entityType: string, entityId: string) =>
+    api.get(`/audit/entity/${entityType}/${entityId}`),
+};
+
+export const usersApi = {
+  list: (params?: any) => api.get('/users', { params }),
+  get: (id: string) => api.get(`/users/${id}`),
+  create: (data: any) => api.post('/users', data),
+  update: (id: string, data: any) => api.put(`/users/${id}`, data),
+  remove: (id: string) => api.delete(`/users/${id}`),
+};
+
+// ============================================
 // SETTINGS API
 // ============================================
 

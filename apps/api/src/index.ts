@@ -20,6 +20,10 @@ import { masterDataRouter } from './routes/masterData';
 import { automationRouter } from './routes/automation';
 import { settingsRouter } from './routes/settings';
 import { exchangeRateRouter } from './routes/exchangeRates';
+import { expenseRouter } from './routes/expenses';
+import { taskRouter } from './routes/tasks';
+import { auditRouter } from './routes/audit';
+import { auditLog } from './middleware/auditLog';
 
 dotenv.config();
 
@@ -41,7 +45,15 @@ app.get('/health', (req, res) => {
 });
 
 // API Routes
+//
+// Audit logging is applied to everything under /api except auth. It records
+// writes only, after the response has been sent, so it cannot affect the
+// outcome of a request. Auth is excluded because login bodies carry passwords
+// and a failed login is not a change to anything.
 app.use('/api/auth', authRouter);
+
+app.use('/api', auditLog);
+
 app.use('/api/users', userRouter);
 app.use('/api/buyers', buyerRouter);
 app.use('/api/products', productRouter);
@@ -57,6 +69,9 @@ app.use('/api/master', masterDataRouter);
 app.use('/api/automation', automationRouter);
 app.use('/api/settings', settingsRouter);
 app.use('/api/exchange-rates', exchangeRateRouter);
+app.use('/api/expenses', expenseRouter);
+app.use('/api/tasks', taskRouter);
+app.use('/api/audit', auditRouter);
 
 // Error handling
 // 404 for anything that didn't match a route above, then the error handler.

@@ -6,6 +6,7 @@ import { AppError, ValidationError, NotFoundError } from '../middleware/errorHan
 import { generateCode, calculateMarginPercent } from '../utils/helpers';
 import { buildQuotationDocument } from '../services/exportDocuments';
 import { buildRateMap } from '../services/exchangeRateService';
+import { emitEvent } from '../services/eventService';
 import { createOrderFromQuotation } from '../services/orderService';
 
 const router: Router = Router();
@@ -213,6 +214,7 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
       });
     }
 
+    emitEvent('quotation.created', quotation);
     res.status(201).json({ success: true, data: quotation });
   } catch (error) {
     next(error);
@@ -362,6 +364,7 @@ router.post('/:id/convert-to-order', can('SALES_MANAGE'), async (req, res, next)
       notes: validation.data.notes,
     });
 
+    emitEvent('order.created', order);
     res.status(201).json({ success: true, data: order });
   } catch (error) {
     next(error);

@@ -7,6 +7,7 @@ import { generateCode } from '../utils/helpers';
 import { createOrderFromQuotation } from '../services/orderService';
 import { buildPackingListDocument } from '../services/exportDocuments';
 import { buildRateMapByCode } from '../services/exchangeRateService';
+import { emitEvent } from '../services/eventService';
 
 const router: Router = Router();
 
@@ -148,6 +149,7 @@ router.post('/', can('OPERATIONS_MANAGE'), async (req, res, next) => {
       notes: validation.data.notes,
     });
 
+    emitEvent('order.created', order);
     res.status(201).json({ success: true, data: order });
   } catch (error) {
     next(error);
@@ -252,6 +254,7 @@ router.post('/:id/shipments', can('OPERATIONS_MANAGE'), async (req, res, next) =
       include: { cha: true, transporter: true, originPort: true, destinationPort: true },
     });
 
+    emitEvent('shipment.created', shipment);
     res.status(201).json({ success: true, data: shipment });
   } catch (error) {
     next(error);
