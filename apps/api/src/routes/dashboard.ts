@@ -1,6 +1,55 @@
 import { Router } from 'express';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
+import {
+  buildRateMap,
+  buildRateMapByCode,
+  sumConverted,
+} from '../services/exchangeRateService';
+
+/**
+ * Collapse a Prisma groupBy that was split by currency back into one row per
+ * key, with the money converted into the base currency.
+ *
+ * Grouping by currency is what makes conversion possible at all, but the UI wants
+ * one row per stage or status, so the currency dimension is folded away here.
+ * Groups whose currency has no notified rate are counted rather than added, so a
+ * chart never shows a total that quietly excludes some records.
+ */
+function collapseByCurrency<T extends Record<string, any>>(
+  groups: T[],
+  keyField: keyof T,
+  getValue: (group: T) => number,
+  rates: Map<string, number>
+): { key: string; count: number; value: number; unconvertedCount: number }[] {
+  const collapsed = new Map<
+    string,
+    { key: string; count: number; value: number; unconvertedCount: number }
+  >();
+
+  for (const group of groups) {
+    const key = String(group[keyField]);
+    const entry =
+      collapsed.get(key) ?? { key, count: 0, value: 0, unconvertedCount: 0 };
+
+    entry.count += group._count?.id ?? 0;
+
+    const currencyId = group.currencyId as string | null;
+    const rate = currencyId ? rates.get(currencyId) : undefined;
+    if (rate === undefined) {
+      entry.unconvertedCount += group._count?.id ?? 0;
+    } else {
+      entry.value += getValue(group) * rate;
+    }
+
+    collapsed.set(key, entry);
+  }
+
+  return [...collapsed.values()].map((e) => ({
+    ...e,
+    value: Math.round((e.value + Number.EPSILON) * 100) / 100,
+  }));
+}
 
 const router: Router = Router();
 
@@ -16,8 +65,6 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
     // Parallel queries for performance
     const [
       // Revenue & Orders
-      monthlyRevenue,
-      yearlyRevenue,
       totalOrders,
       activeOrders,
       
@@ -29,8 +76,6 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
       activeShipments,
       
       // Finance
-      totalReceivables,
-      overdueReceivables,
       
       // Recent items
       recentInquiries,
@@ -41,17 +86,6 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
       totalBuyers,
       activeBuyers,
     ] = await Promise.all([
-      // Monthly revenue (paid invoices this month)
-      prisma.payment.aggregate({
-        where: { paymentDate: { gte: startOfMonth } },
-        _sum: { amount: true },
-      }),
-      
-      // Yearly revenue
-      prisma.payment.aggregate({
-        where: { paymentDate: { gte: startOfYear } },
-        _sum: { amount: true },
-      }),
       
       // Total orders this year
       prisma.exportOrder.count({
@@ -76,18 +110,6 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
       // Active shipments
       prisma.shipment.count({
         where: { status: { in: ['PENDING', 'BOOKED', 'IN_TRANSIT'] } },
-      }),
-      
-      // Total receivables
-      prisma.invoice.aggregate({
-        where: { status: { in: ['SENT', 'PARTIALLY_PAID', 'OVERDUE'] } },
-        _sum: { balanceAmount: true },
-      }),
-      
-      // Overdue receivables
-      prisma.invoice.aggregate({
-        where: { status: 'OVERDUE' },
-        _sum: { balanceAmount: true },
       }),
       
       // Recent inquiries
@@ -122,26 +144,105 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
       prisma.buyer.count({ where: { status: 'ACTIVE' } }),
     ]);
 
-    // Pipeline value
-    const pipelineValue = await prisma.inquiry.aggregate({
-      where: { stage: { notIn: ['WON', 'LOST'] } },
-      _sum: { expectedValue: true },
-    });
+    /**
+     * Money figures below are converted into the base currency before being
+     * summed. Previously these were Prisma _sum aggregates, which add the raw
+     * numbers regardless of currency - a USD 5,900 payment and a EUR 3,000
+     * payment came out as 8,900 of nothing.
+     *
+     * Prisma cannot convert inside an aggregate, so each figure is fetched with
+     * its currency and converted in application code. Rows whose currency has no
+     * notified rate are reported rather than silently dropped.
+     */
+    const { base, rates: ratesByCode } = await buildRateMapByCode(today);
+    const { rates: ratesById } = await buildRateMap(today);
+
+    const [
+      monthlyPayments,
+      yearlyPayments,
+      receivableInvoices,
+      overdueInvoices,
+      pipelineInquiries,
+    ] = await Promise.all([
+      prisma.payment.findMany({
+        where: { paymentDate: { gte: startOfMonth } },
+        select: { amount: true, currency: true },
+      }),
+      prisma.payment.findMany({
+        where: { paymentDate: { gte: startOfYear } },
+        select: { amount: true, currency: true },
+      }),
+      prisma.invoice.findMany({
+        where: { status: { in: ['SENT', 'PARTIALLY_PAID', 'OVERDUE'] } },
+        select: { balanceAmount: true, currencyId: true },
+      }),
+      prisma.invoice.findMany({
+        where: { status: 'OVERDUE' },
+        select: { balanceAmount: true, currencyId: true },
+      }),
+      prisma.inquiry.findMany({
+        where: { stage: { notIn: ['WON', 'LOST'] } },
+        select: { expectedValue: true, currencyId: true },
+      }),
+    ]);
+
+    const monthlyRevenue = sumConverted(
+      monthlyPayments.map((p) => ({ amount: Number(p.amount), currencyId: p.currency })),
+      ratesByCode
+    );
+    const yearlyRevenue = sumConverted(
+      yearlyPayments.map((p) => ({ amount: Number(p.amount), currencyId: p.currency })),
+      ratesByCode
+    );
+    const totalReceivables = sumConverted(
+      receivableInvoices.map((i) => ({
+        amount: Number(i.balanceAmount),
+        currencyId: i.currencyId,
+      })),
+      ratesById
+    );
+    const overdueReceivables = sumConverted(
+      overdueInvoices.map((i) => ({ amount: Number(i.balanceAmount), currencyId: i.currencyId })),
+      ratesById
+    );
+    // Inquiries may predate the currency column, so those without one cannot be
+    // converted and are counted as unconvertible instead of assumed.
+    const pipelineValue = sumConverted(
+      pipelineInquiries
+        .filter((i) => i.expectedValue !== null)
+        .map((i) => ({
+          amount: Number(i.expectedValue),
+          currencyId: i.currencyId ?? '__unknown__',
+        })),
+      ratesById
+    );
+
+    const unconverted =
+      monthlyRevenue.unconvertedCount +
+      yearlyRevenue.unconvertedCount +
+      totalReceivables.unconvertedCount +
+      overdueReceivables.unconvertedCount +
+      pipelineValue.unconvertedCount;
 
     res.json({
       success: true,
       data: {
+        // Every money figure below is expressed in this currency.
+        baseCurrency: base,
+        // Non-zero means some records could not be converted, so the totals are
+        // understated. The UI surfaces this rather than showing a clean number.
+        unconvertedRecords: unconverted,
         kpis: {
-          monthlyRevenue: monthlyRevenue._sum.amount || 0,
-          yearlyRevenue: yearlyRevenue._sum.amount || 0,
+          monthlyRevenue: monthlyRevenue.total,
+          yearlyRevenue: yearlyRevenue.total,
           totalOrders,
           activeOrders,
           openInquiries,
           pendingQuotations,
           activeShipments,
-          totalReceivables: totalReceivables._sum.balanceAmount || 0,
-          overdueReceivables: overdueReceivables._sum.balanceAmount || 0,
-          pipelineValue: pipelineValue._sum.expectedValue || 0,
+          totalReceivables: totalReceivables.total,
+          overdueReceivables: overdueReceivables.total,
+          pipelineValue: pipelineValue.total,
           totalBuyers,
           activeBuyers,
         },
@@ -167,16 +268,18 @@ router.get('/sales', can('DASHBOARD_SALES'), async (req, res, next) => {
       topBuyers,
       salesByMonth,
     ] = await Promise.all([
-      // Inquiries by stage
+      // Inquiries by stage. Grouped by currency as well, so the value can be
+      // converted before being totalled - a plain _sum here would add rupees to
+      // dollars.
       prisma.inquiry.groupBy({
-        by: ['stage'],
+        by: ['stage', 'currencyId'],
         _count: { id: true },
         _sum: { expectedValue: true },
       }),
       
-      // Quotations by status
+      // Quotations by status, likewise grouped by currency
       prisma.quotation.groupBy({
-        by: ['status'],
+        by: ['status', 'currencyId'],
         _count: { id: true },
         _sum: { grandTotal: true },
       }),
@@ -207,11 +310,26 @@ router.get('/sales', can('DASHBOARD_SALES'), async (req, res, next) => {
       `,
     ]);
 
+    // The two groupBy results above are split by currency, so collapse them back
+    // to one row per stage/status with the value converted into the base currency.
+    const { base: analyticsBase, rates: analyticsRates } = await buildRateMap(new Date());
+
     res.json({
       success: true,
       data: {
-        inquiriesByStage,
-        quotationsByStatus,
+        baseCurrency: analyticsBase,
+        inquiriesByStage: collapseByCurrency(
+          inquiriesByStage,
+          'stage',
+          (g: any) => Number(g._sum.expectedValue ?? 0),
+          analyticsRates
+        ),
+        quotationsByStatus: collapseByCurrency(
+          quotationsByStatus,
+          'status',
+          (g: any) => Number(g._sum.grandTotal ?? 0),
+          analyticsRates
+        ),
         topBuyers,
         salesByMonth,
       },

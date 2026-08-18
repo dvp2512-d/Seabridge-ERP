@@ -4,6 +4,7 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
+import { buildRateMap } from '../services/exchangeRateService';
 import {
   buildCommercialInvoiceDocument,
   buildProformaInvoiceDocument,
@@ -29,7 +30,7 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
       ];
     }
 
-    const [invoices, total, statusGroups, amountTotals, overdueCount] = await Promise.all([
+    const [invoices, total, statusGroups, overdueCount] = await Promise.all([
       prisma.invoice.findMany({
         where,
         include: {
@@ -43,16 +44,14 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
       }),
       prisma.invoice.count({ where }),
       // Summary figures must cover the whole filtered set, not just this page,
-      // otherwise the dashboard cards understate receivables.
+      // otherwise the dashboard cards understate receivables. Grouped by currency
+      // as well so the money can be converted before being totalled - invoices
+      // in different currencies cannot simply be added.
       prisma.invoice.groupBy({
-        by: ['status'],
+        by: ['status', 'currencyId'],
         where,
         _count: { _all: true },
-        _sum: { balanceAmount: true, paidAmount: true },
-      }),
-      prisma.invoice.aggregate({
-        where,
-        _sum: { totalAmount: true, paidAmount: true, balanceAmount: true },
+        _sum: { balanceAmount: true, paidAmount: true, totalAmount: true },
       }),
       prisma.invoice.count({
         where: {
@@ -63,25 +62,48 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
       }),
     ]);
 
+    // Fold the currency dimension away, converting as we go. Records whose
+    // currency has no notified rate are counted so the UI can say the totals are
+    // incomplete instead of showing a smaller number as if it were the whole set.
+    const { base, rates } = await buildRateMap(new Date());
+
     const countByStatus: Record<string, number> = {};
     let outstanding = 0;
+    let invoiced = 0;
+    let collected = 0;
+    let unconverted = 0;
+
     for (const group of statusGroups) {
-      countByStatus[group.status] = group._count._all;
+      countByStatus[group.status] = (countByStatus[group.status] ?? 0) + group._count._all;
+
+      const rate = rates.get(group.currencyId);
+      if (rate === undefined) {
+        unconverted += group._count._all;
+        continue;
+      }
+
+      invoiced += Number(group._sum.totalAmount ?? 0) * rate;
+      collected += Number(group._sum.paidAmount ?? 0) * rate;
       if (!['PAID', 'CANCELLED'].includes(group.status)) {
-        outstanding += Number(group._sum.balanceAmount ?? 0);
+        outstanding += Number(group._sum.balanceAmount ?? 0) * rate;
       }
     }
+
+    const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
 
     res.json({
       success: true,
       data: invoices,
       pagination: { page: Number(page), limit: Number(limit), total },
       summary: {
+        // Every money figure here is in this currency, not the invoice's own.
+        baseCurrency: base,
+        unconvertedRecords: unconverted,
         countByStatus,
         overdueCount,
-        totalInvoiced: Number(amountTotals._sum.totalAmount ?? 0),
-        totalCollected: Number(amountTotals._sum.paidAmount ?? 0),
-        totalOutstanding: outstanding,
+        totalInvoiced: round2(invoiced),
+        totalCollected: round2(collected),
+        totalOutstanding: round2(outstanding),
       },
     });
   } catch (error) {

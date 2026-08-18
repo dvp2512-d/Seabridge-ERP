@@ -19,6 +19,7 @@ import { dashboardRouter } from './routes/dashboard';
 import { masterDataRouter } from './routes/masterData';
 import { automationRouter } from './routes/automation';
 import { settingsRouter } from './routes/settings';
+import { exchangeRateRouter } from './routes/exchangeRates';
 
 dotenv.config();
 
@@ -55,6 +56,7 @@ app.use('/api/dashboard', dashboardRouter);
 app.use('/api/master', masterDataRouter);
 app.use('/api/automation', automationRouter);
 app.use('/api/settings', settingsRouter);
+app.use('/api/exchange-rates', exchangeRateRouter);
 
 // Error handling
 // 404 for anything that didn't match a route above, then the error handler.

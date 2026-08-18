@@ -138,6 +138,38 @@ echo [2/7] Preparing configuration (.env)
 
 if exist ".env" (
   echo       [OK] .env already exists - leaving it untouched
+
+  REM An existing .env is never overwritten, so it can still hold the
+  REM placeholders from .env.example or the weak defaults this repo once
+  REM published. Placeholders could never have worked, so fail on those.
+  REM Known-weak real values are warned about instead of failed, because the
+  REM database was created with them and rotating needs a deliberate step.
+  findstr /C:"CHANGE_ME" ".env" >nul 2>&1
+  if not errorlevel 1 (
+    echo.
+    echo       ERROR: .env still contains CHANGE_ME placeholders.
+    echo.
+    echo       Edit .env and set POSTGRES_PASSWORD and JWT_SECRET to real
+    echo       values, or delete .env and re-run this script to have strong
+    echo       ones generated for you.
+    exit /b 1
+  )
+
+  findstr /C:"seabridge123" ".env" >nul 2>&1
+  if not errorlevel 1 (
+    echo.
+    echo       [!] WARNING: .env uses a password that was published in this
+    echo           repository's history. Anyone who has seen the repo knows it.
+    echo.
+    echo           To rotate safely, back up your data first:
+    echo             docker compose exec -T postgres pg_dump -U seabridge seabridge_erp ^> backup.sql
+    echo           then change POSTGRES_PASSWORD in .env, and run:
+    echo             deploy.cmd fresh
+    echo           which recreates the database with the new password.
+    echo.
+    echo           Continuing in 10 seconds. Press Ctrl+C to stop.
+    timeout /t 10 >nul 2>&1
+  )
 ) else (
   REM Generate cryptographically strong secrets. PowerShell ships with Windows,
   REM so this keeps the script to a single file without needing Node.js.
