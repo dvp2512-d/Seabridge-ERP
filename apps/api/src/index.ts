@@ -24,6 +24,7 @@ import { expenseRouter } from './routes/expenses';
 import { taskRouter } from './routes/tasks';
 import { auditRouter } from './routes/audit';
 import { auditLog } from './middleware/auditLog';
+import { lifecycleRouter } from './routes/lifecycle';
 
 dotenv.config();
 
@@ -72,6 +73,7 @@ app.use('/api/exchange-rates', exchangeRateRouter);
 app.use('/api/expenses', expenseRouter);
 app.use('/api/tasks', taskRouter);
 app.use('/api/audit', auditRouter);
+app.use('/api/lifecycle', lifecycleRouter);
 
 // Error handling
 // 404 for anything that didn't match a route above, then the error handler.

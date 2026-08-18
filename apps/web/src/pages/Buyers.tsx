@@ -1,7 +1,7 @@
 // Enhanced Buyers Page
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { buyersApi, masterApi } from '@/lib/api';
 import { formatCurrency, formatDate, getStatusColor } from '@/lib/utils';
@@ -9,20 +9,35 @@ import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
-import { Plus, Search, Eye, Building2, MapPin, TrendingUp } from 'lucide-react';
+import RowActions from '@/components/ui/RowActions';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { useLifecycleActions } from '@/hooks/useLifecycleActions';
+import { Plus, Search, Building2, MapPin, TrendingUp } from 'lucide-react';
 
 export default function Buyers() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
+  // Deactivate / cancel flow, shared with every other list so the
+  // wording and confirmations stay consistent.
+  const lifecycle = useLifecycleActions(['buyers']);
+  // Deactivated rows are hidden by default. Revealing them is what makes a
+  // deactivation reversible without database access.
+  const [showInactive, setShowInactive] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [countryFilter, setCountryFilter] = useState('');
   const [showModal, setShowModal] = useState(false);
+  // The same modal serves both create and edit; null means create.
+  const [editBuyer, setEditBuyer] = useState<any>(null);
+
+  const openEdit = (b: any) => { setEditBuyer(b); setShowModal(true); };
+  const openAdd = () => { setEditBuyer(null); setShowModal(true); };
   const [page, setPage] = useState(1);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['buyers', search, statusFilter, countryFilter, page],
-    queryFn: () => buyersApi.list({ 
+    queryKey: ['buyers', search, statusFilter, countryFilter, page, showInactive],
+    queryFn: () => buyersApi.list({
+      isActive: showInactive ? undefined : true, 
       search: search || undefined, 
       status: statusFilter || undefined,
       countryId: countryFilter || undefined,
@@ -46,11 +61,26 @@ export default function Buyers() {
 
   return (
     <div className="space-y-6">
+      {/* Confirmation for deactivate, cancel and delete */}
+      {lifecycle.dialog && (
+        <ConfirmDialog
+          isOpen
+          title={lifecycle.dialog.title}
+          message={lifecycle.dialog.message}
+          consequences={lifecycle.dialog.consequences}
+          tone={lifecycle.dialog.tone}
+          requireTyping={lifecycle.dialog.requireTyping}
+          confirmLabel={lifecycle.dialog.confirmLabel}
+          isPending={lifecycle.isPending}
+          onConfirm={lifecycle.confirm}
+          onCancel={lifecycle.dismiss}
+        />
+      )}
       <PageHeader
         title="Buyers"
         subtitle={`${pagination?.total || 0} total buyers`}
         actions={
-          <button onClick={() => setShowModal(true)} className="btn btn-primary">
+          <button onClick={openAdd} className="btn btn-primary">
             <Plus className="w-4 h-4 mr-2" />
             Add Buyer
           </button>
@@ -110,12 +140,21 @@ export default function Buyers() {
                 : 'Get started by adding your first buyer'}
             </p>
             {!search && !statusFilter && !countryFilter && (
-              <button onClick={() => setShowModal(true)} className="btn btn-primary">
+              <button onClick={openAdd} className="btn btn-primary">
                 <Plus className="w-4 h-4 mr-2" />
                 Add Buyer
               </button>
             )}
           </div>
+            <label className="flex items-center gap-2 text-sm text-gray-600 whitespace-nowrap">
+              <input
+                type="checkbox"
+                checked={showInactive}
+                onChange={(e) => setShowInactive(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              Show inactive
+            </label>
         </div>
       ) : (
         <>
@@ -173,12 +212,34 @@ export default function Buyers() {
                       {buyer.lastOrderDate ? formatDate(buyer.lastOrderDate) : 'Never'}
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
-                      <Link
-                        to={`/buyers/${buyer.id}`}
-                        className="btn btn-secondary py-1 px-2"
-                      >
-                        <Eye className="w-4 h-4" />
-                      </Link>
+                      <RowActions
+                        viewHref={`/buyers/${buyer.id}`}
+                        onEdit={() => openEdit(buyer)}
+                        editPermission="BUYER_MANAGE"
+                        destructiveKind="deactivate"
+                        // Inquiries, quotations, orders and invoices all reference
+                        // buyers, so they are deactivated rather than removed.
+                        onDestructive={
+                          buyer.isActive
+                            ? () =>
+                                lifecycle.request(
+                                  { kind: 'deactivate', resource: 'buyers' },
+                                  buyer.id,
+                                  buyer.companyName
+                                )
+                            : undefined
+                        }
+                        onReactivate={
+                          !buyer.isActive
+                            ? () =>
+                                lifecycle.request(
+                                  { kind: 'reactivate', resource: 'buyers' },
+                                  buyer.id,
+                                  buyer.companyName
+                                )
+                            : undefined
+                        }
+                      />
                     </td>
                   </tr>
                 ))}
@@ -217,14 +278,18 @@ export default function Buyers() {
       {/* Add Buyer Modal */}
       {showModal && (
         <AddBuyerModal
+          buyer={editBuyer}
           dropdowns={dropdowns?.data?.data}
-          onClose={() => setShowModal(false)}
+          onClose={() => { setShowModal(false); setEditBuyer(null); }}
           onSuccess={(newBuyer) => {
             setShowModal(false);
             queryClient.invalidateQueries({ queryKey: ['buyers'] });
-            if (newBuyer?.id) {
+            // Only jump to the detail page for a newly created buyer. Navigating
+            // away after an edit would lose the list filters the user had set.
+            if (!editBuyer && newBuyer?.id) {
               navigate(`/buyers/${newBuyer.id}`);
             }
+            setEditBuyer(null);
           }}
         />
       )}
@@ -233,30 +298,34 @@ export default function Buyers() {
 }
 
 // Add Buyer Modal
-function AddBuyerModal({ dropdowns, onClose, onSuccess }: { dropdowns: any; onClose: () => void; onSuccess: (buyer?: any) => void }) {
+function AddBuyerModal({ buyer, dropdowns, onClose, onSuccess }: { buyer?: any; dropdowns: any; onClose: () => void; onSuccess: (buyer?: any) => void }) {
+  // Prefill when editing an existing buyer; blank when creating.
+  const isEdit = !!buyer;
   const [formData, setFormData] = useState({
-    companyName: '',
-    tradeName: '',
-    countryId: '',
-    address: '',
-    city: '',
-    website: '',
-    industry: '',
-    status: 'LEAD',
-    source: '',
-    currencyId: '',
-    paymentTerms: '',
-    notes: '',
+    companyName: buyer?.companyName ?? '',
+    tradeName: buyer?.tradeName ?? '',
+    countryId: buyer?.countryId ?? '',
+    address: buyer?.address ?? '',
+    city: buyer?.city ?? '',
+    website: buyer?.website ?? '',
+    industry: buyer?.industry ?? '',
+    status: buyer?.status ?? 'LEAD',
+    source: buyer?.source ?? '',
+    currencyId: buyer?.currencyId ?? '',
+    paymentTerms: buyer?.paymentTerms ?? '',
+    notes: buyer?.notes ?? '',
   });
 
   const mutation = useMutation({
-    mutationFn: (data: any) => buyersApi.create(data),
+    mutationFn: (data: any) => (isEdit ? buyersApi.update(buyer.id, data) : buyersApi.create(data)),
     onSuccess: (response) => {
-      toast.success('Buyer created successfully');
+      toast.success(isEdit ? 'Buyer updated' : 'Buyer created successfully');
       onSuccess(response.data?.data);
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || 'Failed to create buyer');
+      toast.error(
+        error.response?.data?.message || `Failed to ${isEdit ? 'update' : 'create'} buyer`
+      );
     },
   });
 
@@ -266,7 +335,7 @@ function AddBuyerModal({ dropdowns, onClose, onSuccess }: { dropdowns: any; onCl
   };
 
   return (
-    <Modal isOpen onClose={onClose} title="Add New Buyer" size="lg">
+    <Modal isOpen onClose={onClose} title={isEdit ? "Edit Buyer" : "Add New Buyer"} size="lg">
       <form onSubmit={handleSubmit} className="p-6 space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <FormField 

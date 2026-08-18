@@ -8,6 +8,9 @@ import PageHeader from '@/components/ui/PageHeader';
 import { formatCurrency, formatDate, getStatusColor, downloadFile, isPastDue, cn } from '@/lib/utils';
 import UnconvertedNotice from '@/components/ui/UnconvertedNotice';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
+import RowActions from '@/components/ui/RowActions';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { useLifecycleActions } from '@/hooks/useLifecycleActions';
 import { Plus, Search, Eye, Download, FileText, Clock, CheckCircle } from 'lucide-react';
 
 const STATUSES = [
@@ -22,6 +25,12 @@ const STATUSES = [
 export default function Quotations() {
   const navigate = useNavigate();  const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+
+  // Deactivate / cancel flow, shared with every other list so the
+
+  // wording and confirmations stay consistent.
+
+  const lifecycle = useLifecycleActions(['quotations']);
   const [page, setPage] = useState(1);
 
   const { data, isLoading } = useQuery({
@@ -69,6 +78,21 @@ export default function Quotations() {
 
   return (
     <div className="space-y-6">
+      {/* Confirmation for deactivate, cancel and delete */}
+      {lifecycle.dialog && (
+        <ConfirmDialog
+          isOpen
+          title={lifecycle.dialog.title}
+          message={lifecycle.dialog.message}
+          consequences={lifecycle.dialog.consequences}
+          tone={lifecycle.dialog.tone}
+          requireTyping={lifecycle.dialog.requireTyping}
+          confirmLabel={lifecycle.dialog.confirmLabel}
+          isPending={lifecycle.isPending}
+          onConfirm={lifecycle.confirm}
+          onCancel={lifecycle.dismiss}
+        />
+      )}
       <UnconvertedNotice count={unconvertedRecords} baseCode={baseCode} />
       <PageHeader
         title="Quotations"
@@ -217,6 +241,28 @@ export default function Quotations() {
                       >
                         <Download className="w-4 h-4" />
                       </button>
+                      <RowActions
+                        // A draft has not been sent to a buyer and nothing
+                        // references it, so it can be removed outright. Anything
+                        // beyond draft keeps its number and is cancelled.
+                        destructiveKind={q.status === 'DRAFT' ? 'delete' : 'cancel'}
+                        onDestructive={() =>
+                          lifecycle.request(
+                            q.status === 'DRAFT'
+                              ? { kind: 'deleteDraftQuotation' }
+                              : { kind: 'cancelQuotation' },
+                            q.id,
+                            q.quotationNumber
+                          )
+                        }
+                        destructiveDisabledReason={
+                          q.status === 'REJECTED'
+                            ? 'Already cancelled'
+                            : q.orders?.length
+                            ? 'Converted to an order - cancel that first'
+                            : undefined
+                        }
+                      />
                     </div>
                   </td>
                 </tr>

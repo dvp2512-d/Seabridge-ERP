@@ -252,6 +252,39 @@ export const exchangeRatesApi = {
 };
 
 // ============================================
+// RECORD LIFECYCLE
+// ============================================
+
+/**
+ * Deactivate, reactivate and cancel.
+ *
+ * Master data deactivates because foreign keys are RESTRICT - a hard delete of a
+ * product that appears on any order fails at the database. Business documents
+ * cancel because their numbers appear on customs paperwork. Only drafts and
+ * internal records really delete.
+ */
+export const lifecycleApi = {
+  /** What deactivating would affect, for the confirmation dialog */
+  preview: (resource: string, id: string) =>
+    api.get(`/lifecycle/${resource}/${id}/preview`),
+  deactivate: (resource: string, id: string) =>
+    api.put(`/lifecycle/${resource}/${id}/deactivate`),
+  reactivate: (resource: string, id: string) =>
+    api.put(`/lifecycle/${resource}/${id}/reactivate`),
+
+  // Documents keep their number and are marked void
+  cancelInvoice: (id: string, reason?: string) => api.put(`/invoices/${id}/cancel`, { reason }),
+  cancelOrder: (id: string, reason?: string) => api.put(`/orders/${id}/cancel`, { reason }),
+  cancelQuotation: (id: string, reason?: string) => api.put(`/quotations/${id}/cancel`, { reason }),
+  cancelInquiry: (id: string, reason?: string) => api.put(`/inquiries/${id}/cancel`, { reason }),
+
+  /** Genuine deletion, draft quotations only */
+  deleteDraftQuotation: (id: string) => api.delete(`/quotations/${id}`),
+
+  reactivateUser: (id: string) => api.put(`/users/${id}/reactivate`),
+};
+
+// ============================================
 // EXPENSES, TASKS, AUDIT
 // ============================================
 

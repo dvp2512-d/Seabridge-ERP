@@ -4,6 +4,7 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
+import { cancelOrder } from '../services/cancellationService';
 import { createOrderFromQuotation } from '../services/orderService';
 import { buildPackingListDocument } from '../services/exportDocuments';
 import { buildRateMapByCode } from '../services/exchangeRateService';
@@ -365,6 +366,16 @@ router.put('/:id/items/:itemId/packing', can('OPERATIONS_MANAGE'), async (req, r
     });
 
     res.json({ success: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Cancel an order. Blocked once goods have shipped or an invoice exists. */
+router.put('/:id/cancel', can('SETTINGS_MANAGE'), async (req, res, next) => {
+  try {
+    const result = await cancelOrder(req.params.id, req.body?.reason);
+    res.json({ success: true, data: result, message: result.message });
   } catch (error) {
     next(error);
   }

@@ -6,21 +6,31 @@ import { suppliersApi, masterApi, productsApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
-import { Plus, Search, Edit2, Star, Eye, Building2, DollarSign } from 'lucide-react';
+import { Plus, Search, Star, Eye, Building2, DollarSign } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
+import RowActions from '@/components/ui/RowActions';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { useLifecycleActions } from '@/hooks/useLifecycleActions';
 
 export default function Suppliers() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
+  // Deactivate / cancel flow, shared with every other list so the
+  // wording and confirmations stay consistent.
+  const lifecycle = useLifecycleActions(['suppliers']);
+  // Deactivated rows are hidden by default. Revealing them is what makes a
+  // deactivation reversible without database access.
+  const [showInactive, setShowInactive] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editSupplier, setEditSupplier] = useState<any>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedSupplier, setSelectedSupplier] = useState<any>(null);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['suppliers', search],
-    queryFn: () => suppliersApi.list({ search: search || undefined }),
+    queryKey: ['suppliers', search, showInactive],
+    queryFn: () => suppliersApi.list({
+      isActive: showInactive ? undefined : true, search: search || undefined }),
   });
 
   const { data: dropdowns } = useQuery({
@@ -39,6 +49,21 @@ export default function Suppliers() {
 
   return (
     <div className="space-y-6">
+      {/* Confirmation for deactivate, cancel and delete */}
+      {lifecycle.dialog && (
+        <ConfirmDialog
+          isOpen
+          title={lifecycle.dialog.title}
+          message={lifecycle.dialog.message}
+          consequences={lifecycle.dialog.consequences}
+          tone={lifecycle.dialog.tone}
+          requireTyping={lifecycle.dialog.requireTyping}
+          confirmLabel={lifecycle.dialog.confirmLabel}
+          isPending={lifecycle.isPending}
+          onConfirm={lifecycle.confirm}
+          onCancel={lifecycle.dismiss}
+        />
+      )}
       <PageHeader
         title="Suppliers"
         subtitle={`${suppliers.length} suppliers`}
@@ -77,6 +102,15 @@ export default function Suppliers() {
             <Plus className="w-4 h-4 mr-2" />
             Add Supplier
           </button>
+            <label className="flex items-center gap-2 text-sm text-gray-600 whitespace-nowrap">
+              <input
+                type="checkbox"
+                checked={showInactive}
+                onChange={(e) => setShowInactive(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              Show inactive
+            </label>
         </div>
       ) : (
         <div className="card overflow-hidden">
@@ -120,9 +154,33 @@ export default function Suppliers() {
                       <button onClick={() => viewDetails(supplier)} className="text-navy-600 hover:text-navy-800">
                         <Eye className="w-4 h-4" />
                       </button>
-                      <button onClick={() => { setEditSupplier(supplier); setShowModal(true); }} className="text-gray-400 hover:text-gray-600">
-                        <Edit2 className="w-4 h-4" />
-                      </button>
+                      <RowActions
+                        onEdit={() => { setEditSupplier(supplier); setShowModal(true); }}
+                        editPermission="MASTER_MANAGE"
+                        destructiveKind="deactivate"
+                        // Price lists and procurements reference suppliers with
+                        // RESTRICT, so deactivating is the only safe removal.
+                        onDestructive={
+                          supplier.isActive
+                            ? () =>
+                                lifecycle.request(
+                                  { kind: 'deactivate', resource: 'suppliers' },
+                                  supplier.id,
+                                  supplier.companyName ?? supplier.name
+                                )
+                            : undefined
+                        }
+                        onReactivate={
+                          !supplier.isActive
+                            ? () =>
+                                lifecycle.request(
+                                  { kind: 'reactivate', resource: 'suppliers' },
+                                  supplier.id,
+                                  supplier.companyName ?? supplier.name
+                                )
+                            : undefined
+                        }
+                      />
                     </div>
                   </td>
                 </tr>

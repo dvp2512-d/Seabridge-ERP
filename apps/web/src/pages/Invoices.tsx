@@ -8,6 +8,9 @@ import PageHeader from '@/components/ui/PageHeader';
 import { formatCurrency, formatDate, getStatusColor, downloadFile, isPastDue, cn } from '@/lib/utils';
 import UnconvertedNotice from '@/components/ui/UnconvertedNotice';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
+import RowActions from '@/components/ui/RowActions';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { useLifecycleActions } from '@/hooks/useLifecycleActions';
 import {
   Search,
   Eye,
@@ -31,6 +34,12 @@ const INVOICE_STATUSES = [
 export default function Invoices() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
+
+  // Deactivate / cancel flow, shared with every other list so the
+
+  // wording and confirmations stay consistent.
+
+  const lifecycle = useLifecycleActions(['invoices']);
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
 
@@ -91,6 +100,21 @@ export default function Invoices() {
 
   return (
     <div className="space-y-6">
+      {/* Confirmation for deactivate, cancel and delete */}
+      {lifecycle.dialog && (
+        <ConfirmDialog
+          isOpen
+          title={lifecycle.dialog.title}
+          message={lifecycle.dialog.message}
+          consequences={lifecycle.dialog.consequences}
+          tone={lifecycle.dialog.tone}
+          requireTyping={lifecycle.dialog.requireTyping}
+          confirmLabel={lifecycle.dialog.confirmLabel}
+          isPending={lifecycle.isPending}
+          onConfirm={lifecycle.confirm}
+          onCancel={lifecycle.dismiss}
+        />
+      )}
       <UnconvertedNotice count={unconvertedRecords} baseCode={baseCode} />
       <PageHeader
         title="Invoices & Receivables"
@@ -291,6 +315,27 @@ export default function Invoices() {
                         >
                           <Download className="w-4 h-4" />
                         </button>
+                        <RowActions
+                          destructiveKind="cancel"
+                          // The invoice number appears on customs paperwork, so it
+                          // is voided rather than deleted. Blocked once any payment
+                          // exists, which would otherwise leave the buyer's ledger
+                          // showing money paid against nothing.
+                          onDestructive={() =>
+                            lifecycle.request(
+                              { kind: 'cancelInvoice' },
+                              invoice.id,
+                              invoice.invoiceNumber
+                            )
+                          }
+                          destructiveDisabledReason={
+                            invoice.status === 'CANCELLED'
+                              ? 'Already cancelled'
+                              : Number(invoice.paidAmount) > 0
+                              ? 'Payment received - issue a credit note instead'
+                              : undefined
+                          }
+                        />
                       </div>
                     </td>
                   </tr>

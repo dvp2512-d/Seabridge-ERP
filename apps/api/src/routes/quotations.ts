@@ -4,6 +4,7 @@ import { prisma, Prisma, InquiryStage } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode, calculateMarginPercent } from '../utils/helpers';
+import { cancelQuotation, deleteDraftQuotation } from '../services/cancellationService';
 import { buildQuotationDocument } from '../services/exportDocuments';
 import { buildRateMap } from '../services/exchangeRateService';
 import { emitEvent } from '../services/eventService';
@@ -403,6 +404,31 @@ router.get('/:id/pdf', can('SALES_VIEW'), async (req, res, next) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${quotation.quotationNumber}.pdf"`);
     res.send(pdfBuffer);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Mark a quotation rejected. Blocked once it has become an order. */
+router.put('/:id/cancel', can('SETTINGS_MANAGE'), async (req, res, next) => {
+  try {
+    const result = await cancelQuotation(req.params.id, req.body?.reason);
+    res.json({ success: true, data: result, message: result.message });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Delete a draft quotation outright.
+ *
+ * Only a DRAFT with no order: nothing has gone to a buyer and nothing references
+ * it, so no history is lost. Anything further along is cancelled instead.
+ */
+router.delete('/:id', can('SETTINGS_MANAGE'), async (req, res, next) => {
+  try {
+    const result = await deleteDraftQuotation(req.params.id);
+    res.json({ success: true, data: result, message: result.message });
   } catch (error) {
     next(error);
   }

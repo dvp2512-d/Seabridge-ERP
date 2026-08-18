@@ -6,21 +6,31 @@ import { chaApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
-import { Plus, Search, Edit2, Star, Eye, Anchor, DollarSign } from 'lucide-react';
+import { Plus, Search, Star, Eye, Anchor, DollarSign } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
+import RowActions from '@/components/ui/RowActions';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { useLifecycleActions } from '@/hooks/useLifecycleActions';
 
 export default function CHAs() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
+  // Deactivate / cancel flow, shared with every other list so the
+  // wording and confirmations stay consistent.
+  const lifecycle = useLifecycleActions(['chas']);
+  // Deactivated rows are hidden by default. Revealing them is what makes a
+  // deactivation reversible without database access.
+  const [showInactive, setShowInactive] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editCha, setEditCha] = useState<any>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedCha, setSelectedCha] = useState<any>(null);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['chas', search],
-    queryFn: () => chaApi.list({ search: search || undefined }),
+    queryKey: ['chas', search, showInactive],
+    queryFn: () => chaApi.list({
+      isActive: showInactive ? undefined : true, search: search || undefined }),
   });
 
   const chas = data?.data?.data || [];
@@ -29,6 +39,21 @@ export default function CHAs() {
 
   return (
     <div className="space-y-6">
+      {/* Confirmation for deactivate, cancel and delete */}
+      {lifecycle.dialog && (
+        <ConfirmDialog
+          isOpen
+          title={lifecycle.dialog.title}
+          message={lifecycle.dialog.message}
+          consequences={lifecycle.dialog.consequences}
+          tone={lifecycle.dialog.tone}
+          requireTyping={lifecycle.dialog.requireTyping}
+          confirmLabel={lifecycle.dialog.confirmLabel}
+          isPending={lifecycle.isPending}
+          onConfirm={lifecycle.confirm}
+          onCancel={lifecycle.dismiss}
+        />
+      )}
       <PageHeader
         title="CHA Agents"
         subtitle="Customs Handling Agents"
@@ -58,6 +83,15 @@ export default function CHAs() {
           <button onClick={() => setShowModal(true)} className="btn btn-primary mt-4">
             <Plus className="w-4 h-4 mr-2" />Add CHA
           </button>
+            <label className="flex items-center gap-2 text-sm text-gray-600 whitespace-nowrap">
+              <input
+                type="checkbox"
+                checked={showInactive}
+                onChange={(e) => setShowInactive(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              Show inactive
+            </label>
         </div>
       ) : (
         <div className="card overflow-hidden">
@@ -93,7 +127,31 @@ export default function CHAs() {
                   <td>
                     <div className="flex gap-2">
                       <button onClick={() => { setSelectedCha(cha); setShowDetailModal(true); }} className="text-navy-600"><Eye className="w-4 h-4" /></button>
-                      <button onClick={() => { setEditCha(cha); setShowModal(true); }} className="text-gray-400"><Edit2 className="w-4 h-4" /></button>
+                      <RowActions
+                        onEdit={() => { setEditCha(cha); setShowModal(true); }}
+                        editPermission="MASTER_MANAGE"
+                        destructiveKind="deactivate"
+                        onDestructive={
+                          cha.isActive
+                            ? () =>
+                                lifecycle.request(
+                                  { kind: 'deactivate', resource: 'cha' },
+                                  cha.id,
+                                  cha.companyName ?? cha.name
+                                )
+                            : undefined
+                        }
+                        onReactivate={
+                          !cha.isActive
+                            ? () =>
+                                lifecycle.request(
+                                  { kind: 'reactivate', resource: 'cha' },
+                                  cha.id,
+                                  cha.companyName ?? cha.name
+                                )
+                            : undefined
+                        }
+                      />
                     </div>
                   </td>
                 </tr>

@@ -6,19 +6,29 @@ import { productsApi, masterApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
-import { Plus, Search, Edit2, Package } from 'lucide-react';
+import { Plus, Search, Package } from 'lucide-react';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
+import RowActions from '@/components/ui/RowActions';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { useLifecycleActions } from '@/hooks/useLifecycleActions';
 
 export default function Products() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
+  // Deactivate / cancel flow, shared with every other list so the
+  // wording and confirmations stay consistent.
+  const lifecycle = useLifecycleActions(['products']);
+  // Deactivated rows are hidden by default. Revealing them is what makes a
+  // deactivation reversible without database access.
+  const [showInactive, setShowInactive] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editProduct, setEditProduct] = useState<any>(null);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['products', search, categoryFilter],
-    queryFn: () => productsApi.list({ 
+    queryKey: ['products', search, categoryFilter, showInactive],
+    queryFn: () => productsApi.list({
+      isActive: showInactive ? undefined : true, 
       search: search || undefined, 
       categoryId: categoryFilter || undefined 
     }),
@@ -47,6 +57,21 @@ export default function Products() {
 
   return (
     <div className="space-y-6">
+      {/* Confirmation for deactivate, cancel and delete */}
+      {lifecycle.dialog && (
+        <ConfirmDialog
+          isOpen
+          title={lifecycle.dialog.title}
+          message={lifecycle.dialog.message}
+          consequences={lifecycle.dialog.consequences}
+          tone={lifecycle.dialog.tone}
+          requireTyping={lifecycle.dialog.requireTyping}
+          confirmLabel={lifecycle.dialog.confirmLabel}
+          isPending={lifecycle.isPending}
+          onConfirm={lifecycle.confirm}
+          onCancel={lifecycle.dismiss}
+        />
+      )}
       <PageHeader
         title="Products"
         subtitle={`${products.length} products in catalog`}
@@ -105,6 +130,15 @@ export default function Products() {
               </button>
             )}
           </div>
+            <label className="flex items-center gap-2 text-sm text-gray-600 whitespace-nowrap">
+              <input
+                type="checkbox"
+                checked={showInactive}
+                onChange={(e) => setShowInactive(e.target.checked)}
+                className="rounded border-gray-300"
+              />
+              Show inactive
+            </label>
         </div>
       ) : (
         <div className="card overflow-hidden">
@@ -143,12 +177,34 @@ export default function Products() {
                     </span>
                   </td>
                   <td>
-                    <button
-                      onClick={() => openEdit(product)}
-                      className="text-navy-600 hover:text-navy-800"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
+                    <RowActions
+                      onEdit={() => openEdit(product)}
+                      editPermission="MASTER_MANAGE"
+                      destructiveKind="deactivate"
+                      // Quotations and orders reference products with RESTRICT
+                      // foreign keys, so a real delete fails once a product has
+                      // been used. It is hidden from new records instead.
+                      onDestructive={
+                        product.isActive
+                          ? () =>
+                              lifecycle.request(
+                                { kind: 'deactivate', resource: 'products' },
+                                product.id,
+                                product.name
+                              )
+                          : undefined
+                      }
+                      onReactivate={
+                        !product.isActive
+                          ? () =>
+                              lifecycle.request(
+                                { kind: 'reactivate', resource: 'products' },
+                                product.id,
+                                product.name
+                              )
+                          : undefined
+                      }
+                    />
                   </td>
                 </tr>
               ))}
