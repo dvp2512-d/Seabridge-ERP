@@ -277,7 +277,7 @@ router.patch('/:id/status', can('SALES_MANAGE'), async (req, res, next) => {
 
     const existing = await prisma.quotation.findUnique({
       where: { id: req.params.id },
-      select: { id: true, notes: true },
+      select: { id: true, notes: true, status: true },
     });
     if (!existing) throw new NotFoundError('Quotation');
 
@@ -294,6 +294,15 @@ router.patch('/:id/status', can('SALES_MANAGE'), async (req, res, next) => {
       data: updateData,
       include: { buyer: true, currency: true, incoterm: true },
     });
+
+    // Announce the transitions worth acting on. Guarded on the previous status so
+    // re-saving an already-sent quotation does not re-fire a webhook.
+    if (status === 'SENT' && existing.status !== 'SENT') {
+      emitEvent('quotation.sent', quotation);
+    }
+    if (status === 'ACCEPTED' && existing.status !== 'ACCEPTED') {
+      emitEvent('quotation.accepted', quotation);
+    }
 
     // Keep the linked inquiry's pipeline stage in sync.
     if (quotation.inquiryId) {

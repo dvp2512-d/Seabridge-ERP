@@ -175,7 +175,8 @@ router.put('/:id', can('OPERATIONS_MANAGE'), async (req, res, next) => {
 
     const existing = await prisma.exportOrder.findUnique({
       where: { id: req.params.id },
-      select: { id: true },
+      // Previous status is needed so the change event only fires on a real change
+      select: { id: true, status: true },
     });
     if (!existing) throw new NotFoundError('Order');
 
@@ -187,6 +188,15 @@ router.put('/:id', can('OPERATIONS_MANAGE'), async (req, res, next) => {
         incoterm: true,
       },
     });
+
+    // Only when the status actually moved, so an unrelated edit does not look
+    // like a status change to whoever is listening.
+    if (validation.data.status && validation.data.status !== existing.status) {
+      emitEvent('order.status_changed', {
+        ...order,
+        previousStatus: existing.status,
+      });
+    }
 
     res.json({ success: true, data: order });
   } catch (error) {
@@ -257,6 +267,68 @@ router.post('/:id/shipments', can('OPERATIONS_MANAGE'), async (req, res, next) =
 
     emitEvent('shipment.created', shipment);
     res.status(201).json({ success: true, data: shipment });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Update a shipment.
+ *
+ * Without this a shipment could only ever be created, so nothing could move past
+ * PENDING - which also meant the order cancellation guard that checks shipment
+ * status could never trigger, and shipment.status_changed could never fire.
+ *
+ * Departure and arrival are stamped automatically when the status reaches the
+ * matching stage, so the dates cannot silently disagree with the status.
+ */
+router.put('/:id/shipments/:shipmentId', can('OPERATIONS_MANAGE'), async (req, res, next) => {
+  try {
+    const schema = z.object({
+      status: z.enum(['PENDING', 'BOOKED', 'IN_TRANSIT', 'ARRIVED', 'DELIVERED']).optional(),
+      chaId: z.string().nullable().optional(),
+      transporterId: z.string().nullable().optional(),
+      originPortId: z.string().nullable().optional(),
+      destinationPortId: z.string().nullable().optional(),
+      containerNumber: z.string().optional(),
+      containerType: z.string().optional(),
+      blNumber: z.string().optional(),
+      vesselName: z.string().optional(),
+      etd: z.string().transform((s) => new Date(s)).optional(),
+      eta: z.string().transform((s) => new Date(s)).optional(),
+      freightCost: z.number().min(0).optional(),
+      notes: z.string().optional(),
+    });
+
+    const validation = schema.safeParse(req.body);
+    if (!validation.success) throw new ValidationError(validation.error.errors);
+
+    const existing = await prisma.shipment.findFirst({
+      where: { id: req.params.shipmentId, orderId: req.params.id },
+    });
+    if (!existing) throw new NotFoundError('Shipment');
+
+    const { status, ...rest } = validation.data;
+
+    const shipment = await prisma.shipment.update({
+      where: { id: req.params.shipmentId },
+      data: {
+        ...rest,
+        ...(status ? { status } : {}),
+        // Stamp the real dates from the status so the two cannot contradict.
+        ...(status === 'IN_TRANSIT' && !existing.actualDeparture
+          ? { actualDeparture: new Date() }
+          : {}),
+        ...(status === 'ARRIVED' && !existing.actualArrival ? { actualArrival: new Date() } : {}),
+      },
+      include: { cha: true, transporter: true, originPort: true, destinationPort: true },
+    });
+
+    if (status && status !== existing.status) {
+      emitEvent('shipment.status_changed', { ...shipment, previousStatus: existing.status });
+    }
+
+    res.json({ success: true, data: shipment });
   } catch (error) {
     next(error);
   }

@@ -222,6 +222,9 @@ export const ordersApi = {
   update: (id: string, data: any) => api.put(`/orders/${id}`, data),
   addProcurement: (id: string, data: any) => api.post(`/orders/${id}/procurements`, data),
   addShipment: (id: string, data: any) => api.post(`/orders/${id}/shipments`, data),
+  /** Update a shipment - status, container, vessel, BL, dates */
+  updateShipment: (orderId: string, shipmentId: string, data: any) =>
+    api.put(`/orders/${orderId}/shipments/${shipmentId}`, data),
   updateDocument: (orderId: string, docId: string, data: any) => 
     api.put(`/orders/${orderId}/documents/${docId}`, data),
   /** Packing List PDF, rendered from the Packing List template */

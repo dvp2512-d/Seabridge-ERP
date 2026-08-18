@@ -52,6 +52,21 @@ export default function OrderDetail() {
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [showProcurementModal, setShowProcurementModal] = useState(false);
   const [showShipmentModal, setShowShipmentModal] = useState(false);
+
+  /**
+   * Move a shipment through its stages. Departure and arrival dates are stamped
+   * server-side from the status, so they cannot disagree with it.
+   */
+  const updateShipmentStatus = useMutation({
+    mutationFn: ({ shipmentId, status }: { shipmentId: string; status: string }) =>
+      ordersApi.updateShipment(id!, shipmentId, { status }),
+    onSuccess: () => {
+      toast.success('Shipment updated');
+      queryClient.invalidateQueries({ queryKey: ['order', id] });
+    },
+    onError: (error: any) =>
+      toast.error(error.response?.data?.message || 'Could not update the shipment'),
+  });
   const [showDocumentModal, setShowDocumentModal] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<any>(null);
 
@@ -278,6 +293,9 @@ export default function OrderDetail() {
                 <ShipmentsTab 
                   order={order}
                   onAdd={() => setShowShipmentModal(true)}
+                  onUpdateStatus={(shipmentId, status) =>
+                    updateShipmentStatus.mutate({ shipmentId, status })
+                  }
                 />
               )}
               {activeTab === 'invoices' && <InvoicesTab order={order} currency={currency} />}
@@ -913,10 +931,13 @@ function DocumentsTab({
 // Shipments Tab
 function ShipmentsTab({ 
   order, 
-  onAdd 
+  onAdd,
+  onUpdateStatus,
 }: { 
   order: any; 
   onAdd: () => void;
+  /** Move a shipment along its stages; handled by the page so the query refreshes */
+  onUpdateStatus: (shipmentId: string, status: string) => void;
 }) {
   const shipments = order.shipments || [];
   
@@ -946,7 +967,20 @@ function ShipmentsTab({
               <div className="flex justify-between items-start mb-3">
                 <div>
                   <div className="font-medium">{shipment.shipmentNumber}</div>
-                  <span className={`badge ${getStatusColor(shipment.status)}`}>{shipment.status}</span>
+                  {/* Status is the field that changes most as a shipment moves, so
+                      it is editable in place rather than behind a modal. */}
+                  <select
+                    className="select text-xs py-1 mt-1"
+                    value={shipment.status}
+                    onChange={(e) => onUpdateStatus(shipment.id, e.target.value)}
+                    aria-label={`Status of shipment ${shipment.shipmentNumber}`}
+                  >
+                    {['PENDING', 'BOOKED', 'IN_TRANSIT', 'ARRIVED', 'DELIVERED'].map((s) => (
+                      <option key={s} value={s}>
+                        {s.replace('_', ' ')}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="text-right text-sm">
                   {shipment.containerNumber && (

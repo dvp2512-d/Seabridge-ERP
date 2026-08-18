@@ -15,6 +15,7 @@ import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
 import { buildRateMapByCode } from '../services/exchangeRateService';
+import { emitEvent } from '../services/eventService';
 
 const router: Router = Router();
 
@@ -292,6 +293,12 @@ router.put('/:id/status', can('FINANCE_MANAGE'), async (req, res, next) => {
       where: { id: req.params.id },
       data: { status: validation.data.status },
     });
+
+    // Only approval is announced: it is the point at which the cost becomes
+    // committed and worth notifying on.
+    if (validation.data.status === 'APPROVED') {
+      emitEvent('expense.approved', expense);
+    }
 
     res.json({ success: true, data: expense });
   } catch (error) {
