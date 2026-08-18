@@ -71,6 +71,36 @@ function bankBlock(company: any): FooterBlock | null {
   return { title: 'Bank Details:', body: lines.join('\n') };
 }
 
+/**
+ * The notified rate line printed on customs documents.
+ *
+ * Customs values a shipping bill in rupees, so showing the rate alone is not
+ * enough - the reference and the converted total are what make the figure
+ * checkable against the notification. Returns null when no rate was stamped,
+ * rather than inventing one, so an unvalued document is visibly unvalued.
+ */
+function exchangeRateLine(invoice: any, company: any): string | null {
+  const rate = num(invoice.exchangeRate);
+  // A stored rate of exactly 1 means nothing was resolved, unless the invoice is
+  // already in the base currency.
+  if (!rate || rate === 1) return null;
+
+  const baseCode = company?.baseCurrencyCode ?? 'INR';
+  const currency = invoice.currency?.code ?? '';
+  const total = num(invoice.totalAmount);
+
+  const parts = [
+    `Exchange Rate : 1 ${currency} = ${money(rate, 4)} ${baseCode}`,
+    invoice.exchangeRateRef ? `Notification : ${invoice.exchangeRateRef}` : null,
+    invoice.exchangeRateDate
+      ? `Rate Date : ${formatDate(invoice.exchangeRateDate)}`
+      : null,
+    `Value in ${baseCode} : ${money(round2(total * rate))}`,
+  ].filter(Boolean);
+
+  return parts.join('          ');
+}
+
 /** Cartons / net / gross / variation summary used by several documents. */
 function packingSummary(items: any[], variationPercent?: unknown): string | null {
   const packages = items.reduce((s, i) => s + num(i.numberOfPackages), 0);
@@ -269,6 +299,7 @@ export function buildCommercialInvoiceDocument(invoice: any, company: any) {
     totals,
     amountInWordsLine: amountInWords(num(invoice.totalAmount), currency),
     summaryLine: packingSummary(items, order?.variationPercent),
+    exchangeRateLine: exchangeRateLine(invoice, company),
     footerBlocks,
     declaration: company?.invoiceDeclaration ?? null,
   });
@@ -306,6 +337,7 @@ export function buildProformaInvoiceDocument(invoice: any, company: any) {
     totals: [['TOTAL', `${currency} ${money(invoice.totalAmount)}`]],
     amountInWordsLine: amountInWords(num(invoice.totalAmount), currency),
     summaryLine: packingSummary(items, order?.variationPercent),
+    exchangeRateLine: exchangeRateLine(invoice, company),
     footerBlocks,
     declaration: company?.invoiceDeclaration ?? null,
   });

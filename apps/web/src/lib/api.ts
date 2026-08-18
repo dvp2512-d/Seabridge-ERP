@@ -233,6 +233,25 @@ export const ordersApi = {
 };
 
 // ============================================
+// EXCHANGE RATES API
+// ============================================
+
+export const exchangeRatesApi = {
+  /** Rates in force on a date, one row per currency */
+  current: (params?: { date?: string; direction?: 'EXPORT' | 'IMPORT' }) =>
+    api.get('/exchange-rates/current', { params }),
+  history: (currencyId: string) => api.get(`/exchange-rates/history/${currencyId}`),
+  /** Record a CBIC notification: one effective date, many currency rates */
+  createNotification: (data: any) => api.post('/exchange-rates/notification', data),
+  update: (id: string, data: any) => api.put(`/exchange-rates/${id}`, data),
+  remove: (id: string) => api.delete(`/exchange-rates/${id}`),
+  /** Advisory market rates for spotting a transposed digit */
+  marketCheck: () => api.get('/exchange-rates/market-check'),
+  /** Which currencies cannot currently be converted */
+  coverage: (date?: string) => api.get('/exchange-rates/coverage', { params: { date } }),
+};
+
+// ============================================
 // SETTINGS API
 // ============================================
 

@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { ordersApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { formatCurrency, formatDate, getStatusColor, isPastDue, cn } from '@/lib/utils';
+import UnconvertedNotice from '@/components/ui/UnconvertedNotice';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import {
   Search,
@@ -46,6 +47,11 @@ export default function Orders() {
   // Pipeline figures come from the API so they reflect all matching orders
   // rather than only the current page.
   const summary = data?.data?.summary;
+  // Summary money is converted into the company's base currency, so it must
+  // be labelled with that rather than each record's own currency.
+  const baseCode = summary?.baseCurrency?.code;
+  // Non-zero means some records had no exchange rate and are excluded.
+  const unconvertedRecords = summary?.unconvertedRecords ?? 0;
 
   const handleSearch = useDebouncedCallback((value: string) => {
     setSearch(value);
@@ -69,6 +75,7 @@ export default function Orders() {
 
   return (
     <div className="space-y-6">
+      <UnconvertedNotice count={unconvertedRecords} baseCode={baseCode} />
       <PageHeader
         title="Export Orders"
         subtitle={`${pagination?.total || orders.length} orders • Track order lifecycle from confirmation to delivery`}
@@ -109,7 +116,7 @@ export default function Orders() {
             <TrendingUp className="w-4 h-4" />
             <span className="text-sm font-medium">Total Value</span>
           </div>
-          <div className="text-xl font-bold text-gray-900">{formatCurrency(stats.totalValue)}</div>
+          <div className="text-xl font-bold text-gray-900">{formatCurrency(stats.totalValue, baseCode)}</div>
         </div>
       </div>
 

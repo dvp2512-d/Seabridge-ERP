@@ -4,7 +4,7 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
-import { buildRateMap } from '../services/exchangeRateService';
+import { buildRateMap, findRate, getBaseCurrency } from '../services/exchangeRateService';
 import {
   buildCommercialInvoiceDocument,
   buildProformaInvoiceDocument,
@@ -172,6 +172,29 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
     const subtotal = Number(order.totalValue);
     const taxAmount = validation.data.taxAmount || 0;
     const totalAmount = subtotal + taxAmount;
+    const invoiceDate = validation.data.invoiceDate || new Date();
+
+    /**
+     * Stamp the notified rate in force on the invoice date.
+     *
+     * Recorded on the invoice rather than looked up at print time so reprinting
+     * later gives the same rupee value, even after a new notification supersedes
+     * the rate. A missing rate is not fatal here - the invoice is still valid,
+     * it simply cannot show a rupee valuation until the rate is entered.
+     */
+    let exchangeRate = 1;
+    let exchangeRateRef: string | null = null;
+    let exchangeRateDate: Date | null = null;
+
+    const base = await prisma.currency.findFirst({ where: { isBaseCurrency: true } });
+    if (base && currency.id !== base.id) {
+      const resolved = await findRate(currency.id, invoiceDate, 'EXPORT');
+      if (resolved) {
+        exchangeRate = resolved.rate;
+        exchangeRateRef = resolved.notificationRef;
+        exchangeRateDate = resolved.effectiveFrom;
+      }
+    }
 
     const invoice = await prisma.invoice.create({
       data: {
@@ -180,12 +203,15 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
         buyerId: order.buyerId,
         currencyId: currency.id,
         type: validation.data.type || 'EXPORT',
-        invoiceDate: validation.data.invoiceDate || new Date(),
+        invoiceDate,
         dueDate: validation.data.dueDate,
         subtotal,
         taxAmount,
         totalAmount,
         balanceAmount: totalAmount,
+        exchangeRate,
+        exchangeRateRef,
+        exchangeRateDate,
         notes: validation.data.notes,
         termsConditions: validation.data.termsConditions,
       },
@@ -344,7 +370,10 @@ router.get('/:id/pdf', can('FINANCE_VIEW'), async (req, res, next) => {
         ? buildSampleInvoiceDocument
         : buildCommercialInvoiceDocument;
 
-    const pdfBuffer = await builder(invoice, company);
+    // The rate line needs to name the currency it converts into, and that comes
+    // from the base currency flag rather than a hardcoded 'INR'.
+    const base = await getBaseCurrency();
+    const pdfBuffer = await builder(invoice, { ...company, baseCurrencyCode: base.code });
 
     const label =
       invoice.type === 'PROFORMA' ? 'Proforma' : invoice.type === 'SAMPLE' ? 'Sample' : 'Commercial';

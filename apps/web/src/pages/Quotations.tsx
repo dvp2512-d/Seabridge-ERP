@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { quotationsApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { formatCurrency, formatDate, getStatusColor, downloadFile, isPastDue, cn } from '@/lib/utils';
+import UnconvertedNotice from '@/components/ui/UnconvertedNotice';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { Plus, Search, Eye, Download, FileText, Clock, CheckCircle } from 'lucide-react';
 
@@ -37,6 +38,11 @@ export default function Quotations() {
   const pagination = data?.data?.pagination;
   // Counts/totals come from the API so they aren't limited to this page.
   const summary = data?.data?.summary;
+  // Summary money is converted into the company's base currency, so it must
+  // be labelled with that rather than each record's own currency.
+  const baseCode = summary?.baseCurrency?.code;
+  // Non-zero means some records had no exchange rate and are excluded.
+  const unconvertedRecords = summary?.unconvertedRecords ?? 0;
 
   const handleSearch = useDebouncedCallback((value: string) => {
     setSearch(value);
@@ -63,6 +69,7 @@ export default function Quotations() {
 
   return (
     <div className="space-y-6">
+      <UnconvertedNotice count={unconvertedRecords} baseCode={baseCode} />
       <PageHeader
         title="Quotations"
         subtitle={`${pagination?.total || quotations.length} quotations`}
@@ -99,7 +106,7 @@ export default function Quotations() {
         </div>
         <div className="card p-4">
           <div className="text-sm text-gray-500 mb-1">Total Value</div>
-          <div className="text-2xl font-bold text-green-600">{formatCurrency(stats.totalValue)}</div>
+          <div className="text-2xl font-bold text-green-600">{formatCurrency(stats.totalValue, baseCode)}</div>
         </div>
       </div>
 

@@ -216,6 +216,13 @@ export interface ExportDocumentInput {
   /** Packing summary line: cartons, net, gross, variation */
   summaryLine?: string | null;
   footerBlocks: FooterBlock[];
+  /**
+   * Notified rate used to value the document, printed on customs paperwork.
+   * Customs values a shipping bill in rupees, so the rate, its notification
+   * reference and the converted total have to appear for the figure to be
+   * checkable.
+   */
+  exchangeRateLine?: string | null;
   /** Small print at the very bottom */
   declaration?: string | null;
 }
@@ -547,6 +554,28 @@ export function generateExportDocument(input: ExportDocumentInput): Promise<Buff
       fill: COLORS.headerFill,
     });
     y += 18;
+  }
+
+  // ---- notified exchange rate, for customs valuation ----
+  if (input.exchangeRateLine) {
+    const h =
+      doc.font('Helvetica').fontSize(7.5).heightOfString(input.exchangeRateLine, { width: W - 6 }) +
+      8;
+    if (y + h > pageBottom) {
+      doc.addPage();
+      y = PAGE.margin;
+    }
+    cell(doc, {
+      x: L,
+      y,
+      w: W,
+      h,
+      value: input.exchangeRateLine,
+      size: 7.5,
+      valueSize: 7.5,
+      fill: COLORS.headerFill,
+    });
+    y += h;
   }
 
   // ---- footer blocks ----

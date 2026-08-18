@@ -21,6 +21,7 @@ import {
   ClipboardList,
   Anchor,
   Database,
+  TrendingUp,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -48,6 +49,7 @@ const navigation: {
   { name: 'Orders', href: '/orders', icon: ShoppingCart, permission: 'OPERATIONS_VIEW' },
   { name: 'Invoices', href: '/invoices', icon: DollarSign, permission: 'FINANCE_VIEW' },
   { name: 'Master Data', href: '/master-data', icon: Database, permission: 'MASTER_MANAGE' },
+  { name: 'Exchange Rates', href: '/exchange-rates', icon: TrendingUp, permission: 'MASTER_VIEW' },
 ];
 
 export default function Layout({ children }: LayoutProps) {

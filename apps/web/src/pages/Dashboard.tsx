@@ -6,6 +6,7 @@ import { dashboardApi } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { can } from '@/lib/permissions';
 import { formatCurrency, formatDate, getStatusColor, cn } from '@/lib/utils';
+import UnconvertedNotice from '@/components/ui/UnconvertedNotice';
 import {
   TrendingUp,
   Users,
@@ -77,9 +78,16 @@ export default function Dashboard() {
   }
 
   const kpis = dashboard?.kpis || {};
+  // Every money KPI is converted into this currency before being summed, so it
+  // must be labelled with it rather than defaulting to USD.
+  const baseCode: string | undefined = dashboard?.baseCurrency?.code;
+  // Non-zero means some records had no exchange rate for today and are missing
+  // from the totals, which has to be stated rather than shown as a clean figure.
+  const unconvertedRecords: number = dashboard?.unconvertedRecords ?? 0;
 
   return (
     <div className="space-y-6">
+      <UnconvertedNotice count={unconvertedRecords} baseCode={baseCode} />
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -144,8 +152,8 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
           title="Monthly Revenue"
-          value={formatCurrency(kpis.monthlyRevenue || 0)}
-          subtitle={`YTD: ${formatCurrency(kpis.yearlyRevenue || 0)}`}
+          value={formatCurrency(kpis.monthlyRevenue || 0, baseCode)}
+          subtitle={`YTD: ${formatCurrency(kpis.yearlyRevenue || 0, baseCode)}`}
           icon={TrendingUp}
           iconBg="bg-green-100"
           iconColor="text-green-600"
@@ -154,7 +162,7 @@ export default function Dashboard() {
         />
         <KPICard
           title="Pipeline Value"
-          value={formatCurrency(kpis.pipelineValue || 0)}
+          value={formatCurrency(kpis.pipelineValue || 0, baseCode)}
           subtitle={`${kpis.openInquiries || 0} open inquiries`}
           icon={Target}
           iconBg="bg-blue-100"
@@ -170,8 +178,8 @@ export default function Dashboard() {
         />
         <KPICard
           title="Total Receivables"
-          value={formatCurrency(kpis.totalReceivables || 0)}
-          subtitle={kpis.overdueReceivables > 0 ? `${formatCurrency(kpis.overdueReceivables)} overdue` : 'All current'}
+          value={formatCurrency(kpis.totalReceivables || 0, baseCode)}
+          subtitle={kpis.overdueReceivables > 0 ? `${formatCurrency(kpis.overdueReceivables, baseCode)} overdue` : 'All current'}
           icon={DollarSign}
           iconBg={kpis.overdueReceivables > 0 ? "bg-red-100" : "bg-green-100"}
           iconColor={kpis.overdueReceivables > 0 ? "text-red-600" : "text-green-600"}

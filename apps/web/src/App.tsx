@@ -21,6 +21,7 @@ import InvoiceDetail from '@/pages/InvoiceDetail';
 import NewInvoice from '@/pages/NewInvoice';
 import Settings from '@/pages/Settings';
 import MasterData from '@/pages/MasterData';
+import ExchangeRates from '@/pages/ExchangeRates';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore();
@@ -61,6 +62,7 @@ function App() {
                 <Route path="/invoices/new" element={<NewInvoice />} />
                 <Route path="/invoices/:id" element={<InvoiceDetail />} />
                 <Route path="/master-data" element={<MasterData />} />
+              <Route path="/exchange-rates" element={<ExchangeRates />} />
                 <Route path="/settings" element={<Settings />} />
               </Routes>
             </Layout>

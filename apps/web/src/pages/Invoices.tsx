@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { invoicesApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { formatCurrency, formatDate, getStatusColor, downloadFile, isPastDue, cn } from '@/lib/utils';
+import UnconvertedNotice from '@/components/ui/UnconvertedNotice';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import {
   Search,
@@ -54,6 +55,11 @@ export default function Invoices() {
   // Summary comes from the API so the figures cover every matching invoice,
   // not just the rows on the current page.
   const summary = data?.data?.summary;
+  // Summary money is converted into the company's base currency, so it must
+  // be labelled with that rather than each record's own currency.
+  const baseCode = summary?.baseCurrency?.code;
+  // Non-zero means some records had no exchange rate and are excluded.
+  const unconvertedRecords = summary?.unconvertedRecords ?? 0;
   const receivables = receivablesData?.data?.data;
 
   const handleSearch = useDebouncedCallback((value: string) => {
@@ -85,6 +91,7 @@ export default function Invoices() {
 
   return (
     <div className="space-y-6">
+      <UnconvertedNotice count={unconvertedRecords} baseCode={baseCode} />
       <PageHeader
         title="Invoices & Receivables"
         subtitle={`${pagination?.total || invoices.length} invoices • Manage billing and payments`}
@@ -104,7 +111,7 @@ export default function Invoices() {
             <span className="text-sm font-medium">Total Receivable</span>
           </div>
           <div className="text-2xl font-bold text-gray-900">
-            {formatCurrency(stats.totalReceivable)}
+            {formatCurrency(stats.totalReceivable, baseCode)}
           </div>
           <div className="text-xs text-gray-500 mt-1">
             {stats.overdue} overdue
@@ -116,7 +123,7 @@ export default function Invoices() {
             <span className="text-sm font-medium">Total Collected</span>
           </div>
           <div className="text-2xl font-bold text-gray-900">
-            {formatCurrency(stats.totalPaid)}
+            {formatCurrency(stats.totalPaid, baseCode)}
           </div>
           <div className="text-xs text-gray-500 mt-1">
             {stats.paid} invoices paid
