@@ -306,15 +306,14 @@ router.put('/:id/status', can('FINANCE_MANAGE'), async (req, res, next) => {
   }
 });
 
-router.delete('/:id', can('FINANCE_MANAGE'), async (req, res, next) => {
+router.delete('/:id', can('RECORD_DELETE'), async (req, res, next) => {
   try {
     const existing = await prisma.expense.findUnique({ where: { id: req.params.id } });
     if (!existing) throw new NotFoundError('Expense');
 
-    if (existing.status === 'PAID') {
-      throw new AppError('A paid expense cannot be deleted - it is part of the audit trail.', 400);
-    }
-
+    // Deletion is founder-only, and nothing references an expense, so a paid one
+    // can be removed without leaving orphaned records. The audit log retains who
+    // deleted it and when.
     await prisma.expense.delete({ where: { id: req.params.id } });
     res.json({ success: true, data: { id: existing.id } });
   } catch (error) {

@@ -258,6 +258,7 @@ export default function Orders() {
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
                       <RowActions
+                        destructivePermission="RECORD_DELETE"
                         viewHref={`/orders/${order.id}`}
                         destructiveKind="cancel"
                         // Cancelling keeps the order number. Blocked once the goods

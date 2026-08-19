@@ -242,6 +242,7 @@ export default function Quotations() {
                         <Download className="w-4 h-4" />
                       </button>
                       <RowActions
+                        destructivePermission="RECORD_DELETE"
                         // A draft has not been sent to a buyer and nothing
                         // references it, so it can be removed outright. Anything
                         // beyond draft keeps its number and is cancelled.

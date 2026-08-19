@@ -20,7 +20,12 @@ router.get('/', can('SALES_VIEW'), async (req, res, next) => {
     const { status, buyerId, search, page = 1, limit = 50 } = req.query;
 
     const where: any = {};
+    // A deleted record is marked cancelled rather than removed, so it keeps its
+    // number for customs and the audit trail. Hidden from the default list so
+    // deleting behaves as the user expects, but still reachable by filtering
+    // explicitly on the cancelled status.
     if (status) where.status = status;
+    else where.status = { not: 'REJECTED' };
     if (buyerId) where.buyerId = buyerId;
     if (search) {
       where.OR = [
@@ -419,7 +424,7 @@ router.get('/:id/pdf', can('SALES_VIEW'), async (req, res, next) => {
 });
 
 /** Mark a quotation rejected. Blocked once it has become an order. */
-router.put('/:id/cancel', can('SETTINGS_MANAGE'), async (req, res, next) => {
+router.put('/:id/cancel', can('RECORD_DELETE'), async (req, res, next) => {
   try {
     const result = await cancelQuotation(req.params.id, req.body?.reason);
     res.json({ success: true, data: result, message: result.message });
@@ -434,7 +439,7 @@ router.put('/:id/cancel', can('SETTINGS_MANAGE'), async (req, res, next) => {
  * Only a DRAFT with no order: nothing has gone to a buyer and nothing references
  * it, so no history is lost. Anything further along is cancelled instead.
  */
-router.delete('/:id', can('SETTINGS_MANAGE'), async (req, res, next) => {
+router.delete('/:id', can('RECORD_DELETE'), async (req, res, next) => {
   try {
     const result = await deleteDraftQuotation(req.params.id);
     res.json({ success: true, data: result, message: result.message });

@@ -8,7 +8,9 @@ import { can } from '@/lib/permissions';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import UnconvertedNotice from '@/components/ui/UnconvertedNotice';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { formatCurrency, formatDate } from '@/lib/utils';
+import { refreshAggregates } from '@/lib/queryKeys';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { Plus, Receipt, Search, Check, X, Trash2, Edit } from 'lucide-react';
 
@@ -41,6 +43,9 @@ export default function Expenses() {
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
   const canManage = can(user?.role as any, 'FINANCE_MANAGE');
+  // Deleting is founder-only and deliberately narrower than managing: recording
+  // and approving an expense is routine finance work, removing one is not.
+  const canDelete = can(user?.role as any, 'RECORD_DELETE');
 
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
@@ -48,6 +53,9 @@ export default function Expenses() {
   const [status, setStatus] = useState('');
   const [editing, setEditing] = useState<any>(null);
   const [showForm, setShowForm] = useState(false);
+  // Held while the confirmation is open, so the row is only removed once the
+  // backend confirms the delete succeeded.
+  const [pendingDelete, setPendingDelete] = useState<any>(null);
 
   const debouncedSearch = useDebouncedCallback((value: string) => setSearch(value), 350);
 
@@ -68,6 +76,8 @@ export default function Expenses() {
     onSuccess: () => {
       toast.success('Status updated');
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      // Totals and the dashboard read this data, so refresh them too
+      refreshAggregates(queryClient);
     },
     onError: (error: any) => toast.error(error.response?.data?.message || 'Could not update'),
   });
@@ -77,6 +87,8 @@ export default function Expenses() {
     onSuccess: () => {
       toast.success('Expense deleted');
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      // Totals and the dashboard read this data, so refresh them too
+      refreshAggregates(queryClient);
     },
     onError: (error: any) => toast.error(error.response?.data?.message || 'Could not delete'),
   });
@@ -213,6 +225,7 @@ export default function Expenses() {
                       {canManage && (
                         <ExpenseActions
                           expense={e}
+                          canDelete={canDelete}
                           onApprove={() => setStatusMutation.mutate({ id: e.id, next: 'APPROVED' })}
                           onReject={() => setStatusMutation.mutate({ id: e.id, next: 'REJECTED' })}
                           onPay={() => setStatusMutation.mutate({ id: e.id, next: 'PAID' })}
@@ -220,9 +233,7 @@ export default function Expenses() {
                             setEditing(e);
                             setShowForm(true);
                           }}
-                          onDelete={() => {
-                            if (confirm(`Delete ${e.expenseNumber}?`)) remove.mutate(e.id);
-                          }}
+                          onDelete={() => setPendingDelete(e)}
                         />
                       )}
                     </td>
@@ -240,8 +251,29 @@ export default function Expenses() {
           onClose={() => setShowForm(false)}
           onSaved={() => {
             queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      // Totals and the dashboard read this data, so refresh them too
+      refreshAggregates(queryClient);
             setShowForm(false);
           }}
+        />
+      )}
+
+      {/* Uses the shared dialog rather than window.confirm, so the wording
+          matches every other section. The row is only removed after the backend
+          confirms, so a failed delete leaves the list untouched. */}
+      {pendingDelete && (
+        <ConfirmDialog
+          isOpen
+          title={`Delete ${pendingDelete.expenseNumber}?`}
+          message="Are you sure you want to delete this record? This action cannot be undone."
+          consequences={['It will drop out of spend totals and the dashboard']}
+          tone="permanent"
+          confirmLabel="Delete"
+          isPending={remove.isPending}
+          onConfirm={() =>
+            remove.mutate(pendingDelete.id, { onSettled: () => setPendingDelete(null) })
+          }
+          onCancel={() => setPendingDelete(null)}
         />
       )}
     </div>
@@ -278,6 +310,7 @@ function SummaryCard({
  */
 function ExpenseActions({
   expense,
+  canDelete,
   onApprove,
   onReject,
   onPay,
@@ -285,6 +318,7 @@ function ExpenseActions({
   onDelete,
 }: {
   expense: any;
+  canDelete: boolean;
   onApprove: () => void;
   onReject: () => void;
   onPay: () => void;
@@ -316,9 +350,13 @@ function ExpenseActions({
       <button onClick={onEdit} className="btn btn-ghost btn-sm" title="Edit">
         <Edit className="w-4 h-4" />
       </button>
-      <button onClick={onDelete} className="btn btn-ghost btn-sm text-red-600" title="Delete">
-        <Trash2 className="w-4 h-4" />
-      </button>
+      {/* Hidden for non-founders. The API also refuses, so this is presentation
+          rather than the security boundary. */}
+      {canDelete && (
+        <button onClick={onDelete} className="btn btn-ghost btn-sm text-red-600" title="Delete">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { quotationsApi } from '@/lib/api';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
+import { refreshAggregates } from '@/lib/queryKeys';
 import {
   ArrowLeft,
   FileText,
@@ -64,6 +65,8 @@ export default function QuotationDetail() {
       quotationsApi.updateStatus(id!, status, notes),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['quotation', id] });
+      // Totals and the dashboard read this data, so refresh them too
+      refreshAggregates(queryClient);
       toast.success('Status updated successfully');
       setShowStatusModal(false);
     },

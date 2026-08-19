@@ -28,7 +28,12 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
     const { status, buyerId, search, page = 1, limit = 50 } = req.query;
 
     const where: any = {};
+    // A deleted record is marked cancelled rather than removed, so it keeps its
+    // number for customs and the audit trail. Hidden from the default list so
+    // deleting behaves as the user expects, but still reachable by filtering
+    // explicitly on the cancelled status.
     if (status) where.status = status;
+    else where.status = { not: 'CANCELLED' };
     if (buyerId) where.buyerId = buyerId;
     if (search) {
       where.OR = [
@@ -464,7 +469,7 @@ router.get('/reports/receivables', can('FINANCE_VIEW'), async (req, res, next) =
  * Cancel an invoice. Kept as a numbered void rather than deleted, since the
  * number appears on customs paperwork and in the audit trail.
  */
-router.put('/:id/cancel', can('SETTINGS_MANAGE'), async (req, res, next) => {
+router.put('/:id/cancel', can('RECORD_DELETE'), async (req, res, next) => {
   try {
     const result = await cancelInvoice(req.params.id, req.body?.reason);
     res.json({ success: true, data: result, message: result.message });

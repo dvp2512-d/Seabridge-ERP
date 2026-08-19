@@ -316,6 +316,7 @@ export default function Invoices() {
                           <Download className="w-4 h-4" />
                         </button>
                         <RowActions
+                        destructivePermission="RECORD_DELETE"
                           destructiveKind="cancel"
                           // The invoice number appears on customs paperwork, so it
                           // is voided rather than deleted. Blocked once any payment

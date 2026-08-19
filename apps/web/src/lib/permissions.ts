@@ -35,6 +35,9 @@ export const PERMISSIONS: Record<string, Role[]> = {
 
   SETTINGS_MANAGE: ['FOUNDER', 'ADMIN'],
   SETTINGS_VIEW: ['FOUNDER', 'ADMIN', 'SALES', 'OPERATIONS', 'FINANCE'],
+
+  // Deleting business records. Founder only - see the API matrix for why.
+  RECORD_DELETE: ['FOUNDER'],
 };
 
 export type Permission = keyof typeof PERMISSIONS;

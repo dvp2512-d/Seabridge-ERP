@@ -7,6 +7,7 @@ import { ordersApi, chaApi, transportersApi, suppliersApi, masterApi } from '@/l
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import { formatCurrency, formatDate, getStatusColor, isPastDue, cn } from '@/lib/utils';
+import { refreshAggregates } from '@/lib/queryKeys';
 import {
   ArrowLeft,
   Package,
@@ -63,6 +64,8 @@ export default function OrderDetail() {
     onSuccess: () => {
       toast.success('Shipment updated');
       queryClient.invalidateQueries({ queryKey: ['order', id] });
+      // Totals and the dashboard read this data, so refresh them too
+      refreshAggregates(queryClient);
     },
     onError: (error: any) =>
       toast.error(error.response?.data?.message || 'Could not update the shipment'),
@@ -84,6 +87,8 @@ export default function OrderDetail() {
     mutationFn: (data: any) => ordersApi.update(id!, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['order', id] });
+      // Totals and the dashboard read this data, so refresh them too
+      refreshAggregates(queryClient);
       toast.success('Order status updated');
       setShowStatusModal(false);
     },
@@ -499,6 +504,8 @@ export default function OrderDetail() {
           onClose={() => setShowProcurementModal(false)}
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['order', id] });
+      // Totals and the dashboard read this data, so refresh them too
+      refreshAggregates(queryClient);
             setShowProcurementModal(false);
           }}
         />
@@ -510,6 +517,8 @@ export default function OrderDetail() {
           onClose={() => setShowShipmentModal(false)}
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['order', id] });
+      // Totals and the dashboard read this data, so refresh them too
+      refreshAggregates(queryClient);
             setShowShipmentModal(false);
           }}
         />
@@ -522,6 +531,8 @@ export default function OrderDetail() {
           onClose={() => { setShowDocumentModal(false); setSelectedDocument(null); }}
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['order', id] });
+      // Totals and the dashboard read this data, so refresh them too
+      refreshAggregates(queryClient);
             setShowDocumentModal(false);
             setSelectedDocument(null);
           }}
@@ -597,6 +608,8 @@ function PackingTab({ order }: { order: any }) {
     onSuccess: () => {
       toast.success('Packing details saved');
       queryClient.invalidateQueries({ queryKey: ['order', order.id] });
+      // Totals and the dashboard read this data, so refresh them too
+      refreshAggregates(queryClient);
       setEditing(null);
     },
     onError: (error: any) =>

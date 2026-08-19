@@ -7,6 +7,7 @@ import { invoicesApi, getApiErrorMessage } from '@/lib/api';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import { formatCurrency, formatDate, downloadFile, isPastDue, cn } from '@/lib/utils';
+import { refreshAggregates } from '@/lib/queryKeys';
 import {
   ArrowLeft,
   Receipt,
@@ -60,6 +61,8 @@ export default function InvoiceDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoice', id] });
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
+      // Totals and the dashboard read this data, so refresh them too
+      refreshAggregates(queryClient);
       toast.success('Invoice updated');
     },
     onError: (error) => toast.error(getApiErrorMessage(error, 'Failed to update invoice')),

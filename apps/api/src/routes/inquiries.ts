@@ -17,7 +17,12 @@ router.get('/', can('SALES_VIEW'), async (req, res, next) => {
     const { stage, buyerId, salesOwnerId, search, page = 1, limit = 50 } = req.query;
 
     const where: any = {};
+    // A deleted record is marked cancelled rather than removed, so it keeps its
+    // number for customs and the audit trail. Hidden from the default list so
+    // deleting behaves as the user expects, but still reachable by filtering
+    // explicitly on the cancelled status.
     if (stage) where.stage = stage;
+    else where.stage = { not: 'LOST' };
     if (buyerId) where.buyerId = buyerId;
     if (salesOwnerId) where.salesOwnerId = salesOwnerId;
     if (search) {
@@ -213,7 +218,7 @@ router.post('/:id/followups', can('SALES_MANAGE'), async (req, res, next) => {
 });
 
 /** Mark an inquiry lost, which is the language the pipeline already uses. */
-router.put('/:id/cancel', can('SETTINGS_MANAGE'), async (req, res, next) => {
+router.put('/:id/cancel', can('RECORD_DELETE'), async (req, res, next) => {
   try {
     const result = await cancelInquiry(req.params.id, req.body?.reason);
     res.json({ success: true, data: result, message: result.message });

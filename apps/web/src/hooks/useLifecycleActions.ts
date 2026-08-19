@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { lifecycleApi } from '@/lib/api';
+import { DEPENDENT_QUERY_KEYS } from '@/lib/queryKeys';
 import type { ConfirmTone } from '@/components/ui/ConfirmDialog';
 
 /**
@@ -39,8 +40,23 @@ export function useLifecycleActions(queryKeys: string[]) {
   const [blocked, setBlocked] = useState<string | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
 
+  /**
+   * Refresh after a change.
+   *
+   * The dashboard and finance queries are always invalidated alongside the page's
+   * own list, because deleting an invoice or an expense changes revenue and
+   * receivables. Without this the totals stay on the previously fetched values
+   * until the page is reloaded.
+   *
+   * This only marks the existing queries stale so they refetch - no total is
+   * calculated here. The existing dashboard formulas run again against the new
+   * data and produce the new figure themselves.
+   */
   const refresh = () => {
     for (const key of queryKeys) {
+      queryClient.invalidateQueries({ queryKey: [key] });
+    }
+    for (const key of DEPENDENT_QUERY_KEYS) {
       queryClient.invalidateQueries({ queryKey: [key] });
     }
   };

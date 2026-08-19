@@ -12,6 +12,7 @@ import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import RowActions from '@/components/ui/RowActions';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useLifecycleActions } from '@/hooks/useLifecycleActions';
+import { refreshAggregates } from '@/lib/queryKeys';
 import {
   Plus,
   Search,
@@ -236,6 +237,8 @@ export default function Inquiries() {
           onSuccess={(inquiry) => {
             setShowModal(false);
             queryClient.invalidateQueries({ queryKey: ['inquiries'] });
+      // The dashboard pipeline figure reads inquiries, so refresh it too
+      refreshAggregates(queryClient);
             if (inquiry?.id) navigate(`/inquiries/${inquiry.id}`);
           }}
         />
@@ -326,6 +329,7 @@ function InquiryTable({
               <td className="text-gray-500">{formatDate(inquiry.createdAt)}</td>
               <td onClick={(e) => e.stopPropagation()}>
                 <RowActions
+                        destructivePermission="RECORD_DELETE"
                   viewHref={`/inquiries/${inquiry.id}`}
                   destructiveKind="cancel"
                   // Marked lost rather than deleted, which is the language the
