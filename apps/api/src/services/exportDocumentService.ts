@@ -482,8 +482,17 @@ export function generateExportDocument(input: ExportDocumentInput): Promise<Buff
   }
 
   // ---- totals ----
-  const totalLabelW = W * 0.72;
-  const totalValueW = W - totalLabelW;
+  /**
+   * The value cell must line up with the last column of the table above, or the
+   * vertical divider visibly breaks at the totals row.
+   *
+   * Derived from the column widths rather than a fixed fraction: the label cell
+   * spans every column except the last, so the boundary always matches whatever
+   * columns the document defined.
+   */
+  const lastColumnWidth = (input.columns[input.columns.length - 1]?.width ?? 0.15) * W;
+  const totalValueW = lastColumnWidth;
+  const totalLabelW = W - totalValueW;
   for (const [label, value] of input.totals) {
     if (y + rowH > pageBottom) {
       doc.addPage();
