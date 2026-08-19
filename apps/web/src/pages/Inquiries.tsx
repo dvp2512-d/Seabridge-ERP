@@ -198,7 +198,7 @@ export default function Inquiries() {
         <InquiryTable
           inquiries={inquiries}
           onView={(id) => navigate(`/inquiries/${id}`)}
-          onCancel={(id, label) => lifecycle.request({ kind: 'cancelInquiry' }, id, label)}
+          onCancel={(id, label) => lifecycle.request({ kind: 'delete', resource: 'inquiries' }, id, label)}
         />
       ) : (
         <InquiryKanban inquiries={inquiries} onView={(id) => navigate(`/inquiries/${id}`)} />
@@ -331,17 +331,10 @@ function InquiryTable({
                 <RowActions
                         destructivePermission="RECORD_DELETE"
                   viewHref={`/inquiries/${inquiry.id}`}
-                  destructiveKind="cancel"
+                  destructiveKind="delete"
                   // Marked lost rather than deleted, which is the language the
                   // pipeline already uses and keeps the record in the history.
                   onDestructive={() => onCancel(inquiry.id, inquiry.inquiryNumber)}
-                  destructiveDisabledReason={
-                    inquiry.stage === 'LOST'
-                      ? 'Already marked lost'
-                      : inquiry.stage === 'WON'
-                      ? 'Won - cancel the quotation or order instead'
-                      : undefined
-                  }
                 />
               </td>
             </tr>

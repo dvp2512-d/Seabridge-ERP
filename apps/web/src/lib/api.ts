@@ -275,14 +275,16 @@ export const lifecycleApi = {
   reactivate: (resource: string, id: string) =>
     api.put(`/lifecycle/${resource}/${id}/reactivate`),
 
-  // Documents keep their number and are marked void
-  cancelInvoice: (id: string, reason?: string) => api.put(`/invoices/${id}/cancel`, { reason }),
-  cancelOrder: (id: string, reason?: string) => api.put(`/orders/${id}/cancel`, { reason }),
-  cancelQuotation: (id: string, reason?: string) => api.put(`/quotations/${id}/cancel`, { reason }),
-  cancelInquiry: (id: string, reason?: string) => api.put(`/inquiries/${id}/cancel`, { reason }),
-
-  /** Genuine deletion, draft quotations only */
-  deleteDraftQuotation: (id: string) => api.delete(`/quotations/${id}`),
+  /**
+   * Permanent deletion of business records, founder only.
+   *
+   * These cascade: deleting an invoice removes its payments, deleting an order
+   * removes its invoices and their payments. previewDelete reports exactly what
+   * will go so the confirmation can list it.
+   */
+  previewDelete: (resource: string, id: string) =>
+    api.get(`/records/${resource}/${id}/preview`),
+  deleteRecord: (resource: string, id: string) => api.delete(`/records/${resource}/${id}`),
 
   reactivateUser: (id: string) => api.put(`/users/${id}/reactivate`),
 };

@@ -317,24 +317,17 @@ export default function Invoices() {
                         </button>
                         <RowActions
                         destructivePermission="RECORD_DELETE"
-                          destructiveKind="cancel"
+                          destructiveKind="delete"
                           // The invoice number appears on customs paperwork, so it
                           // is voided rather than deleted. Blocked once any payment
                           // exists, which would otherwise leave the buyer's ledger
                           // showing money paid against nothing.
                           onDestructive={() =>
                             lifecycle.request(
-                              { kind: 'cancelInvoice' },
+                              { kind: 'delete', resource: 'invoices' },
                               invoice.id,
                               invoice.invoiceNumber
                             )
-                          }
-                          destructiveDisabledReason={
-                            invoice.status === 'CANCELLED'
-                              ? 'Already cancelled'
-                              : Number(invoice.paidAmount) > 0
-                              ? 'Payment received - issue a credit note instead'
-                              : undefined
                           }
                         />
                       </div>

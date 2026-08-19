@@ -20,12 +20,7 @@ router.get('/', can('SALES_VIEW'), async (req, res, next) => {
     const { status, buyerId, search, page = 1, limit = 50 } = req.query;
 
     const where: any = {};
-    // A deleted record is marked cancelled rather than removed, so it keeps its
-    // number for customs and the audit trail. Hidden from the default list so
-    // deleting behaves as the user expects, but still reachable by filtering
-    // explicitly on the cancelled status.
     if (status) where.status = status;
-    else where.status = { not: 'REJECTED' };
     if (buyerId) where.buyerId = buyerId;
     if (search) {
       where.OR = [

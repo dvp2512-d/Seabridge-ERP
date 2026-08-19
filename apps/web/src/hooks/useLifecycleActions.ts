@@ -18,11 +18,12 @@ import type { ConfirmTone } from '@/components/ui/ConfirmDialog';
 export type LifecycleAction =
   | { kind: 'deactivate'; resource: string }
   | { kind: 'reactivate'; resource: string }
-  | { kind: 'cancelInvoice' }
-  | { kind: 'cancelOrder' }
-  | { kind: 'cancelQuotation' }
-  | { kind: 'cancelInquiry' }
-  | { kind: 'deleteDraftQuotation' }
+  /**
+   * Permanent deletion of a business record. Cascades through orders, invoices
+   * and payments where the database requires it, so the confirmation lists what
+   * will be destroyed before the user commits.
+   */
+  | { kind: 'delete'; resource: 'inquiries' | 'quotations' | 'orders' | 'invoices' | 'expenses' }
   | { kind: 'reactivateUser' };
 
 interface PendingAction {
@@ -67,21 +68,46 @@ export function useLifecycleActions(queryKeys: string[]) {
     setConsequences([]);
     setBlocked(null);
 
-    if (action.kind !== 'deactivate') return;
+    if (action.kind === 'deactivate') {
+      setLoadingPreview(true);
+      try {
+        const res = await lifecycleApi.preview(action.resource, id);
+        const data = res.data.data;
+        setBlocked(data.blocked ?? null);
+        setConsequences(
+          (data.dependents ?? []).map((d: any) => `Stays on ${d.count} ${d.label}`)
+        );
+      } catch {
+        // The preview is advisory; failing to load it must not block the action.
+        setConsequences([]);
+      } finally {
+        setLoadingPreview(false);
+      }
+      return;
+    }
 
-    setLoadingPreview(true);
-    try {
-      const res = await lifecycleApi.preview(action.resource, id);
-      const data = res.data.data;
-      setBlocked(data.blocked ?? null);
-      setConsequences(
-        (data.dependents ?? []).map((d: any) => `Stays on ${d.count} ${d.label}`)
-      );
-    } catch {
-      // The preview is advisory; failing to load it must not block the action.
-      setConsequences([]);
-    } finally {
-      setLoadingPreview(false);
+    if (action.kind === 'delete') {
+      setLoadingPreview(true);
+      try {
+        const res = await lifecycleApi.previewDelete(action.resource, id);
+        const data = res.data.data;
+        setBlocked(data.blocked ?? null);
+        // Spell out exactly what disappears, including money, because these
+        // deletions are irreversible and change reported figures.
+        setConsequences(
+          (data.impacts ?? []).map((i: any) => {
+            const money =
+              i.amount != null
+                ? ` totalling ${i.currency ? i.currency + ' ' : ''}${Number(i.amount).toLocaleString()}`
+                : '';
+            return `${i.count} ${i.label}${money}`;
+          })
+        );
+      } catch {
+        setConsequences([]);
+      } finally {
+        setLoadingPreview(false);
+      }
     }
   };
 
@@ -92,16 +118,8 @@ export function useLifecycleActions(queryKeys: string[]) {
           return lifecycleApi.deactivate(action.resource, id);
         case 'reactivate':
           return lifecycleApi.reactivate(action.resource, id);
-        case 'cancelInvoice':
-          return lifecycleApi.cancelInvoice(id);
-        case 'cancelOrder':
-          return lifecycleApi.cancelOrder(id);
-        case 'cancelQuotation':
-          return lifecycleApi.cancelQuotation(id);
-        case 'cancelInquiry':
-          return lifecycleApi.cancelInquiry(id);
-        case 'deleteDraftQuotation':
-          return lifecycleApi.deleteDraftQuotation(id);
+        case 'delete':
+          return lifecycleApi.deleteRecord(action.resource, id);
         case 'reactivateUser':
           return lifecycleApi.reactivateUser(id);
       }
@@ -182,53 +200,19 @@ function buildDialog(
         consequences: [],
       };
 
-    case 'cancelInvoice':
+    case 'delete':
       return {
-        title: `Cancel invoice ${label}?`,
-        message:
-          'The invoice keeps its number and is marked void, so your numbering stays unbroken. It will stop counting towards receivables.',
-        tone: 'cancel',
-        confirmLabel: 'Cancel invoice',
-        consequences: ['Blocked if any payment has been received'],
-      };
-
-    case 'cancelOrder':
-      return {
-        title: `Cancel order ${label}?`,
-        message: 'The order is marked cancelled and keeps its number.',
-        tone: 'cancel',
-        confirmLabel: 'Cancel order',
-        consequences: ['Blocked if the goods have shipped or an invoice exists'],
-      };
-
-    case 'cancelQuotation':
-      return {
-        title: `Cancel quotation ${label}?`,
-        message: 'The quotation is marked rejected and keeps its number.',
-        tone: 'cancel',
-        confirmLabel: 'Cancel quotation',
-        consequences: ['Blocked if it has already become an order'],
-      };
-
-    case 'cancelInquiry':
-      return {
-        title: `Mark inquiry ${label} as lost?`,
-        message: 'It moves out of your open pipeline but stays in the history.',
-        tone: 'cancel',
-        confirmLabel: 'Mark lost',
-        consequences: [],
-      };
-
-    case 'deleteDraftQuotation':
-      return {
-        title: `Delete draft ${label}?`,
-        message:
-          'This draft has not been sent and nothing references it, so it will be removed completely. This cannot be undone.',
+        title: `Delete ${label}?`,
+        message: loadingPreview
+          ? 'Checking what this will remove...'
+          : 'Are you sure you want to delete this record? This action cannot be undone.',
         tone: 'permanent',
         confirmLabel: 'Delete permanently',
-        // Typing the number makes an irreversible action deliberate
+        // Typing the record number makes an irreversible action deliberate. These
+        // deletions remove payments and change reported revenue, so a mis-click
+        // must not be enough.
         requireTyping: label,
-        consequences: [],
+        consequences,
       };
   }
 }

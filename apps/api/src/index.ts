@@ -25,6 +25,7 @@ import { taskRouter } from './routes/tasks';
 import { auditRouter } from './routes/audit';
 import { auditLog } from './middleware/auditLog';
 import { lifecycleRouter } from './routes/lifecycle';
+import { recordDeletionRouter } from './routes/recordDeletion';
 
 dotenv.config();
 
@@ -74,6 +75,7 @@ app.use('/api/expenses', expenseRouter);
 app.use('/api/tasks', taskRouter);
 app.use('/api/audit', auditRouter);
 app.use('/api/lifecycle', lifecycleRouter);
+app.use('/api/records', recordDeletionRouter);
 
 // Error handling
 // 404 for anything that didn't match a route above, then the error handler.

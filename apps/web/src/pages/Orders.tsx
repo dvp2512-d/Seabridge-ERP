@@ -260,19 +260,12 @@ export default function Orders() {
                       <RowActions
                         destructivePermission="RECORD_DELETE"
                         viewHref={`/orders/${order.id}`}
-                        destructiveKind="cancel"
+                        destructiveKind="delete"
                         // Cancelling keeps the order number. Blocked once the goods
                         // have shipped or an invoice exists, because from that
                         // point the order records what actually happened.
                         onDestructive={() =>
-                          lifecycle.request({ kind: 'cancelOrder' }, order.id, order.orderNumber)
-                        }
-                        destructiveDisabledReason={
-                          order.status === 'CANCELLED'
-                            ? 'Already cancelled'
-                            : ['SHIPPED', 'DELIVERED'].includes(order.status)
-                            ? 'Goods have already shipped'
-                            : undefined
+                          lifecycle.request({ kind: 'delete', resource: 'orders' }, order.id, order.orderNumber)
                         }
                       />
                     </td>

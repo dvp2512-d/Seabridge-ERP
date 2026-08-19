@@ -243,25 +243,17 @@ export default function Quotations() {
                       </button>
                       <RowActions
                         destructivePermission="RECORD_DELETE"
-                        // A draft has not been sent to a buyer and nothing
-                        // references it, so it can be removed outright. Anything
-                        // beyond draft keeps its number and is cancelled.
-                        destructiveKind={q.status === 'DRAFT' ? 'delete' : 'cancel'}
+                        // Deletable at any stage. If the quotation became an
+                        // order, the order and its invoices go too - the database
+                        // will not allow the quotation to be removed otherwise.
+                        // The confirmation lists exactly what that means.
+                        destructiveKind="delete"
                         onDestructive={() =>
                           lifecycle.request(
-                            q.status === 'DRAFT'
-                              ? { kind: 'deleteDraftQuotation' }
-                              : { kind: 'cancelQuotation' },
+                            { kind: 'delete', resource: 'quotations' },
                             q.id,
                             q.quotationNumber
                           )
-                        }
-                        destructiveDisabledReason={
-                          q.status === 'REJECTED'
-                            ? 'Already cancelled'
-                            : q.orders?.length
-                            ? 'Converted to an order - cancel that first'
-                            : undefined
                         }
                       />
                     </div>
