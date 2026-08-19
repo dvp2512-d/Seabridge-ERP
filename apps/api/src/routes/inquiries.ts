@@ -4,7 +4,6 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
-import { cancelInquiry } from '../services/cancellationService';
 import { emitEvent } from '../services/eventService';
 
 const router: Router = Router();
@@ -207,16 +206,6 @@ router.post('/:id/followups', can('SALES_MANAGE'), async (req, res, next) => {
     });
 
     res.status(201).json({ success: true, data: followUp });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/** Mark an inquiry lost, which is the language the pipeline already uses. */
-router.put('/:id/cancel', can('RECORD_DELETE'), async (req, res, next) => {
-  try {
-    const result = await cancelInquiry(req.params.id, req.body?.reason);
-    res.json({ success: true, data: result, message: result.message });
   } catch (error) {
     next(error);
   }

@@ -4,7 +4,6 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
-import { cancelInvoice } from '../services/cancellationService';
 import {
   buildRateMap,
   findRate,
@@ -455,19 +454,6 @@ router.get('/reports/receivables', can('FINANCE_VIEW'), async (req, res, next) =
     };
 
     res.json({ success: true, data: summary });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * Cancel an invoice. Kept as a numbered void rather than deleted, since the
- * number appears on customs paperwork and in the audit trail.
- */
-router.put('/:id/cancel', can('RECORD_DELETE'), async (req, res, next) => {
-  try {
-    const result = await cancelInvoice(req.params.id, req.body?.reason);
-    res.json({ success: true, data: result, message: result.message });
   } catch (error) {
     next(error);
   }

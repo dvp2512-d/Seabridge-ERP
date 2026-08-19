@@ -509,14 +509,16 @@ function PipelineChart({ data }: { data: any[] }) {
     { key: 'LOST', label: 'Lost', color: 'bg-red-500' },
   ];
 
-  const totalValue = data.reduce((sum, d) => sum + (d._sum?.expectedValue || 0), 0);
+  // Each row is { key, count, value } from the collapsed analytics response, and
+  // value is already converted into the base currency.
+  const totalValue = data.reduce((sum, d) => sum + (d.value || 0), 0);
 
   return (
     <div className="space-y-3">
       {stages.map(stage => {
-        const stageData = data.find(d => d.stage === stage.key);
-        const count = stageData?._count?.id || 0;
-        const value = stageData?._sum?.expectedValue || 0;
+        const stageData = data.find(d => d.key === stage.key);
+        const count = stageData?.count || 0;
+        const value = stageData?.value || 0;
         const percentage = totalValue > 0 ? (value / totalValue) * 100 : 0;
 
         if (count === 0 && !['NEW', 'WON', 'LOST'].includes(stage.key)) return null;
@@ -656,8 +658,11 @@ function ReceivablesAging({ data }: { data: any[] }) {
 
 // Helper function to calculate conversion rate
 function calculateConversionRate(inquiriesByStage: any[]): string {
-  const won = inquiriesByStage.find(s => s.stage === 'WON')?._count?.id || 0;
-  const lost = inquiriesByStage.find(s => s.stage === 'LOST')?._count?.id || 0;
+  // The analytics endpoint groups by currency internally and collapses the result,
+  // so each row is { key, count, value } rather than Prisma's raw
+  // { stage, _count, _sum }. Reading the old shape silently produced zero.
+  const won = inquiriesByStage.find(s => s.key === 'WON')?.count || 0;
+  const lost = inquiriesByStage.find(s => s.key === 'LOST')?.count || 0;
   const total = won + lost;
   
   if (total === 0) return '-';
