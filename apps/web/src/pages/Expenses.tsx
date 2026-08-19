@@ -325,8 +325,23 @@ function ExpenseActions({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  /**
+   * A paid expense can no longer be approved, rejected or edited - the money has
+   * gone out, so those actions would misrepresent what happened. Deleting is
+   * still offered, because a founder may need to remove a mistaken entry, and
+   * nothing in the database references an expense.
+   */
   if (expense.status === 'PAID') {
-    return <span className="text-xs text-gray-400">final</span>;
+    return canDelete ? (
+      <div className="inline-flex gap-1 items-center">
+        <span className="text-xs text-gray-400">paid</span>
+        <button onClick={onDelete} className="btn btn-ghost btn-sm text-red-600" title="Delete">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+    ) : (
+      <span className="text-xs text-gray-400">paid</span>
+    );
   }
 
   return (
