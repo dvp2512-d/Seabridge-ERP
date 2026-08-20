@@ -21,6 +21,7 @@ import {
   type DocumentColumn,
   type FooterBlock,
 } from './exportDocumentService';
+import { calculateInclusiveUnitPrices } from './inclusivePricing';
 
 /** Shipment-ish details, sourced from the order or its first shipment. */
 interface DispatchInfo {
@@ -127,61 +128,30 @@ export function buildQuotationDocument(quotation: any, company: any) {
 
   // Additional costs are billed to the buyer but belong to the quotation as a
   // whole. The template has a single TOTAL row (=SUM of the line amounts) and no
-  // charges line, so the charges are apportioned into the unit prices by value
-  // share. That keeps Qty x Unit Price = Amount on every line.
+  // charges line, so the costs are folded into the unit prices.
   //
-  // Two decimals cannot always reconcile: 40.00 over a quantity of 3 gives
-  // 13.33, and 13.33 x 3 = 39.99, losing a cent. So the unit price is computed
-  // at the smallest precision from 2 to 4 decimals that makes the line amounts
-  // sum to the true grand total, which is what export invoices do in practice.
+  // Uses the same helper as the order conversion, so what the buyer is quoted per
+  // unit is exactly what the order and its invoices will carry. These were
+  // separate implementations once, and the order ended up disagreeing with its own
+  // total as a result.
   const additional = (quotation.costs ?? []).reduce((s: number, c: any) => s + num(c.amount), 0);
-  const lineSubtotal = items.reduce((s: number, i: any) => s + num(i.totalPrice), 0);
-  const trueTotal = round2(lineSubtotal + additional);
+  const pricing = calculateInclusiveUnitPrices(
+    items.map((item: any) => ({
+      ...item,
+      quantity: num(item.quantity),
+      unitPrice: num(item.unitPrice),
+    })),
+    additional
+  );
 
-  /** Apportion charges and price every line at the given decimal precision. */
-  const priceAt = (decimals: number) => {
-    const factor = Math.pow(10, decimals);
-    let apportioned = 0;
-
-    const priced = items.map((item: any, index: number) => {
-      const qtyValue = num(item.quantity);
-      const lineTotal = num(item.totalPrice);
-
-      let share: number;
-      if (index === items.length - 1) {
-        // The last line absorbs the remainder so the apportionment is exact.
-        share = round2(additional - apportioned);
-      } else {
-        share = round2(
-          lineSubtotal > 0
-            ? additional * (lineTotal / lineSubtotal)
-            : additional / Math.max(items.length, 1)
-        );
-        apportioned += share;
-      }
-
-      const rawUnit = qtyValue > 0 ? (lineTotal + share) / qtyValue : 0;
-      const unitPrice = Math.round((rawUnit + Number.EPSILON) * factor) / factor;
-      return {
-        ...item,
-        printUnitPrice: unitPrice,
-        printDecimals: decimals,
-        printAmount: round2(unitPrice * qtyValue),
-      };
-    });
-
-    const total = round2(priced.reduce((s: number, i: any) => s + i.printAmount, 0));
-    return { priced, total };
-  };
-
-  let result = priceAt(2);
-  for (const decimals of [3, 4]) {
-    if (Math.abs(result.total - trueTotal) < 0.005) break;
-    result = priceAt(decimals);
-  }
-
-  const priced = result.priced;
-  const documentTotal = result.total;
+  // Carry the computed figures onto each row for the column renderers.
+  const priced = pricing.lines.map((line) => ({
+    ...line.item,
+    printUnitPrice: line.unitPrice,
+    printDecimals: line.decimals,
+    printAmount: line.amount,
+  }));
+  const documentTotal = pricing.total;
 
   const columns: DocumentColumn[] = [
     { header: 'Product Code', width: 0.13, value: (i) => i.product?.hsnCode ?? i.product?.code ?? '-' },
