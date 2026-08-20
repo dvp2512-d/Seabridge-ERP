@@ -175,6 +175,7 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
        */
       incomeByStatus,
       incomeByCategory,
+      expenseGroups,
     ] = await Promise.all([
       prisma.payment.findMany({
         where: { paymentDate: { gte: startOfMonth } },
@@ -206,6 +207,17 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
         by: ['category'],
         where: { receivedDate: { gte: startOfYear }, status: 'RECEIVED' },
         _sum: { amountINR: true },
+      }),
+      /**
+       * Expenses for the net position. Grouped by currency as well, since an
+       * expense is recorded in whatever currency it was paid in and those cannot
+       * be added directly.
+       */
+      prisma.expense.groupBy({
+        by: ['status', 'currency'],
+        where: { expenseDate: { gte: startOfYear } },
+        _count: { _all: true },
+        _sum: { amount: true },
       }),
     ]);
 
@@ -262,6 +274,42 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
       if (group.status === 'PENDING') otherIncomePending += amount;
     }
 
+    /**
+     * Net position for the year to date.
+     *
+     *   total income   = export payments received + other income received
+     *   total expenses = expenses actually paid
+     *   net            = the difference
+     *
+     * Deliberately cash-based. "Paid" and "received" mean money that has actually
+     * moved, so the net answers what is left rather than what is expected.
+     * Committed-but-unpaid expenses and pending income are reported separately
+     * rather than folded in, because mixing the two produces a figure that is
+     * neither a cash position nor a profit.
+     *
+     * This does not change what Revenue means: kpis.yearlyRevenue is still export
+     * sales alone. Nothing here alters an existing figure.
+     */
+    let expensesPaid = 0;
+    let expensesCommitted = 0;
+    let expensesUnconverted = 0;
+
+    for (const group of expenseGroups) {
+      const rate = ratesByCode.get(group.currency);
+      if (rate === undefined) {
+        expensesUnconverted += group._count._all;
+        continue;
+      }
+      const amount = Number(group._sum.amount ?? 0) * rate;
+      if (group.status === 'PAID') expensesPaid += amount;
+      // Approved but not yet paid: an obligation, not yet an outflow.
+      if (group.status === 'APPROVED') expensesCommitted += amount;
+    }
+
+    const totalIncome = round2(yearlyRevenue.total + otherIncomeReceived);
+    const totalExpenses = round2(expensesPaid);
+    const netBalance = round2(totalIncome - totalExpenses);
+
     res.json({
       success: true,
       data: {
@@ -302,6 +350,26 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
               amountINR: round2(Number(g._sum.amountINR ?? 0)),
             }))
             .sort((a, b) => b.amountINR - a.amountINR),
+        },
+        /**
+         * Net position, year to date, in the base currency.
+         *
+         * Reported as its own block with every component shown, so the arithmetic
+         * is checkable rather than a single unexplained number.
+         */
+        netPosition: {
+          currency: base.code,
+          exportRevenue: yearlyRevenue.total,
+          otherIncome: round2(otherIncomeReceived),
+          totalIncome,
+          totalExpenses,
+          netBalance,
+          // Not included in the figures above; shown so the net is not mistaken
+          // for the whole picture.
+          expensesCommitted: round2(expensesCommitted),
+          incomePending: round2(otherIncomePending),
+          // Non-zero means some expenses had no exchange rate and are excluded.
+          unconvertedExpenses: expensesUnconverted,
         },
         pendingTasks,
         alerts: await getAlerts(),

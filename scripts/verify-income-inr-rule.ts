@@ -143,6 +143,55 @@ if (dashboard) {
     !/income/i.test(revenueBlock),
     'income appears inside the revenue calculation'
   );
+
+  // ---- net position ----
+  check(
+    'net position is reported as its own block',
+    /netPosition:\s*\{/.test(dashboard.content),
+    'no netPosition block found'
+  );
+
+  check(
+    'net is total income minus total expenses',
+    /netBalance\s*=\s*round2\(totalIncome - totalExpenses\)/.test(dashboard.content),
+    'the net is not derived from the two totals'
+  );
+
+  check(
+    'total income is export revenue plus other income',
+    /totalIncome\s*=\s*round2\(yearlyRevenue\.total \+ otherIncomeReceived\)/.test(
+      dashboard.content
+    ),
+    'total income is not the sum of the two sources'
+  );
+
+  // Cash-based: only paid expenses reduce the balance, and only received income
+  // adds to it. Mixing in commitments would give a figure that is neither.
+  check(
+    'only PAID expenses reduce the balance',
+    /status === 'PAID'\) expensesPaid/.test(dashboard.content),
+    'expenses other than paid appear to be counted'
+  );
+
+  check(
+    'approved-but-unpaid expenses are reported separately',
+    /expensesCommitted/.test(dashboard.content),
+    'committed expenses are not surfaced'
+  );
+
+  // Expenses are recorded in the currency paid, so they must be converted before
+  // being added - the same rule that applies everywhere else.
+  check(
+    'expenses are converted before being summed',
+    /ratesByCode\.get\(group\.currency\)/.test(dashboard.content),
+    'expenses appear to be summed without conversion'
+  );
+
+  check(
+    'expenses with no rate are counted, not silently dropped',
+    /expensesUnconverted/.test(dashboard.content),
+    'unconvertible expenses are not reported'
+  );
 }
 
 // ---- 4. the UI must label income figures as INR --------------------------

@@ -7,6 +7,7 @@ import { useAuthStore } from '@/store/authStore';
 import { can } from '@/lib/permissions';
 import { formatCurrency, formatDate, getStatusColor, cn } from '@/lib/utils';
 import UnconvertedNotice from '@/components/ui/UnconvertedNotice';
+import NetPositionPanel from '@/components/ui/NetPositionPanel';
 import {
   TrendingUp,
   Users,
@@ -86,6 +87,8 @@ export default function Dashboard() {
   const unconvertedRecords: number = dashboard?.unconvertedRecords ?? 0;
   // Always INR: income is converted when recorded, so nothing here needs a rate.
   const otherIncome = dashboard?.otherIncome ?? { received: 0, pending: 0, byCategory: [] };
+  // Total income less expenses paid, with every component shown on the panel.
+  const netPosition = dashboard?.netPosition;
 
   return (
     <div className="space-y-6">
@@ -203,6 +206,14 @@ export default function Dashboard() {
           iconColor="text-teal-600"
         />
       </div>
+
+      {/* Total income less expenses paid. Placed above the pipeline detail because
+          it answers the question most often asked of a dashboard. */}
+      {netPosition && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <NetPositionPanel net={netPosition} />
+        </div>
+      )}
 
       {/* Secondary KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
