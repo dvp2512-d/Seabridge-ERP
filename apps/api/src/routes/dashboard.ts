@@ -189,7 +189,9 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
        */
       incomeByStatus,
       incomeByCategory,
-      expenseGroups,
+      allPayments,
+      allIncomeReceived,
+      allExpenseGroups,
     ] = await Promise.all([
       prisma.payment.findMany({
         where: { paymentDate: { gte: startOfMonth } },
@@ -223,13 +225,24 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
         _sum: { amountINR: true },
       }),
       /**
-       * Expenses for the net position. Grouped by currency as well, since an
-       * expense is recorded in whatever currency it was paid in and those cannot
-       * be added directly.
+       * All-time figures for the remaining balance.
+       *
+       * Deliberately not scoped to the financial year. The balance answers "how
+       * much is actually left to use", and money received in a previous year is
+       * still money. Scoping it to April onwards would understate what is
+       * available every April and slowly recover through the year, which is not
+       * what anyone means by a remaining balance.
+       *
+       * The KPI cards stay on the financial year, because revenue performance is
+       * a period question.
        */
+      prisma.payment.findMany({ select: { amount: true, currency: true } }),
+      prisma.income.aggregate({
+        where: { status: 'RECEIVED' },
+        _sum: { amountINR: true },
+      }),
       prisma.expense.groupBy({
         by: ['status', 'currency'],
-        where: { expenseDate: { gte: startOfYear } },
         _count: { _all: true },
         _sum: { amount: true },
       }),
@@ -289,26 +302,25 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
     }
 
     /**
-     * Net position for the year to date.
+     * Net position: the remaining balance, all time.
      *
-     *   total income   = export payments received + other income received
-     *   total expenses = expenses actually paid
-     *   net            = the difference
+     *   total income   = every payment received + every other-income receipt
+     *   total expenses = every expense paid
+     *   remaining      = the difference
      *
-     * Deliberately cash-based. "Paid" and "received" mean money that has actually
-     * moved, so the net answers what is left rather than what is expected.
-     * Committed-but-unpaid expenses and pending income are reported separately
-     * rather than folded in, because mixing the two produces a figure that is
-     * neither a cash position nor a profit.
+     * All time rather than financial year, because this answers what is left to
+     * use. Money received last year has not stopped existing, and scoping it to
+     * April onwards would show a near-empty balance every April.
      *
-     * This does not change what Revenue means: kpis.yearlyRevenue is still export
-     * sales alone. Nothing here alters an existing figure.
+     * Cash-based: only money that has actually moved. Approved-but-unpaid
+     * expenses and pending income are reported separately rather than folded in,
+     * since a figure mixing the two is neither a cash position nor a profit.
      */
     let expensesPaid = 0;
     let expensesCommitted = 0;
     let expensesUnconverted = 0;
 
-    for (const group of expenseGroups) {
+    for (const group of allExpenseGroups) {
       const rate = ratesByCode.get(group.currency);
       if (rate === undefined) {
         expensesUnconverted += group._count._all;
@@ -320,7 +332,14 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
       if (group.status === 'APPROVED') expensesCommitted += amount;
     }
 
-    const totalIncome = round2(yearlyRevenue.total + otherIncomeReceived);
+    // Every payment ever, converted at today's rates for a single comparable figure.
+    const allTimeRevenue = sumConverted(
+      allPayments.map((p) => ({ amount: Number(p.amount), currencyId: p.currency })),
+      ratesByCode
+    );
+
+    const otherIncomeAllTime = Number(allIncomeReceived._sum.amountINR ?? 0);
+    const totalIncome = round2(allTimeRevenue.total + otherIncomeAllTime);
     const totalExpenses = round2(expensesPaid);
     const netBalance = round2(totalIncome - totalExpenses);
 
@@ -379,24 +398,29 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
             .sort((a, b) => b.amountINR - a.amountINR),
         },
         /**
-         * Net position, year to date, in the base currency.
+         * Remaining balance, all time, in the base currency.
          *
-         * Reported as its own block with every component shown, so the arithmetic
-         * is checkable rather than a single unexplained number.
+         * Every component is returned so the arithmetic is checkable rather than a
+         * single unexplained number. Scope is stated on the block itself, because
+         * this is all time while the KPI cards above are financial year - the two
+         * appearing to disagree without explanation is exactly the confusion this
+         * replaces.
          */
         netPosition: {
           currency: base.code,
-          exportRevenue: yearlyRevenue.total,
-          otherIncome: round2(otherIncomeReceived),
+          scope: 'All time',
+          exportRevenue: allTimeRevenue.total,
+          otherIncome: round2(otherIncomeAllTime),
           totalIncome,
           totalExpenses,
           netBalance,
-          // Not included in the figures above; shown so the net is not mistaken
-          // for the whole picture.
+          // Not included in the figures above; shown so the balance is not
+          // mistaken for the whole picture.
           expensesCommitted: round2(expensesCommitted),
           incomePending: round2(otherIncomePending),
-          // Non-zero means some expenses had no exchange rate and are excluded.
+          // Non-zero means some records had no exchange rate and are excluded.
           unconvertedExpenses: expensesUnconverted,
+          unconvertedPayments: allTimeRevenue.unconvertedCount,
         },
         pendingTasks,
         alerts: await getAlerts(),

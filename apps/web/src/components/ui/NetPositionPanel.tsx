@@ -23,8 +23,13 @@ export default function NetPositionPanel({ net, periodLabel }: { net: any; perio
   return (
     <div className="card">
       <div className="card-header flex items-center justify-between">
-        <h2 className="font-semibold">Net Position</h2>
-        <span className="text-xs text-gray-500">{periodLabel ?? 'year to date'} &middot; {currency}</span>
+        <h2 className="font-semibold">Remaining Balance</h2>
+        {/* All time, not the financial year. Stated because the KPI cards above
+            are period-scoped, and two unlabelled figures that disagree is the
+            confusion this replaces. */}
+        <span className="text-xs text-gray-500">
+          {net.scope ?? periodLabel ?? 'all time'} &middot; {currency}
+        </span>
       </div>
       <div className="card-body space-y-3">
         {/* The two income components, so the total is traceable */}
@@ -88,14 +93,24 @@ export default function NetPositionPanel({ net, periodLabel }: { net: any; perio
           </div>
         )}
 
-        {net.unconvertedExpenses > 0 && (
+        {(net.unconvertedExpenses > 0 || net.unconvertedPayments > 0) && (
           <div className="flex items-start gap-2 p-2 rounded bg-amber-50 text-xs text-amber-800">
             <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
             <span>
-              {net.unconvertedExpenses}{' '}
-              {net.unconvertedExpenses === 1 ? 'expense is' : 'expenses are'} missing from this
-              total &mdash; no exchange rate on record for {net.unconvertedExpenses === 1 ? 'its' : 'their'}{' '}
-              currency.
+              {net.unconvertedExpenses > 0 && (
+                <>
+                  {net.unconvertedExpenses}{' '}
+                  {net.unconvertedExpenses === 1 ? 'expense' : 'expenses'}
+                </>
+              )}
+              {net.unconvertedExpenses > 0 && net.unconvertedPayments > 0 && ' and '}
+              {net.unconvertedPayments > 0 && (
+                <>
+                  {net.unconvertedPayments}{' '}
+                  {net.unconvertedPayments === 1 ? 'payment' : 'payments'}
+                </>
+              )}{' '}
+              missing from this balance &mdash; no exchange rate on record for their currency.
             </span>
           </div>
         )}

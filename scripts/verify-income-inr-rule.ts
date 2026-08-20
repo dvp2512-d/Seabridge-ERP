@@ -159,10 +159,20 @@ if (dashboard) {
 
   check(
     'total income is export revenue plus other income',
-    /totalIncome\s*=\s*round2\(yearlyRevenue\.total \+ otherIncomeReceived\)/.test(
+    /totalIncome\s*=\s*round2\(allTimeRevenue\.total \+ otherIncomeAllTime\)/.test(
       dashboard.content
     ),
     'total income is not the sum of the two sources'
+  );
+
+  // The balance answers what is left to use, so it must not be period-scoped.
+  check(
+    'the balance is all time, not financial year',
+    /scope: 'All time'/.test(dashboard.content) &&
+      /prisma\.payment\.findMany\(\{ select: \{ amount: true, currency: true \} \}\)/.test(
+        dashboard.content
+      ),
+    'the balance appears to be scoped to a period'
   );
 
   // Cash-based: only paid expenses reduce the balance, and only received income
