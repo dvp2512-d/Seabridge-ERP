@@ -191,6 +191,7 @@ async function main() {
     { entityType: 'PROCUREMENT', prefix: 'PO', currentNo: 0, padLength: 5 },
     { entityType: 'PAYMENT', prefix: 'PAY', currentNo: 0, padLength: 5 },
     { entityType: 'EXPENSE', prefix: 'EXP', currentNo: 0, padLength: 5 },
+    { entityType: 'INCOME', prefix: 'INC', currentNo: 0, padLength: 5 },
   ];
 
   for (const seq of sequences) {

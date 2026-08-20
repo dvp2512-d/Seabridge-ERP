@@ -50,6 +50,7 @@ model User {
   createdTasks     Task[]          @relation("TaskCreatedBy")
   communications   Communication[]
   auditLogs        AuditLog[]
+  incomeRecorded Income[]
 
   @@map("users")
 }
@@ -875,6 +876,7 @@ model Invoice {
   buyer    Buyer       @relation(fields: [buyerId], references: [id])
   currency Currency    @relation(fields: [currencyId], references: [id])
   payments Payment[]
+  incomeEntries   Income[]
 
   @@map("invoices")
 }
@@ -1041,6 +1043,64 @@ model CompanyProfile {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("company_profile")
+}
+
+/// Non-export-sale receipts: duty drawback, RoDTEP scrips, interest, forex gain,
+/// commission, scrap sales, recovered sample charges.
+///
+/// Deliberately separate from Invoice and Payment. Export revenue and incentive
+/// income answer different questions, and merging them would make sales
+/// performance look better than it is and break period-to-period comparison.
+///
+/// Reporting rule, enforced in the API rather than left as a convention: every
+/// total, card and export sums amountINR only. originalAmount must never be
+/// summed across rows, because those rows may be in different currencies.
+model Income {
+  id           String @id @default(cuid())
+  incomeNumber String @unique @map("income_number")
+
+  /// DUTY_DRAWBACK | RODTEP_MEIS | INTEREST | FOREX_GAIN | COMMISSION |
+  /// SCRAP_SALES | SAMPLE_CHARGES | OTHER
+  /// Stored as a string to match Expense.category; validated by the API.
+  category    String
+  description String
+
+  /// The amount as actually received or booked, in originalCurrency.
+  originalAmount   Decimal @map("original_amount") @db.Decimal(15, 2)
+  /// ISO code, validated against the Currency master rather than a fixed list.
+  originalCurrency String  @default("INR") @map("original_currency")
+  /// Rupees per one unit of originalCurrency. Entered by the user, never fetched
+  /// automatically - for forex gain the rate that matters is what the bank
+  /// actually gave, which no rate table knows.
+  exchangeRate     Decimal @default(1.0000) @map("exchange_rate") @db.Decimal(12, 4)
+  /// originalAmount x exchangeRate. Recomputed server-side on every write; a
+  /// client-supplied value is always ignored.
+  amountINR        Decimal @map("amount_inr") @db.Decimal(15, 2)
+
+  /// Scrip number, drawback shipping bill, or the payment reference
+  reference String?
+
+  /// Set only for FOREX_GAIN, so the figure stays traceable to the invoice it
+  /// came from rather than floating free of the books.
+  linkedInvoiceId String? @map("linked_invoice_id")
+
+  /// RECEIVED | PENDING
+  status String @default("PENDING")
+
+  receivedDate DateTime @map("received_date") @db.Date
+  notes        String?
+
+  createdById String   @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  linkedInvoice Invoice? @relation(fields: [linkedInvoiceId], references: [id])
+  createdBy     User     @relation(fields: [createdById], references: [id])
+
+  @@index([receivedDate])
+  @@index([category])
+  @@index([status])
+  @@map("income")
 }
 
 model SystemSetting {

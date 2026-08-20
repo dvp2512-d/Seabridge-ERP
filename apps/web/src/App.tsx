@@ -23,6 +23,7 @@ import Settings from '@/pages/Settings';
 import MasterData from '@/pages/MasterData';
 import ExchangeRates from '@/pages/ExchangeRates';
 import Expenses from '@/pages/Expenses';
+import Income from '@/pages/Income';
 import Tasks from '@/pages/Tasks';
 import Users from '@/pages/Users';
 
@@ -67,6 +68,7 @@ function App() {
                 <Route path="/master-data" element={<MasterData />} />
               <Route path="/exchange-rates" element={<ExchangeRates />} />
               <Route path="/expenses" element={<Expenses />} />
+              <Route path="/income" element={<Income />} />
               <Route path="/tasks" element={<Tasks />} />
               <Route path="/users" element={<Users />} />
                 <Route path="/settings" element={<Settings />} />

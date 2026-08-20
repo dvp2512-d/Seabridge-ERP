@@ -303,6 +303,22 @@ export const expensesApi = {
   options: () => api.get('/expenses/meta/options'),
 };
 
+/**
+ * Other Income. Every figure returned is already in INR - the server converts on
+ * write, so no client ever sums a foreign-currency amount.
+ */
+export const incomeApi = {
+  list: (params?: any) => api.get('/income', { params }),
+  get: (id: string) => api.get(`/income/${id}`),
+  create: (data: any) => api.post('/income', data),
+  update: (id: string, data: any) => api.put(`/income/${id}`, data),
+  setStatus: (id: string, status: string) => api.patch(`/income/${id}/status`, { status }),
+  remove: (id: string) => api.delete(`/income/${id}`),
+  options: () => api.get('/income/meta/options'),
+  /** Suggested forex gain from an invoice's booked and realised rates */
+  forexGain: (invoiceId: string) => api.get(`/income/forex-gain/${invoiceId}`),
+};
+
 export const tasksApi = {
   list: (params?: any) => api.get('/tasks', { params }),
   get: (id: string) => api.get(`/tasks/${id}`),

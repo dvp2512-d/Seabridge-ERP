@@ -84,6 +84,8 @@ export default function Dashboard() {
   // Non-zero means some records had no exchange rate for today and are missing
   // from the totals, which has to be stated rather than shown as a clean figure.
   const unconvertedRecords: number = dashboard?.unconvertedRecords ?? 0;
+  // Always INR: income is converted when recorded, so nothing here needs a rate.
+  const otherIncome = dashboard?.otherIncome ?? { received: 0, pending: 0, byCategory: [] };
 
   return (
     <div className="space-y-6">
@@ -184,6 +186,21 @@ export default function Dashboard() {
           iconBg={kpis.overdueReceivables > 0 ? "bg-red-100" : "bg-green-100"}
           iconColor={kpis.overdueReceivables > 0 ? "text-red-600" : "text-green-600"}
           alert={kpis.overdueReceivables > 0}
+        />
+        {/* Separate from Revenue on purpose: drawback, RoDTEP, interest and forex
+            gain are real receipts but not export sales, and folding them in would
+            flatter sales performance. Always INR - converted when recorded. */}
+        <KPICard
+          title="Other Income"
+          value={formatCurrency(otherIncome.received || 0, 'INR')}
+          subtitle={
+            otherIncome.pending > 0
+              ? `${formatCurrency(otherIncome.pending, 'INR')} pending`
+              : 'Drawback, RoDTEP, interest'
+          }
+          icon={TrendingUp}
+          iconBg="bg-teal-100"
+          iconColor="text-teal-600"
         />
       </div>
 

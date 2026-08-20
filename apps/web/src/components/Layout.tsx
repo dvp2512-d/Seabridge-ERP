@@ -54,6 +54,7 @@ const navigation: {
   { name: 'Master Data', href: '/master-data', icon: Database, permission: 'MASTER_MANAGE' },
   { name: 'Exchange Rates', href: '/exchange-rates', icon: TrendingUp, permission: 'MASTER_VIEW' },
   { name: 'Expenses', href: '/expenses', icon: Receipt, permission: 'FINANCE_VIEW' },
+  { name: 'Other Income', href: '/income', icon: TrendingUp, permission: 'FINANCE_VIEW' },
   { name: 'Tasks', href: '/tasks', icon: CheckSquare, permission: 'OPERATIONS_VIEW' },
   { name: 'Users', href: '/users', icon: UserCog, permission: 'SETTINGS_MANAGE' },
 ];

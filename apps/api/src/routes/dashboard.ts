@@ -163,6 +163,18 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
       receivableInvoices,
       overdueInvoices,
       pipelineInquiries,
+      /**
+       * Other income, kept apart from Revenue on purpose.
+       *
+       * Drawback, RoDTEP, interest and forex gain are real receipts but they are
+       * not export sales. Folding them into Revenue would flatter sales
+       * performance and stop one period being comparable with another.
+       *
+       * Already stored in INR, so these are plain sums - no conversion needed,
+       * which is the point of converting on write.
+       */
+      incomeByStatus,
+      incomeByCategory,
     ] = await Promise.all([
       prisma.payment.findMany({
         where: { paymentDate: { gte: startOfMonth } },
@@ -183,6 +195,17 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
       prisma.inquiry.findMany({
         where: { stage: { notIn: ['WON', 'LOST'] } },
         select: { expectedValue: true, currencyId: true },
+      }),
+      prisma.income.groupBy({
+        by: ['status'],
+        where: { receivedDate: { gte: startOfYear } },
+        _count: { _all: true },
+        _sum: { amountINR: true },
+      }),
+      prisma.income.groupBy({
+        by: ['category'],
+        where: { receivedDate: { gte: startOfYear }, status: 'RECEIVED' },
+        _sum: { amountINR: true },
       }),
     ]);
 
@@ -224,6 +247,21 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
       overdueReceivables.unconvertedCount +
       pipelineValue.unconvertedCount;
 
+    /**
+     * Other income for the year to date, in rupees.
+     *
+     * Deliberately not added to any revenue figure. Reported alongside so the
+     * top line can be seen if wanted, without changing what Revenue means.
+     */
+    const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
+    let otherIncomeReceived = 0;
+    let otherIncomePending = 0;
+    for (const group of incomeByStatus) {
+      const amount = Number(group._sum.amountINR ?? 0);
+      if (group.status === 'RECEIVED') otherIncomeReceived += amount;
+      if (group.status === 'PENDING') otherIncomePending += amount;
+    }
+
     res.json({
       success: true,
       data: {
@@ -249,6 +287,21 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
         recent: {
           inquiries: recentInquiries,
           orders: recentOrders,
+        },
+        /**
+         * Separate from kpis.monthlyRevenue and yearlyRevenue, which remain export
+         * sales only. Always INR, since income is converted when it is recorded.
+         */
+        otherIncome: {
+          currency: 'INR',
+          received: round2(otherIncomeReceived),
+          pending: round2(otherIncomePending),
+          byCategory: incomeByCategory
+            .map((g) => ({
+              category: g.category,
+              amountINR: round2(Number(g._sum.amountINR ?? 0)),
+            }))
+            .sort((a, b) => b.amountINR - a.amountINR),
         },
         pendingTasks,
         alerts: await getAlerts(),

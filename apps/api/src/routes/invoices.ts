@@ -270,7 +270,17 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
     const schema = z.object({
       amount: z.number().positive(),
       currency: z.string().optional(),
-      exchangeRate: z.number().optional(),
+      /**
+       * Rupees per unit of the payment currency, as actually realised.
+       *
+       * Left to the caller because the rate that matters here is what the bank
+       * gave, which no notified rate table knows. When omitted it falls back to
+       * the notified rate on the payment date, so the figure is at least
+       * defensible rather than the previous default of 1.0 - which made a USD
+       * payment look as though a dollar were a rupee and rendered any forex gain
+       * calculation meaningless.
+       */
+      exchangeRate: z.number().positive().optional(),
       paymentDate: z.string().transform(s => new Date(s)),
       paymentMode: z.string().min(1),
       reference: z.string().optional(),
@@ -303,6 +313,30 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
     const paymentNumber = await generateCode('PAYMENT', 'PAY');
 
     const newPaidAmount = Number(invoice.paidAmount) + validation.data.amount;
+    /**
+     * Resolve the realised rate for this payment.
+     *
+     * Preference order: what the caller stated, then the notified rate on the
+     * payment date, then parity only when the payment is already in the base
+     * currency. Previously this defaulted to 1.0 for every payment, so a USD
+     * receipt recorded a rate of one rupee per dollar - harmless while nothing
+     * read it, but the forex gain calculation depends on it being real.
+     */
+    let paymentRate = validation.data.exchangeRate;
+    if (paymentRate === undefined) {
+      const base = await prisma.currency.findFirst({ where: { isBaseCurrency: true } });
+      if (base && invoice.currencyId === base.id) {
+        paymentRate = 1;
+      } else {
+        const resolved = await findRate(
+          invoice.currencyId,
+          validation.data.paymentDate,
+          'EXPORT'
+        );
+        paymentRate = resolved?.rate ?? Number(invoice.exchangeRate ?? 1);
+      }
+    }
+
     const newBalanceAmount = Math.max(0, Number(invoice.totalAmount) - newPaidAmount);
     const newStatus = newBalanceAmount <= 0.01 ? 'PAID' : 'PARTIALLY_PAID';
 
@@ -336,6 +370,9 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
           ...validation.data,
           invoiceId: req.params.id,
           paymentNumber,
+          // Resolved above rather than taken straight from the request, so a
+          // foreign-currency receipt is never left recorded at parity.
+          exchangeRate: paymentRate,
         },
       });
 
