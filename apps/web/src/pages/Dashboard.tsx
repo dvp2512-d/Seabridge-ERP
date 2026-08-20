@@ -89,6 +89,12 @@ export default function Dashboard() {
   const otherIncome = dashboard?.otherIncome ?? { received: 0, pending: 0, byCategory: [] };
   // Total income less expenses paid, with every component shown on the panel.
   const netPosition = dashboard?.netPosition;
+  /**
+   * The period and basis these figures cover. Labelled on the cards so a number
+   * is never presented without saying what it measures - the income page defaults
+   * to all time, so an unlabelled dashboard figure looked like a mismatch.
+   */
+  const period = dashboard?.period;
 
   return (
     <div className="space-y-6">
@@ -158,7 +164,7 @@ export default function Dashboard() {
         <KPICard
           title="Monthly Revenue"
           value={formatCurrency(kpis.monthlyRevenue || 0, baseCode)}
-          subtitle={`YTD: ${formatCurrency(kpis.yearlyRevenue || 0, baseCode)}`}
+          subtitle={`${period?.label ?? 'YTD'}: ${formatCurrency(kpis.yearlyRevenue || 0, baseCode)}`}
           icon={TrendingUp}
           iconBg="bg-green-100"
           iconColor="text-green-600"
@@ -198,8 +204,11 @@ export default function Dashboard() {
           value={formatCurrency(otherIncome.received || 0, 'INR')}
           subtitle={
             otherIncome.pending > 0
-              ? `${formatCurrency(otherIncome.pending, 'INR')} pending`
-              : 'Drawback, RoDTEP, interest'
+              ? `Received ${period?.label ?? ''} · ${formatCurrency(
+                  otherIncome.pending,
+                  'INR'
+                )} pending`
+              : `Received ${period?.label ?? ''}`
           }
           icon={TrendingUp}
           iconBg="bg-teal-100"
@@ -211,7 +220,7 @@ export default function Dashboard() {
           it answers the question most often asked of a dashboard. */}
       {netPosition && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <NetPositionPanel net={netPosition} />
+          <NetPositionPanel net={netPosition} periodLabel={period?.label} />
         </div>
       )}
 

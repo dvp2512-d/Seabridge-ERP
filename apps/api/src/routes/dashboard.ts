@@ -2,6 +2,11 @@ import { Router } from 'express';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import {
+  startOfFinancialYear,
+  startOfMonth as monthStart,
+  financialYearLabel,
+} from '../utils/period';
+import {
   buildRateMap,
   buildRateMapByCode,
   sumConverted,
@@ -59,8 +64,17 @@ router.use(authenticate);
 router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
   try {
     const today = new Date();
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    const startOfYear = new Date(today.getFullYear(), 0, 1);
+    const startOfMonth = monthStart(today);
+    /**
+     * Indian financial year, 1 April to 31 March - not the calendar year.
+     *
+     * This previously started on 1 January, so January, February and March counted
+     * against the wrong year and every yearly total disagreed with the books by
+     * three months of activity. The label travels with the response so a screen
+     * can state which year it is showing rather than leaving it to be assumed.
+     */
+    const startOfYear = startOfFinancialYear(today);
+    const periodLabel = financialYearLabel(today);
 
     // Parallel queries for performance
     const [
@@ -315,6 +329,19 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
       data: {
         // Every money figure below is expressed in this currency.
         baseCurrency: base,
+        /**
+         * What period and basis these figures cover, so a screen can label them
+         * rather than presenting bare numbers whose meaning has to be guessed.
+         * The mismatch this replaces: the dashboard showed year-to-date received
+         * income while the income page showed all-time received plus pending, and
+         * nothing said so.
+         */
+        period: {
+          label: periodLabel,
+          from: startOfYear,
+          to: today,
+          basis: 'Received and paid only, excluding pending',
+        },
         // Non-zero means some records could not be converted, so the totals are
         // understated. The UI surfaces this rather than showing a clean number.
         unconvertedRecords: unconverted,

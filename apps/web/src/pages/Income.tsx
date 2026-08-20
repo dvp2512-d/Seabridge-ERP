@@ -112,11 +112,13 @@ export default function Income() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <SummaryCard
           label="Received"
           value={formatCurrency(summary?.totalReceived ?? 0, 'INR')}
-          hint={`${summary?.countByStatus?.RECEIVED ?? 0} entries`}
+          hint={`${summary?.countByStatus?.RECEIVED ?? 0} entries · ${
+            summary?.period?.label ?? 'All time'
+          }`}
         />
         <SummaryCard
           label="Pending"
@@ -127,7 +129,15 @@ export default function Income() {
         <SummaryCard
           label="Total"
           value={formatCurrency(summary?.totalAll ?? 0, 'INR')}
-          hint="Separate from export revenue"
+          hint="Received + pending"
+        />
+        {/* The dashboard card shows received for the current financial year only.
+            Repeated here so the two screens can be reconciled at a glance instead
+            of appearing to disagree. */}
+        <SummaryCard
+          label={summary?.financialYear?.label ?? 'This year'}
+          value={formatCurrency(summary?.financialYear?.received ?? 0, 'INR')}
+          hint="Received — matches the dashboard card"
         />
       </div>
 

@@ -14,7 +14,7 @@ import { formatCurrency } from '@/lib/utils';
  * inside it - mixing them would give a figure that is neither a cash position nor
  * a profit.
  */
-export default function NetPositionPanel({ net }: { net: any }) {
+export default function NetPositionPanel({ net, periodLabel }: { net: any; periodLabel?: string }) {
   if (!net) return null;
 
   const currency = net.currency ?? 'INR';
@@ -24,7 +24,7 @@ export default function NetPositionPanel({ net }: { net: any }) {
     <div className="card">
       <div className="card-header flex items-center justify-between">
         <h2 className="font-semibold">Net Position</h2>
-        <span className="text-xs text-gray-500">year to date &middot; {currency}</span>
+        <span className="text-xs text-gray-500">{periodLabel ?? 'year to date'} &middot; {currency}</span>
       </div>
       <div className="card-body space-y-3">
         {/* The two income components, so the total is traceable */}

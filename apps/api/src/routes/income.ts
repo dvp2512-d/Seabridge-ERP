@@ -22,6 +22,7 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
+import { startOfFinancialYear, financialYearLabel } from '../utils/period';
 
 const router: Router = Router();
 
@@ -144,6 +145,20 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
       if (group.status === 'PENDING') totalPending += amount;
     }
 
+    /**
+     * The same figure the dashboard card shows: received, current financial year.
+     *
+     * Computed here regardless of the user's filters so the page can display it
+     * alongside its own totals. Without this the two screens could only be
+     * reconciled by manually setting a date filter, which is why they appeared to
+     * disagree.
+     */
+    const fyAggregate = await prisma.income.aggregate({
+      where: { status: 'RECEIVED', receivedDate: { gte: startOfFinancialYear() } },
+      _sum: { amountINR: true },
+    });
+    const fyReceived = Number(fyAggregate._sum.amountINR ?? 0);
+
     res.json({
       success: true,
       data: entries,
@@ -151,6 +166,24 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
       summary: {
         // Stated explicitly so no screen has to assume it.
         currency: 'INR',
+        /**
+         * Which period these totals cover.
+         *
+         * Unfiltered, this list is all-time, while the dashboard card shows the
+         * current financial year. Both are correct for what they measure, but the
+         * two disagreeing without explanation is confusing, so the period is
+         * reported and the screen states it.
+         */
+        period: {
+          from: from ? new Date(String(from)) : null,
+          to: to ? new Date(String(to)) : null,
+          label: from || to ? 'Filtered period' : 'All time',
+        },
+        /** Current financial year figures, so the dashboard card is reproducible here. */
+        financialYear: {
+          label: financialYearLabel(),
+          received: round2(fyReceived),
+        },
         totalReceived: round2(totalReceived),
         totalPending: round2(totalPending),
         totalAll: round2(totalReceived + totalPending),
