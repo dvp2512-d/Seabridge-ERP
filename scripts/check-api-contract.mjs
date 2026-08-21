@@ -8,7 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const root = 'C:/Users/Dhruvil.Patel/Projects/seabridge-ERP';
+const root = path.resolve(import.meta.dirname, '..');
 const apiSrc = path.join(root, 'apps/api/src');
 const webApiFile = path.join(root, 'apps/web/src/lib/api.ts');
 
