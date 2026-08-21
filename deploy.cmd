@@ -119,7 +119,7 @@ echo ================================================
 REM ------------------------------------------------------------- 1. files
 echo.
 echo [1/7] Checking project files
-for %%F in (docker-compose.yml .env) do (
+for %%F in (docker-compose.yml .env.example) do (
   if not exist "%%F" (
     echo       ERROR: "%%F" not found.
     echo       Run deploy.cmd from inside the project folder.
