@@ -893,6 +893,11 @@ model Payment {
   reference     String?
   bankDetails   String?  @map("bank_details")
   notes         String?
+  /// Client-generated unique key for duplicate prevention.
+  /// If set, a second request with the same key returns the existing payment
+  /// instead of creating a duplicate. This protects against double-submits,
+  /// network retries, and impatient users clicking "Pay" twice.
+  idempotencyKey String? @unique @map("idempotency_key")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 

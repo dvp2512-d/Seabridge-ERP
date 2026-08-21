@@ -280,7 +280,25 @@ router.post('/:id/shipments', can('OPERATIONS_MANAGE'), async (req, res, next) =
  *
  * Departure and arrival are stamped automatically when the status reaches the
  * matching stage, so the dates cannot silently disagree with the status.
+ *
+ * STATE MACHINE: Transitions are validated to prevent invalid workflows.
+ * Valid transitions:
+ *   PENDING → BOOKED (booking confirmed)
+ *   BOOKED → IN_TRANSIT (departed) or PENDING (booking cancelled)
+ *   IN_TRANSIT → ARRIVED (reached destination)
+ *   ARRIVED → DELIVERED (handed over to buyer)
+ *   DELIVERED is terminal — no further transitions allowed
  */
+
+/** Valid shipment state transitions. Each key lists the states it can move TO. */
+const SHIPMENT_TRANSITIONS: Record<string, string[]> = {
+  PENDING: ['BOOKED'],
+  BOOKED: ['IN_TRANSIT', 'PENDING'],  // Can cancel a booking
+  IN_TRANSIT: ['ARRIVED'],
+  ARRIVED: ['DELIVERED'],
+  DELIVERED: [],  // Terminal state
+};
+
 router.put('/:id/shipments/:shipmentId', can('OPERATIONS_MANAGE'), async (req, res, next) => {
   try {
     const schema = z.object({
@@ -308,6 +326,19 @@ router.put('/:id/shipments/:shipmentId', can('OPERATIONS_MANAGE'), async (req, r
     if (!existing) throw new NotFoundError('Shipment');
 
     const { status, ...rest } = validation.data;
+
+    // ─── STATE MACHINE VALIDATION ───────────────────────────────────────────
+    // Prevent invalid transitions like DELIVERED → PENDING
+    if (status && status !== existing.status) {
+      const allowedTransitions = SHIPMENT_TRANSITIONS[existing.status] || [];
+      if (!allowedTransitions.includes(status)) {
+        throw new AppError(
+          `Invalid status transition: cannot change from ${existing.status} to ${status}. ` +
+          `Allowed transitions from ${existing.status}: ${allowedTransitions.join(', ') || 'none (terminal state)'}`,
+          400
+        );
+      }
+    }
 
     const shipment = await prisma.shipment.update({
       where: { id: req.params.shipmentId },

@@ -44,6 +44,7 @@ vi.mock('@seabridge/database', () => {
     },
     payment: {
       create: vi.fn(),
+      findUnique: vi.fn(),
     },
     buyer: {
       update: vi.fn(),
@@ -55,6 +56,7 @@ vi.mock('@seabridge/database', () => {
       create: vi.fn().mockResolvedValue({}),
     },
     $transaction: vi.fn(),
+    $queryRaw: vi.fn(),
     $connect: vi.fn(),
     $disconnect: vi.fn(),
   };
@@ -67,7 +69,8 @@ vi.mock('../services/exchangeRateService', () => ({
   buildRateMap: vi.fn().mockResolvedValue({ base: 'INR', rates: new Map() }),
   findRate: vi.fn().mockResolvedValue(null),
   getBaseCurrency: vi.fn().mockResolvedValue({ id: 'cur-inr', code: 'INR', symbol: '₹' }),
-  toBaseCurrency: vi.fn().mockResolvedValue({ amount: 0, rate: 1 }),
+  // Return non-zero amount so buyer revenue update is triggered
+  toBaseCurrency: vi.fn().mockResolvedValue({ amount: 16900, rate: 84.5, baseCode: 'INR' }),
 }));
 
 // Mock event service
@@ -139,9 +142,19 @@ describe('DB Integrity: Payment Recording Transaction', () => {
       status: 'SENT',
     });
 
-    // The $transaction callback creates payment, updates invoice, updates buyer
+    // No existing idempotent payment
+    prisma.payment.findUnique.mockResolvedValue(null);
+
+    // The $transaction callback now uses $queryRaw for SELECT FOR UPDATE
     prisma.$transaction.mockImplementation(async (cb: Function) => {
       const tx = {
+        $queryRaw: vi.fn().mockResolvedValue([{
+          id: INVOICE_ID,
+          balance_amount: '5900',
+          paid_amount: '0',
+          total_amount: '5900',
+          buyer_id: 'buyer-001',
+        }]),
         payment: { create: vi.fn().mockResolvedValue({ id: 'pay-001', paymentNumber: 'PAY-001' }) },
         invoice: { update: vi.fn().mockResolvedValue({}) },
         buyer: { update: vi.fn().mockResolvedValue({}) },
@@ -181,12 +194,22 @@ describe('DB Integrity: Payment Recording Transaction', () => {
       status: 'SENT',
     });
 
+    prisma.payment.findUnique.mockResolvedValue(null);
+
+    const txQueryRaw = vi.fn().mockResolvedValue([{
+      id: INVOICE_ID,
+      balance_amount: '5900',
+      paid_amount: '0',
+      total_amount: '5900',
+      buyer_id: 'buyer-001',
+    }]);
     const txPaymentCreate = vi.fn().mockResolvedValue({ id: 'pay-001', paymentNumber: 'PAY-001' });
     const txInvoiceUpdate = vi.fn().mockResolvedValue({});
     const txBuyerUpdate = vi.fn().mockResolvedValue({});
 
     prisma.$transaction.mockImplementation(async (cb: Function) => {
       const tx = {
+        $queryRaw: txQueryRaw,
         payment: { create: txPaymentCreate },
         invoice: { update: txInvoiceUpdate },
         buyer: { update: txBuyerUpdate },
@@ -207,6 +230,8 @@ describe('DB Integrity: Payment Recording Transaction', () => {
 
     expect(res.status).toBe(201);
 
+    // SELECT FOR UPDATE was called
+    expect(txQueryRaw).toHaveBeenCalledTimes(1);
     // All three operations were called inside the transaction
     expect(txPaymentCreate).toHaveBeenCalledTimes(1);
     expect(txInvoiceUpdate).toHaveBeenCalledTimes(1);
@@ -240,10 +265,19 @@ describe('DB Integrity: Payment Recording Transaction', () => {
       status: 'SENT',
     });
 
+    prisma.payment.findUnique.mockResolvedValue(null);
+
     const txInvoiceUpdate = vi.fn().mockResolvedValue({});
 
     prisma.$transaction.mockImplementation(async (cb: Function) => {
       const tx = {
+        $queryRaw: vi.fn().mockResolvedValue([{
+          id: INVOICE_ID,
+          balance_amount: '5900',
+          paid_amount: '0',
+          total_amount: '5900',
+          buyer_id: 'buyer-001',
+        }]),
         payment: { create: vi.fn().mockResolvedValue({ id: 'pay-001', paymentNumber: 'PAY-001' }) },
         invoice: { update: txInvoiceUpdate },
         buyer: { update: vi.fn().mockResolvedValue({}) },

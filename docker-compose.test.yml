@@ -1,0 +1,35 @@
+# Isolated test database for integration tests.
+#
+# This container is SEPARATE from the production docker-compose.yml stack.
+# It uses a different port (5433) so it never conflicts with a running
+# production database on 5432.
+#
+# Usage:
+#   docker compose -f docker-compose.test.yml up -d
+#   npm run test:integration          # run integration tests
+#   docker compose -f docker-compose.test.yml down -v   # wipe all data
+#
+# The DATABASE_URL for tests is:
+#   postgresql://seabridge_test:seabridge_test@localhost:5433/seabridge_erp_test
+#
+# This is set in .env.test and picked up automatically by the test helpers.
+
+services:
+  postgres-test:
+    image: postgres:15-alpine
+    container_name: seabridge-test-db
+    environment:
+      POSTGRES_USER: seabridge_test
+      POSTGRES_PASSWORD: seabridge_test
+      POSTGRES_DB: seabridge_erp_test
+    ports:
+      - "5433:5432"
+    # tmpfs makes the DB run entirely in RAM — faster for tests and
+    # automatically empty on container restart.
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seabridge_test -d seabridge_erp_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20

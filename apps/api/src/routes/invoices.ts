@@ -264,7 +264,24 @@ router.put('/:id', can('FINANCE_MANAGE'), async (req, res, next) => {
   }
 });
 
-// Record payment
+/**
+ * Record a payment against an invoice.
+ *
+ * CONCURRENCY SAFETY:
+ * This endpoint uses two mechanisms to prevent payment errors:
+ *
+ * 1. IDEMPOTENCY KEY: If the client provides an idempotencyKey, a duplicate
+ *    request returns the existing payment instead of creating another. This
+ *    protects against double-clicks, network retries, and impatient users.
+ *
+ * 2. SELECT FOR UPDATE: The invoice row is locked inside the transaction before
+ *    reading the balance. Two concurrent payments cannot both read the same
+ *    balance and both proceed — one will wait for the other's lock, then see
+ *    the updated balance.
+ *
+ * Without these, two $700 payments against a $1000 balance could both succeed,
+ * leaving the invoice with -$400 balance.
+ */
 router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
   try {
     const schema = z.object({
@@ -286,96 +303,137 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
       reference: z.string().optional(),
       bankDetails: z.string().optional(),
       notes: z.string().optional(),
+      /**
+       * Client-generated unique key for duplicate prevention.
+       * If provided, a second request with the same key returns the existing
+       * payment instead of creating a duplicate.
+       */
+      idempotencyKey: z.string().optional(),
     });
 
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
-    const invoice = await prisma.invoice.findUnique({
-      where: { id: req.params.id },
-    });
+    const { idempotencyKey, ...paymentData } = validation.data;
 
-    if (!invoice) throw new NotFoundError('Invoice');
-
-    if (invoice.status === 'CANCELLED') {
-      throw new AppError('Cannot record a payment against a cancelled invoice', 400);
-    }
-
-    const balance = Number(invoice.balanceAmount);
-    // Allow a tiny rounding tolerance but block genuine overpayment.
-    if (validation.data.amount > balance + 0.01) {
-      throw new AppError(
-        `Payment of ${validation.data.amount} exceeds the outstanding balance of ${balance}`,
-        400
-      );
-    }
-
-    const paymentNumber = await generateCode('PAYMENT', 'PAY');
-
-    const newPaidAmount = Number(invoice.paidAmount) + validation.data.amount;
-    /**
-     * Resolve the realised rate for this payment.
-     *
-     * Preference order: what the caller stated, then the notified rate on the
-     * payment date, then parity only when the payment is already in the base
-     * currency. Previously this defaulted to 1.0 for every payment, so a USD
-     * receipt recorded a rate of one rupee per dollar - harmless while nothing
-     * read it, but the forex gain calculation depends on it being real.
-     */
-    let paymentRate = validation.data.exchangeRate;
-    if (paymentRate === undefined) {
-      const base = await prisma.currency.findFirst({ where: { isBaseCurrency: true } });
-      if (base && invoice.currencyId === base.id) {
-        paymentRate = 1;
-      } else {
-        const resolved = await findRate(
-          invoice.currencyId,
-          validation.data.paymentDate,
-          'EXPORT'
-        );
-        paymentRate = resolved?.rate ?? Number(invoice.exchangeRate ?? 1);
+    // ─── IDEMPOTENCY CHECK ──────────────────────────────────────────────────
+    // If the client sent an idempotency key, check if we already processed it.
+    // Return the existing payment rather than creating a duplicate.
+    if (idempotencyKey) {
+      const existing = await prisma.payment.findUnique({
+        where: { idempotencyKey },
+      });
+      if (existing) {
+        return res.status(200).json({
+          success: true,
+          data: existing,
+          message: 'Payment already recorded (idempotent response)',
+        });
       }
     }
 
-    const newBalanceAmount = Math.max(0, Number(invoice.totalAmount) - newPaidAmount);
-    const newStatus = newBalanceAmount <= 0.01 ? 'PAID' : 'PARTIALLY_PAID';
+    // ─── PRE-TRANSACTION LOOKUPS ────────────────────────────────────────────
+    // These reads happen outside the transaction to avoid holding locks while
+    // doing network I/O (exchange rate lookups).
 
-    /**
-     * Convert the payment into the base currency for the buyer's running revenue
-     * total. Resolved before the transaction so a rate lookup cannot hold a
-     * database transaction open.
-     *
-     * A payment in a currency with no notified rate still records correctly; it
-     * simply does not move the revenue figure, which is better than corrupting it
-     * with an unconverted amount.
-     */
+    // Basic invoice existence check (the real balance check is inside the txn)
+    const invoiceCheck = await prisma.invoice.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, status: true, currencyId: true, exchangeRate: true, buyerId: true },
+    });
+
+    if (!invoiceCheck) throw new NotFoundError('Invoice');
+
+    if (invoiceCheck.status === 'CANCELLED') {
+      throw new AppError('Cannot record a payment against a cancelled invoice', 400);
+    }
+
+    // Resolve the exchange rate before entering the transaction
+    let paymentRate = paymentData.exchangeRate;
+    if (paymentRate === undefined) {
+      const base = await prisma.currency.findFirst({ where: { isBaseCurrency: true } });
+      if (base && invoiceCheck.currencyId === base.id) {
+        paymentRate = 1;
+      } else {
+        const resolved = await findRate(
+          invoiceCheck.currencyId,
+          paymentData.paymentDate,
+          'EXPORT'
+        );
+        paymentRate = resolved?.rate ?? Number(invoiceCheck.exchangeRate ?? 1);
+      }
+    }
+
+    // Convert payment to base currency for buyer revenue
     let revenueInBase = 0;
     try {
       const converted = await toBaseCurrency(
-        validation.data.amount,
-        invoice.currencyId,
-        validation.data.paymentDate ?? new Date()
+        paymentData.amount,
+        invoiceCheck.currencyId,
+        paymentData.paymentDate ?? new Date()
       );
       revenueInBase = converted.amount;
     } catch {
       console.warn(
-        `[payment] no exchange rate for ${invoice.currencyId} on the payment date; buyer revenue not incremented`
+        `[payment] no exchange rate for ${invoiceCheck.currencyId}; buyer revenue not incremented`
       );
     }
 
-    // Payment, invoice rollup and buyer revenue must all move together.
-    const payment = await prisma.$transaction(async (tx) => {
+    // Generate payment number before transaction (uses its own atomic SQL)
+    const paymentNumber = await generateCode('PAYMENT', 'PAY');
+
+    // ─── TRANSACTION WITH ROW LOCKING ───────────────────────────────────────
+    // SELECT FOR UPDATE locks the invoice row so concurrent payments see the
+    // updated balance, not the stale one.
+    const result = await prisma.$transaction(async (tx) => {
+      // Lock the invoice row and get the CURRENT balance (not stale)
+      const [lockedInvoice] = await tx.$queryRaw<
+        { id: string; balance_amount: string; paid_amount: string; total_amount: string; buyer_id: string }[]
+      >`
+        SELECT id, balance_amount, paid_amount, total_amount, buyer_id
+        FROM invoices
+        WHERE id = ${req.params.id}
+        FOR UPDATE
+      `;
+
+      if (!lockedInvoice) {
+        throw new NotFoundError('Invoice');
+      }
+
+      const currentBalance = Number(lockedInvoice.balance_amount);
+      const currentPaid = Number(lockedInvoice.paid_amount);
+      const totalAmount = Number(lockedInvoice.total_amount);
+
+      // Check balance AFTER acquiring lock — this is the real check
+      if (paymentData.amount > currentBalance + 0.01) {
+        throw new AppError(
+          `Payment of ${paymentData.amount} exceeds the outstanding balance of ${currentBalance}`,
+          400
+        );
+      }
+
+      const newPaidAmount = currentPaid + paymentData.amount;
+      const newBalanceAmount = Math.max(0, totalAmount - newPaidAmount);
+      const newStatus = newBalanceAmount <= 0.01 ? 'PAID' : 'PARTIALLY_PAID';
+
+      // Create the payment
       const created = await tx.payment.create({
         data: {
-          ...validation.data,
           invoiceId: req.params.id,
           paymentNumber,
-          // Resolved above rather than taken straight from the request, so a
-          // foreign-currency receipt is never left recorded at parity.
+          amount: paymentData.amount,
+          currency: paymentData.currency,
           exchangeRate: paymentRate,
+          paymentDate: paymentData.paymentDate,
+          paymentMode: paymentData.paymentMode,
+          reference: paymentData.reference,
+          bankDetails: paymentData.bankDetails,
+          notes: paymentData.notes,
+          idempotencyKey: idempotencyKey ?? null,
         },
       });
 
+      // Update invoice balances
       await tx.invoice.update({
         where: { id: req.params.id },
         data: {
@@ -385,26 +443,33 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
         },
       });
 
-      // Buyer revenue accumulates across many payments, which may be in
-      // different currencies, so it is converted into the base currency first.
-      // Incrementing with the raw amount made "top buyers by revenue" a ranking
-      // of mixed units.
-      await tx.buyer.update({
-        where: { id: invoice.buyerId },
-        data: { totalRevenue: { increment: revenueInBase } },
-      });
+      // Update buyer revenue (converted to base currency)
+      if (revenueInBase > 0) {
+        await tx.buyer.update({
+          where: { id: lockedInvoice.buyer_id },
+          data: { totalRevenue: { increment: revenueInBase } },
+        });
+      }
 
-      return created;
+      return { payment: created, newStatus, invoiceNumber: '' };
     });
 
-    // Notify after the transaction commits, so a webhook can never observe a
-    // payment that was subsequently rolled back.
-    emitEvent('payment.recorded', payment);
-    if (newStatus === 'PAID') {
-      emitEvent('invoice.paid', { id: req.params.id, invoiceNumber: invoice.invoiceNumber });
+    // Get invoice number for the event (outside transaction)
+    const invoiceForEvent = await prisma.invoice.findUnique({
+      where: { id: req.params.id },
+      select: { invoiceNumber: true },
+    });
+
+    // Notify after the transaction commits
+    emitEvent('payment.recorded', result.payment);
+    if (result.newStatus === 'PAID') {
+      emitEvent('invoice.paid', {
+        id: req.params.id,
+        invoiceNumber: invoiceForEvent?.invoiceNumber,
+      });
     }
 
-    res.status(201).json({ success: true, data: payment });
+    res.status(201).json({ success: true, data: result.payment });
   } catch (error) {
     next(error);
   }

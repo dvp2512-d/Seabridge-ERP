@@ -9,13 +9,14 @@ import { createTestJwt } from './setup';
 const mockPrisma = {
   user: { findUnique: vi.fn() },
   invoice: { findUnique: vi.fn(), findMany: vi.fn(), count: vi.fn(), groupBy: vi.fn(), update: vi.fn(), create: vi.fn() },
-  payment: { create: vi.fn() },
+  payment: { create: vi.fn(), findUnique: vi.fn() },
   buyer: { update: vi.fn() },
   exportOrder: { findUnique: vi.fn() },
   currency: { findFirst: vi.fn() },
   numberSequence: { upsert: vi.fn() },
   auditLog: { create: vi.fn().mockResolvedValue({}) },
   $transaction: vi.fn(),
+  $queryRaw: vi.fn(),
 };
 
 vi.mock('@seabridge/database', () => ({
@@ -122,6 +123,7 @@ describe('POST /api/invoices/:id/payments', () => {
   it('valid partial payment reduces balanceAmount', async () => {
     mockPrisma.invoice.findUnique.mockResolvedValue({ ...MOCK_INVOICE });
     mockPrisma.currency.findFirst.mockResolvedValue({ id: 'cur-inr', code: 'INR', isBaseCurrency: true });
+    mockPrisma.payment.findUnique.mockResolvedValue(null); // No existing idempotent payment
 
     const createdPayment = {
       id: 'pay-1',
@@ -134,14 +136,23 @@ describe('POST /api/invoices/:id/payments', () => {
       exchangeRate: 83.5,
     };
 
-    // Mock the transaction: capture the callback and execute it with a mock tx
+    // Mock the transaction: the new implementation uses tx.$queryRaw for SELECT FOR UPDATE
     mockPrisma.$transaction.mockImplementation(async (cb: Function) => {
       const tx = {
+        $queryRaw: vi.fn().mockResolvedValue([{
+          id: 'inv-1',
+          balance_amount: '10000',
+          paid_amount: '0',
+          total_amount: '10000',
+          buyer_id: 'buyer-1',
+        }]),
         payment: { create: vi.fn().mockResolvedValue(createdPayment) },
         invoice: { update: vi.fn().mockResolvedValue({}) },
         buyer: { update: vi.fn().mockResolvedValue({}) },
       };
       const result = await cb(tx);
+      // Verify SELECT FOR UPDATE was called
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
       // Verify all three side effects were attempted
       expect(tx.payment.create).toHaveBeenCalledTimes(1);
       expect(tx.invoice.update).toHaveBeenCalledWith(
@@ -175,6 +186,25 @@ describe('POST /api/invoices/:id/payments', () => {
 
   it('payment exceeding balance returns 400', async () => {
     mockPrisma.invoice.findUnique.mockResolvedValue({ ...MOCK_INVOICE, balanceAmount: 1000 });
+    mockPrisma.payment.findUnique.mockResolvedValue(null);
+    mockPrisma.currency.findFirst.mockResolvedValue({ id: 'cur-inr', code: 'INR', isBaseCurrency: true });
+
+    // The balance check now happens INSIDE the transaction after SELECT FOR UPDATE
+    mockPrisma.$transaction.mockImplementation(async (cb: Function) => {
+      const tx = {
+        $queryRaw: vi.fn().mockResolvedValue([{
+          id: 'inv-1',
+          balance_amount: '1000',  // Only 1000 available
+          paid_amount: '9000',
+          total_amount: '10000',
+          buyer_id: 'buyer-1',
+        }]),
+        payment: { create: vi.fn() },
+        invoice: { update: vi.fn() },
+        buyer: { update: vi.fn() },
+      };
+      return cb(tx);
+    });
 
     const token = createTestJwt(FINANCE_USER.id, 'FINANCE');
     const res = await request(app)
@@ -190,9 +220,17 @@ describe('POST /api/invoices/:id/payments', () => {
   it('payment equal to balance sets status to PAID', async () => {
     mockPrisma.invoice.findUnique.mockResolvedValue({ ...MOCK_INVOICE, balanceAmount: 5000, paidAmount: 5000, totalAmount: 10000 });
     mockPrisma.currency.findFirst.mockResolvedValue({ id: 'cur-inr', code: 'INR', isBaseCurrency: true });
+    mockPrisma.payment.findUnique.mockResolvedValue(null);
 
     mockPrisma.$transaction.mockImplementation(async (cb: Function) => {
       const tx = {
+        $queryRaw: vi.fn().mockResolvedValue([{
+          id: 'inv-1',
+          balance_amount: '5000',
+          paid_amount: '5000',
+          total_amount: '10000',
+          buyer_id: 'buyer-1',
+        }]),
         payment: { create: vi.fn().mockResolvedValue({ id: 'pay-2', paymentNumber: 'PAY-00001' }) },
         invoice: { update: vi.fn().mockResolvedValue({}) },
         buyer: { update: vi.fn().mockResolvedValue({}) },
@@ -226,9 +264,17 @@ describe('POST /api/invoices/:id/payments', () => {
   it('payment less than balance sets status to PARTIALLY_PAID', async () => {
     mockPrisma.invoice.findUnique.mockResolvedValue({ ...MOCK_INVOICE });
     mockPrisma.currency.findFirst.mockResolvedValue({ id: 'cur-inr', code: 'INR', isBaseCurrency: true });
+    mockPrisma.payment.findUnique.mockResolvedValue(null);
 
     mockPrisma.$transaction.mockImplementation(async (cb: Function) => {
       const tx = {
+        $queryRaw: vi.fn().mockResolvedValue([{
+          id: 'inv-1',
+          balance_amount: '10000',
+          paid_amount: '0',
+          total_amount: '10000',
+          buyer_id: 'buyer-1',
+        }]),
         payment: { create: vi.fn().mockResolvedValue({ id: 'pay-3', paymentNumber: 'PAY-00001' }) },
         invoice: { update: vi.fn().mockResolvedValue({}) },
         buyer: { update: vi.fn().mockResolvedValue({}) },

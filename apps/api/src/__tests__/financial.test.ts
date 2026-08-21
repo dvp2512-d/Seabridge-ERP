@@ -34,7 +34,7 @@ vi.mock('@seabridge/database', () => {
     },
     exportOrder: { findUnique: vi.fn() },
     numberSequence: { upsert: vi.fn() },
-    payment: { create: vi.fn() },
+    payment: { create: vi.fn(), findUnique: vi.fn() },
     buyer: { update: vi.fn() },
     quotation: {
       findMany: vi.fn(),
@@ -48,6 +48,7 @@ vi.mock('@seabridge/database', () => {
     inquiry: { update: vi.fn() },
     auditLog: { create: vi.fn().mockResolvedValue({}) },
     $transaction: vi.fn(),
+    $queryRaw: vi.fn(),
     $connect: vi.fn(),
     $disconnect: vi.fn(),
   };
@@ -332,12 +333,12 @@ describe('Invoice routes — creation and payment', () => {
       notificationRef: 'N-01/2026',
       effectiveFrom: new Date('2026-08-01'),
     });
-    mockPrisma.numberSequence.upsert.mockResolvedValue({
-      entityType: 'INVOICE',
+    // generateCode() now uses $queryRaw instead of numberSequence.upsert
+    mockPrisma.$queryRaw.mockResolvedValue([{
+      current_no: 1,
+      pad_length: 5,
       prefix: 'INV',
-      currentNo: 1,
-      padLength: 5,
-    });
+    }]);
 
     // Capture what gets passed to prisma.invoice.create
     let capturedData: any = null;
@@ -389,12 +390,12 @@ describe('Invoice routes — creation and payment', () => {
       notificationRef: null,
       effectiveFrom: new Date('2026-08-01'),
     });
-    mockPrisma.numberSequence.upsert.mockResolvedValue({
-      entityType: 'INVOICE',
+    // generateCode() now uses $queryRaw instead of numberSequence.upsert
+    mockPrisma.$queryRaw.mockResolvedValue([{
+      current_no: 2,
+      pad_length: 5,
       prefix: 'INV',
-      currentNo: 2,
-      padLength: 5,
-    });
+    }]);
 
     let capturedData: any = null;
     mockPrisma.invoice.create.mockImplementation(async (args: any) => {
@@ -430,6 +431,7 @@ describe('Invoice routes — creation and payment', () => {
       exchangeRate: 84.5,
       status: 'SENT',
     });
+    mockPrisma.payment.findUnique.mockResolvedValue(null);
     mockPrisma.currency.findFirst.mockResolvedValue({
       id: 'curr-inr',
       code: 'INR',
@@ -454,6 +456,13 @@ describe('Invoice routes — creation and payment', () => {
     let invoiceUpdateData: any = null;
     mockPrisma.$transaction.mockImplementation(async (fn: Function) => {
       const tx = {
+        $queryRaw: vi.fn().mockResolvedValue([{
+          id: 'inv-1',
+          balance_amount: '10000',
+          paid_amount: '0',
+          total_amount: '10000',
+          buyer_id: 'buyer-1',
+        }]),
         payment: {
           create: vi.fn().mockResolvedValue({ id: 'pay-1', amount: 3000 }),
         },
@@ -499,6 +508,7 @@ describe('Invoice routes — creation and payment', () => {
       exchangeRate: 84.5,
       status: 'SENT',
     });
+    mockPrisma.payment.findUnique.mockResolvedValue(null);
     mockPrisma.currency.findFirst.mockResolvedValue({
       id: 'curr-inr',
       code: 'INR',
@@ -523,6 +533,13 @@ describe('Invoice routes — creation and payment', () => {
     let invoiceUpdateData: any = null;
     mockPrisma.$transaction.mockImplementation(async (fn: Function) => {
       const tx = {
+        $queryRaw: vi.fn().mockResolvedValue([{
+          id: 'inv-1',
+          balance_amount: '10000',
+          paid_amount: '0',
+          total_amount: '10000',
+          buyer_id: 'buyer-1',
+        }]),
         payment: { create: vi.fn().mockResolvedValue({ id: 'pay-2', amount: 5000 }) },
         invoice: {
           update: vi.fn().mockImplementation(async (args: any) => {
@@ -562,6 +579,7 @@ describe('Invoice routes — creation and payment', () => {
       exchangeRate: 84.5,
       status: 'PARTIALLY_PAID',
     });
+    mockPrisma.payment.findUnique.mockResolvedValue(null);
     mockPrisma.currency.findFirst.mockResolvedValue({
       id: 'curr-inr',
       code: 'INR',
@@ -586,6 +604,13 @@ describe('Invoice routes — creation and payment', () => {
     let invoiceUpdateData: any = null;
     mockPrisma.$transaction.mockImplementation(async (fn: Function) => {
       const tx = {
+        $queryRaw: vi.fn().mockResolvedValue([{
+          id: 'inv-1',
+          balance_amount: '3000',
+          paid_amount: '7000',
+          total_amount: '10000',
+          buyer_id: 'buyer-1',
+        }]),
         payment: { create: vi.fn().mockResolvedValue({ id: 'pay-3', amount: 3000 }) },
         invoice: {
           update: vi.fn().mockImplementation(async (args: any) => {
@@ -626,6 +651,29 @@ describe('Invoice routes — creation and payment', () => {
       balanceAmount: 2000,
       exchangeRate: 84.5,
       status: 'PARTIALLY_PAID',
+    });
+    mockPrisma.payment.findUnique.mockResolvedValue(null);
+    mockPrisma.currency.findFirst.mockResolvedValue({
+      id: 'curr-inr',
+      code: 'INR',
+      isBaseCurrency: true,
+    });
+
+    // The balance check now happens INSIDE the transaction via $queryRaw
+    mockPrisma.$transaction.mockImplementation(async (fn: Function) => {
+      const tx = {
+        $queryRaw: vi.fn().mockResolvedValue([{
+          id: 'inv-1',
+          balance_amount: '2000',
+          paid_amount: '8000',
+          total_amount: '10000',
+          buyer_id: 'buyer-1',
+        }]),
+        payment: { create: vi.fn() },
+        invoice: { update: vi.fn() },
+        buyer: { update: vi.fn() },
+      };
+      return fn(tx);
     });
 
     const res = await request(app)
@@ -810,12 +858,12 @@ describe('Quotation route — creation math', () => {
   it('test 17: grandTotal = subtotal + additionalCosts, margin excludes costs', async () => {
     const mockPrisma = prisma as any;
 
-    mockPrisma.numberSequence.upsert.mockResolvedValue({
-      entityType: 'QUOTATION',
+    // generateCode() now uses $queryRaw instead of numberSequence.upsert
+    mockPrisma.$queryRaw.mockResolvedValue([{
+      current_no: 1,
+      pad_length: 5,
       prefix: 'QT',
-      currentNo: 1,
-      padLength: 5,
-    });
+    }]);
 
     let capturedData: any = null;
     mockPrisma.quotation.create.mockImplementation(async (args: any) => {
