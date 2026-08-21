@@ -404,11 +404,14 @@ echo   API health:     http://localhost:4000/health
 echo.
 if "%DO_SEED%"=="1" (
   echo   Sign in with:
-  echo     founder@seabridge.com  /  admin123   ^(Founder - full access^)
-  echo     hiren@seabridge.com    /  admin123   ^(Sales^)
+  echo     Email:    founder@seabridge.com
+  echo     Password: shown in the seed output above
   echo.
-  echo   IMPORTANT: change BOTH passwords now - Settings -^> Profile -^> Change Password
-  echo              These credentials are public in the source code.
+  echo   If you missed the password, run:  deploy.cmd reset
+  echo   which wipes the database and re-seeds with a new random password.
+  echo.
+  echo   Change the password on first login:
+  echo     Settings -^> Profile -^> Change Password
   echo.
 )
 echo   Commands
