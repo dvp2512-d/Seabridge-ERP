@@ -248,8 +248,6 @@ export const exchangeRatesApi = {
   createNotification: (data: any) => api.post('/exchange-rates/notification', data),
   update: (id: string, data: any) => api.put(`/exchange-rates/${id}`, data),
   remove: (id: string) => api.delete(`/exchange-rates/${id}`),
-  /** Advisory market rates for spotting a transposed digit */
-  marketCheck: () => api.get('/exchange-rates/market-check'),
   /** Which currencies cannot currently be converted */
   coverage: (date?: string) => api.get('/exchange-rates/coverage', { params: { date } }),
 };

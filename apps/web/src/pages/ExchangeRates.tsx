@@ -8,15 +8,12 @@ import { can } from '@/lib/permissions';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import { formatDate } from '@/lib/utils';
-import { AlertTriangle, Plus, TrendingUp, Info } from 'lucide-react';
+import { AlertTriangle, Plus, Info } from 'lucide-react';
 
 /**
  * CBIC notifies rates for 22 currencies twice a month, effective from midnight
  * of the following day, with separate import and export rates. There is no
  * reliable machine-readable feed, so rates are entered from the notification.
- *
- * The market comparison is advisory: it catches a transposed digit, but the
- * notified rate is what customs uses and what the documents print.
  */
 export default function ExchangeRates() {
   const queryClient = useQueryClient();
@@ -31,14 +28,6 @@ export default function ExchangeRates() {
   const { data, isLoading } = useQuery({
     queryKey: ['exchange-rates', asOf, direction],
     queryFn: () => exchangeRatesApi.current({ date: asOf, direction }).then((r) => r.data.data),
-  });
-
-  const { data: market } = useQuery({
-    queryKey: ['exchange-rates-market'],
-    queryFn: () => exchangeRatesApi.marketCheck().then((r) => r.data.data),
-    // Advisory only, so don't retry hard or block the page
-    retry: false,
-    staleTime: 60 * 60 * 1000,
   });
 
   const rates = data?.rates ?? [];
@@ -100,16 +89,10 @@ export default function ExchangeRates() {
       )}
 
       <div className="card">
-        <div className="card-header flex items-center justify-between">
+        <div className="card-header">
           <h2 className="font-semibold">
             Rates as at {formatDate(asOf)} &middot; {direction === 'EXPORT' ? 'Export' : 'Import'}
           </h2>
-          {market?.available && (
-            <span className="text-xs text-gray-500 flex items-center gap-1">
-              <TrendingUp className="w-3 h-3" />
-              market comparison available
-            </span>
-          )}
         </div>
         <div className="overflow-x-auto">
           {isLoading ? (
@@ -120,8 +103,6 @@ export default function ExchangeRates() {
                 <tr>
                   <th>Currency</th>
                   <th className="text-right">Notified Rate</th>
-                  <th className="text-right">Market</th>
-                  <th className="text-right">Difference</th>
                   <th>Effective From</th>
                   <th>Age</th>
                   <th>Notification</th>
@@ -134,7 +115,6 @@ export default function ExchangeRates() {
                     key={r.currencyId}
                     rate={r}
                     baseCode={baseCode}
-                    marketRate={market?.available ? market.ratesPerForeignUnit?.[r.code] : undefined}
                     onHistory={() => setHistoryFor(r)}
                   />
                 ))}
@@ -148,7 +128,6 @@ export default function ExchangeRates() {
         <NotificationModal
           currencies={rates.filter((r: any) => !r.isBaseCurrency)}
           baseCode={baseCode}
-          market={market}
           onClose={() => setShowEntry(false)}
           onSaved={() => {
             queryClient.invalidateQueries({ queryKey: ['exchange-rates'] });
@@ -169,16 +148,14 @@ export default function ExchangeRates() {
   );
 }
 
-/** One currency's current position, with the market figure for comparison. */
+/** One currency's current position. */
 function RateRow({
   rate,
   baseCode,
-  marketRate,
   onHistory,
 }: {
   rate: any;
   baseCode: string;
-  marketRate?: number;
   onHistory: () => void;
 }) {
   if (rate.isBaseCurrency) {
@@ -188,18 +165,12 @@ function RateRow({
           <span className="font-medium">{rate.code}</span>{' '}
           <span className="text-gray-500">{rate.name}</span>
         </td>
-        <td colSpan={7} className="text-sm text-gray-500">
+        <td colSpan={5} className="text-sm text-gray-500">
           Base currency &mdash; all totals are expressed in {rate.code}
         </td>
       </tr>
     );
   }
-
-  // A large gap between notified and market usually means a typo, not a policy
-  // difference, so it is worth flagging.
-  const diffPercent =
-    rate.rate && marketRate ? ((rate.rate - marketRate) / marketRate) * 100 : null;
-  const suspicious = diffPercent !== null && Math.abs(diffPercent) > 5;
 
   return (
     <tr>
@@ -212,20 +183,6 @@ function RateRow({
           `${rate.rate.toFixed(4)} ${baseCode}`
         ) : (
           <span className="text-amber-600">not set</span>
-        )}
-      </td>
-      <td className="text-right text-gray-500 text-sm">
-        {marketRate !== undefined ? marketRate.toFixed(4) : '-'}
-      </td>
-      <td className="text-right text-sm">
-        {diffPercent !== null ? (
-          <span className={suspicious ? 'text-amber-700 font-medium' : 'text-gray-500'}>
-            {diffPercent > 0 ? '+' : ''}
-            {diffPercent.toFixed(1)}%
-            {suspicious && <AlertTriangle className="w-3 h-3 inline ml-1" />}
-          </span>
-        ) : (
-          '-'
         )}
       </td>
       <td className="text-sm">{rate.effectiveFrom ? formatDate(rate.effectiveFrom) : '-'}</td>
@@ -256,13 +213,11 @@ function RateRow({
 function NotificationModal({
   currencies,
   baseCode,
-  market,
   onClose,
   onSaved,
 }: {
   currencies: any[];
   baseCode: string;
-  market: any;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -387,14 +342,10 @@ function NotificationModal({
                 <th>Currency</th>
                 <th className="text-right">Import Rate</th>
                 <th className="text-right">Export Rate</th>
-                <th className="text-right">Market</th>
               </tr>
             </thead>
             <tbody>
               {currencies.map((c: any) => {
-                const marketRate = market?.available
-                  ? market.ratesPerForeignUnit?.[c.code]
-                  : undefined;
                 return (
                   <tr key={c.currencyId}>
                     <td>
@@ -422,9 +373,6 @@ function NotificationModal({
                         onChange={(e) => set(c.currencyId, 'exportRate', e.target.value)}
                         aria-label={`${c.code} export rate`}
                       />
-                    </td>
-                    <td className="text-right text-sm text-gray-500">
-                      {marketRate !== undefined ? marketRate.toFixed(4) : '-'}
                     </td>
                   </tr>
                 );

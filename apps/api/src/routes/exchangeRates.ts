@@ -298,58 +298,6 @@ router.delete('/:id', can('MASTER_MANAGE'), async (req, res, next) => {
   }
 });
 
-/**
- * Market rates for cross-checking a typed notification.
- *
- * CBIC rates track the market within a few percent, so a figure that is wildly
- * different usually means a transposed digit. Purely advisory - the notified
- * rate is what gets used.
- */
-router.get('/market-check', can('MASTER_VIEW'), async (_req, res, next) => {
-  try {
-    const base = await getBaseCurrency();
-
-    // No API key needed, and a failure here must not block rate entry.
-    const response = await fetch(`https://open.er-api.com/v6/latest/${base.code}`, {
-      signal: AbortSignal.timeout(8000),
-    });
-
-    if (!response.ok) {
-      return res.json({
-        success: true,
-        data: { available: false, reason: `provider returned ${response.status}` },
-      });
-    }
-
-    const payload: any = await response.json();
-    const perBase: Record<string, number> = payload?.rates ?? {};
-
-    // The provider gives foreign-per-base; documents need base-per-foreign.
-    const inverted: Record<string, number> = {};
-    for (const [code, value] of Object.entries(perBase)) {
-      if (typeof value === 'number' && value > 0) {
-        inverted[code] = Math.round((1 / value) * 10000) / 10000;
-      }
-    }
-
-    res.json({
-      success: true,
-      data: {
-        available: true,
-        baseCode: base.code,
-        asOf: payload?.time_last_update_utc ?? null,
-        ratesPerForeignUnit: inverted,
-      },
-    });
-  } catch (error) {
-    // Advisory only, so a provider outage returns "unavailable" rather than 500.
-    res.json({
-      success: true,
-      data: { available: false, reason: (error as Error).message },
-    });
-  }
-});
-
 /** Which currencies cannot currently be converted, for warning banners. */
 router.get('/coverage', can('MASTER_VIEW'), async (req, res, next) => {
   try {
