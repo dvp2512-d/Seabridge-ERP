@@ -469,6 +469,18 @@ router.get('/:id/pdf', can('FINANCE_VIEW'), async (req, res, next) => {
 });
 
 // Receivables summary
+//
+// totalOutstanding is expressed in the application's base currency (INR by
+// default) so the single number is always meaningful regardless of how many
+// different invoice currencies are in flight. Individual invoice balances are
+// left in their original currencies; only the aggregate is converted.
+//
+// Design follows the same pattern as the main invoice list summary and the
+// dashboard's totalReceivables card: buildRateMap fetches every rate in one
+// query, then each row's balanceAmount is multiplied by the relevant rate.
+// Rows whose currency has no rate in force today are counted and reported as
+// unconvertedRecords rather than silently excluded - this matches the
+// UnconvertedNotice component pattern already used on the Invoices page.
 router.get('/reports/receivables', can('FINANCE_VIEW'), async (req, res, next) => {
   try {
     const receivables = await prisma.invoice.findMany({
@@ -478,15 +490,46 @@ router.get('/reports/receivables', can('FINANCE_VIEW'), async (req, res, next) =
       },
       include: {
         buyer: { select: { id: true, companyName: true } },
-        currency: { select: { code: true, symbol: true } },
+        currency: { select: { id: true, code: true, symbol: true } },
       },
       orderBy: { dueDate: 'asc' },
     });
 
+    // Build a rate map keyed by currency id using today's date.
+    // This is the same call made by the main invoice list endpoint - we
+    // deliberately do NOT create a second implementation of this logic.
+    const { base, rates } = await buildRateMap(new Date());
+
+    const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
+
+    let totalOutstanding = 0;
+    let unconvertedRecords = 0;
+    const now = new Date();
+
+    for (const inv of receivables) {
+      const rate = rates.get(inv.currencyId);
+      if (rate === undefined) {
+        // Count but do not add at face value - adding, say, 1000 USD to a
+        // running INR total would produce a number that is neither USD nor INR.
+        unconvertedRecords++;
+        continue;
+      }
+      totalOutstanding += Number(inv.balanceAmount) * rate;
+    }
+
     const summary = {
-      totalOutstanding: receivables.reduce((sum, inv) => sum + Number(inv.balanceAmount), 0),
+      // All-currencies total expressed in the base currency (INR).
+      // The caller must not display this without the baseCurrency label.
+      baseCurrency: base,
+      totalOutstanding: round2(totalOutstanding),
+      // Non-zero means some invoices had no exchange rate and are omitted from
+      // the total. The UI should surface this rather than showing a lower
+      // number as if it were the complete figure.
+      unconvertedRecords,
       count: receivables.length,
-      overdue: receivables.filter(inv => new Date(inv.dueDate) < new Date()),
+      overdue: receivables.filter(inv => inv.dueDate < now),
+      // Individual invoice rows keep their original currencies; only the
+      // aggregate is converted.
       invoices: receivables,
     };
 
