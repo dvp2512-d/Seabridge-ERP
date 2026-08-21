@@ -73,15 +73,12 @@ export function getApiErrorMessage(error: any, fallback = 'Something went wrong'
 export const authApi = {
   login: (email: string, password: string) =>
     api.post('/auth/login', { email, password }),
-  
-  register: (data: { email: string; password: string; firstName: string; lastName: string; role?: string }) =>
-    api.post('/auth/register', data),
-  
+
   me: () => api.get('/auth/me'),
 
   updateProfile: (data: { firstName: string; lastName: string; phone?: string }) =>
     api.put('/auth/me', data),
-  
+
   changePassword: (currentPassword: string, newPassword: string) =>
     api.post('/auth/change-password', { currentPassword, newPassword }),
 };

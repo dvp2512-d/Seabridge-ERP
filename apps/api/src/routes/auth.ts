@@ -2,6 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
+import rateLimit from 'express-rate-limit';
 import { prisma } from '@seabridge/database';
 import { AppError, ValidationError } from '../middleware/errorHandler';
 import { authenticate } from '../middleware/auth';
@@ -9,11 +10,38 @@ import { authenticate } from '../middleware/auth';
 const router: Router = Router();
 
 /**
+ * Rate limiter for authentication endpoints.
+ *
+ * 10 attempts per IP per 15-minute window covers legitimate use cases (typos,
+ * multiple devices) while blocking automated brute-force attacks. The window
+ * resets after 15 minutes so a single bad password attempt does not lock
+ * someone out for a long period.
+ *
+ * Applied only to login here. Change-password already requires a valid token,
+ * so it is protected by authentication rather than rate limiting.
+ */
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10,
+  standardHeaders: true,  // Return rate limit info in RateLimit-* headers
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many login attempts from this IP. Please try again in 15 minutes.',
+  },
+  // Skip successful requests - only count failures toward the limit.
+  skipSuccessfulRequests: true,
+});
+
+/**
  * Sign a JWT for a user. Centralised so token contents/expiry stay consistent
- * between login and register, and so the types are handled in one place.
+ * and so the types are handled in one place.
+ *
+ * JWT_SECRET is validated at startup in index.ts; the process exits if it is
+ * absent, so the non-null assertion here is always safe.
  */
 function signToken(userId: string): string {
-  const secret: jwt.Secret = process.env.JWT_SECRET || 'default_secret';
+  const secret: jwt.Secret = process.env.JWT_SECRET as string;
   const options: jwt.SignOptions = {
     expiresIn: (process.env.JWT_EXPIRES_IN || '7d') as jwt.SignOptions['expiresIn'],
   };
@@ -25,16 +53,8 @@ const loginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
-const registerSchema = z.object({
-  email: z.string().email('Invalid email'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
-  firstName: z.string().min(1, 'First name is required'),
-  lastName: z.string().min(1, 'Last name is required'),
-  role: z.enum(['FOUNDER', 'SALES', 'OPERATIONS', 'FINANCE', 'ADMIN']).optional(),
-});
-
 // Login
-router.post('/login', async (req, res, next) => {
+router.post('/login', authLimiter, async (req, res, next) => {
   try {
     const validation = loginSchema.safeParse(req.body);
     if (!validation.success) {
@@ -70,57 +90,6 @@ router.post('/login', async (req, res, next) => {
 
 
     res.json({
-      success: true,
-      data: {
-        token,
-        user: {
-          id: user.id,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          role: user.role,
-        },
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// Register (Admin/Founder only in production)
-router.post('/register', async (req, res, next) => {
-  try {
-    const validation = registerSchema.safeParse(req.body);
-    if (!validation.success) {
-      throw new ValidationError(validation.error.errors);
-    }
-
-    const { email, password, firstName, lastName, role } = validation.data;
-
-    const existingUser = await prisma.user.findUnique({
-      where: { email },
-    });
-
-    if (existingUser) {
-      throw new AppError('Email already registered', 409);
-    }
-
-    const passwordHash = await bcrypt.hash(password, 12);
-
-    const user = await prisma.user.create({
-      data: {
-        email,
-        passwordHash,
-        firstName,
-        lastName,
-        role: role || 'SALES',
-      },
-    });
-
-    const token = signToken(user.id);
-
-
-    res.status(201).json({
       success: true,
       data: {
         token,

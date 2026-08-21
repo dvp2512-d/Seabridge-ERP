@@ -32,9 +32,10 @@ export const authenticate = async (
     }
 
     const token = authHeader.split(' ')[1];
-    const secret = process.env.JWT_SECRET || 'default_secret';
 
-    const decoded = jwt.verify(token, secret) as { userId: string };
+    // JWT_SECRET is validated at startup in index.ts; the process exits if it
+    // is absent. The cast is therefore always safe at this point.
+    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as { userId: string };
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },

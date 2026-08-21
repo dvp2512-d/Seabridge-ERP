@@ -95,7 +95,7 @@ async function main() {
   const login = await fetch(`${BASE}/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: 'founder@seabridge.com', password: 'admin123' }),
+    body: JSON.stringify({ email: 'founder@seabridge.com', password: process.env.SEED_FOUNDER_PASSWORD ?? 'admin123' }),
   });
   token = (await login.json()).data.token;
   if (!token) {

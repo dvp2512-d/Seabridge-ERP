@@ -71,7 +71,7 @@ async function login(email: string, password: string): Promise<string> {
 }
 
 async function main() {
-  const founder = await login('founder@seabridge.com', 'admin123');
+  const founder = await login('founder@seabridge.com', process.env.SEED_FOUNDER_PASSWORD ?? 'admin123');
   check('founder authenticated', !!founder);
   if (!founder) process.exit(1);
 

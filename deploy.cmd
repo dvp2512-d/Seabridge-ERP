@@ -170,6 +170,31 @@ if exist ".env" (
     echo           Continuing in 10 seconds. Press Ctrl+C to stop.
     timeout /t 10 >nul 2>&1
   )
+
+  REM Reject known test/development credentials that must never reach production.
+  REM These values appear in the repository's local .env and seed files.
+  findstr /C:"testpass123" ".env" >nul 2>&1
+  if not errorlevel 1 (
+    echo.
+    echo       ERROR: .env contains the test credential "testpass123".
+    echo.
+    echo       This value is checked into the repository and is publicly known.
+    echo       Delete .env and re-run this script to generate a strong password,
+    echo       or manually set POSTGRES_PASSWORD and DATABASE_URL to a real value.
+    exit /b 1
+  )
+
+  REM Match testsecret... prefix used by the local verification .env
+  findstr /C:"testsecret" ".env" >nul 2>&1
+  if not errorlevel 1 (
+    echo.
+    echo       ERROR: .env contains a test JWT secret ("testsecret...").
+    echo.
+    echo       This value is publicly known. Delete .env and re-run this script
+    echo       to generate a strong JWT_SECRET, or set it manually to at least
+    echo       32 random characters.
+    exit /b 1
+  )
 ) else (
   REM Generate cryptographically strong secrets. PowerShell ships with Windows,
   REM so this keeps the script to a single file without needing Node.js.

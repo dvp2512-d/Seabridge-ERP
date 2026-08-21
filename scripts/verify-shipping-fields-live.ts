@@ -89,7 +89,7 @@ async function pdf(path: string): Promise<Buffer> {
 async function main() {
   const login = await api('POST', '/auth/login', {
     email: 'founder@seabridge.com',
-    password: 'admin123',
+    password: process.env.SEED_FOUNDER_PASSWORD ?? 'admin123',
   });
   token = login.json?.data?.token ?? '';
   check('authenticated', !!token);

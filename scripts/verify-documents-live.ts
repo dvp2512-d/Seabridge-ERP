@@ -54,7 +54,7 @@ async function main() {
   console.log('=== authentication ===');
   const login = await call('POST', '/auth/login', {
     email: 'founder@seabridge.com',
-    password: 'admin123',
+    password: process.env.SEED_FOUNDER_PASSWORD ?? 'admin123',
   });
   token = login.json?.data?.token ?? login.json?.token ?? '';
   check('login returns a token', login.status === 200 && !!token, `status ${login.status}`);

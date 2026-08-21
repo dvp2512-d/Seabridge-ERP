@@ -6,8 +6,33 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Seeding database...');
 
-  // Create admin user
-  const passwordHash = await bcrypt.hash('admin123', 12);
+  /**
+   * Founder password resolution.
+   *
+   * In development, set SEED_FOUNDER_PASSWORD in your .env to a value you
+   * choose. In a first-time production deployment, leave it unset and the seed
+   * generates a random password, prints it ONCE, and never stores it anywhere.
+   * Copy it immediately and change it on first login.
+   *
+   * The password is printed to stdout only, never to any log file or the
+   * database. It is hashed with bcrypt before being stored, so even direct
+   * database access does not reveal it.
+   */
+  let founderPassword = process.env.SEED_FOUNDER_PASSWORD;
+  let generatedPassword = false;
+
+  if (!founderPassword) {
+    // Generate a cryptographically random password: 16 bytes → 22 base64 chars
+    // with special characters stripped for shell compatibility.
+    const { randomBytes } = await import('crypto');
+    founderPassword = randomBytes(16)
+      .toString('base64')
+      .replace(/[+/=]/g, '')   // keep alphanumeric only
+      .slice(0, 20);            // 20 chars is plenty
+    generatedPassword = true;
+  }
+
+  const passwordHash = await bcrypt.hash(founderPassword, 12);
   
   const founder = await prisma.user.upsert({
     where: { email: 'founder@seabridge.com' },
@@ -23,7 +48,9 @@ async function main() {
   });
   console.log('✅ Created founder user:', founder.email);
 
-  // Create sample users
+  // Sample sales user — uses the same hash as founder for simplicity on a
+  // fresh dev install. In production, each user should set their own password
+  // on first login.
   const salesUser = await prisma.user.upsert({
     where: { email: 'hiren@seabridge.com' },
     update: {},
@@ -250,7 +277,15 @@ async function main() {
   console.log('🎉 Database seeding completed!');
   console.log('\n📋 Login credentials:');
   console.log('   Email: founder@seabridge.com');
-  console.log('   Password: admin123');
+  if (generatedPassword) {
+    console.log('   Password: ' + founderPassword);
+    console.log('\n   ⚠️  This password was generated once and will not be shown again.');
+    console.log('   Copy it now and change it after your first login.');
+    console.log('   To set a fixed password for future re-seeds, add to .env:');
+    console.log('     SEED_FOUNDER_PASSWORD=your-chosen-password');
+  } else {
+    console.log('   Password: (the value you set in SEED_FOUNDER_PASSWORD)');
+  }
 }
 
 main()
