@@ -42,6 +42,7 @@ if /i "!ARG!"=="ps"     set "ACTION=status"   & goto nextarg
 if /i "!ARG!"=="help"   set "ACTION=help"     & goto nextarg
 if /i "!ARG!"=="h"      set "ACTION=help"     & goto nextarg
 if /i "!ARG!"=="?"      set "ACTION=help"     & goto nextarg
+if /i "!ARG!"=="fixenv" set "ACTION=fixenv"   & goto nextarg
 echo.
 echo ERROR: unknown option "%~1"
 echo Run "deploy.cmd help" to see the available options.
@@ -110,6 +111,12 @@ if /i "%ACTION%"=="status" (
   exit /b 0
 )
 
+if /i "%ACTION%"=="fixenv" (
+  echo Regenerating .env file...
+  if exist ".env" del /f ".env"
+  goto createenv
+)
+
 REM ------------------------------------------------------------- banner
 echo.
 echo ================================================
@@ -136,33 +143,56 @@ REM ------------------------------------------------------------- 2. .env
 echo.
 echo [2/7] Preparing configuration (.env)
 
+:createenv
 if exist ".env" (
-  echo       [OK] .env already exists - leaving it untouched
-) else (
-  REM Generate cryptographically strong secrets. PowerShell ships with Windows,
-  REM so this keeps the script to a single file without needing Node.js.
-  for /f "usebackq delims=" %%S in (`powershell -NoProfile -Command "$b=[byte[]]::new(32);[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b);$c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';-join($b^|%%{$c[$_ %% 62]})"`) do set "DBPASS=%%S"
-  for /f "usebackq delims=" %%S in (`powershell -NoProfile -Command "$b=[byte[]]::new(64);[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b);$c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';-join($b^|%%{$c[$_ %% 62]})"`) do set "JWTSEC=%%S"
-
-  if "!DBPASS!"=="" (
-    echo       ERROR: could not generate a secure password.
-    exit /b 1
-  )
-
-  REM Write .env as UTF-8 without BOM - a BOM breaks Compose variable parsing.
-  powershell -NoProfile -Command ^
-    "$t=Get-Content '.env.example' -Raw;" ^
-    "$t=$t -replace '(?m)^POSTGRES_PASSWORD=.*','POSTGRES_PASSWORD=!DBPASS!';" ^
-    "$t=$t -replace '(?m)^JWT_SECRET=.*','JWT_SECRET=!JWTSEC!';" ^
-    "$t=$t -replace '(?m)^DATABASE_URL=.*','DATABASE_URL=postgresql://seabridge:!DBPASS!@localhost:5432/seabridge_erp';" ^
-    "[System.IO.File]::WriteAllText((Join-Path $PWD '.env'),$t,(New-Object System.Text.UTF8Encoding($false)))"
+  echo       Checking .env validity...
+  REM Test if docker compose can read the env file
+  docker compose config >nul 2>&1
   if errorlevel 1 (
-    echo       ERROR: failed to create .env
-    exit /b 1
+    echo       [!] .env file has issues - regenerating...
+    del /f ".env"
+    goto generateenv
   )
-  echo       [OK] created .env with a random database password and JWT secret
-  echo            stored only in .env, which is gitignored
+  echo       [OK] .env already exists and is valid
+  goto envdone
 )
+
+:generateenv
+REM Generate a clean .env file directly without complex regex
+echo       Creating new .env with secure credentials...
+
+REM Generate random passwords using PowerShell
+for /f "usebackq delims=" %%S in (`powershell -NoProfile -Command "$c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'; -join(1..32|ForEach-Object{$c[(Get-Random -Max $c.Length)]})"`) do set "DBPASS=%%S"
+for /f "usebackq delims=" %%S in (`powershell -NoProfile -Command "$c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'; -join(1..48|ForEach-Object{$c[(Get-Random -Max $c.Length)]})"`) do set "JWTSEC=%%S"
+
+if "!DBPASS!"=="" (
+  echo       ERROR: could not generate a secure password.
+  exit /b 1
+)
+
+REM Write clean .env file directly (no BOM issues)
+(
+echo POSTGRES_USER=seabridge
+echo POSTGRES_PASSWORD=!DBPASS!
+echo POSTGRES_DB=seabridge_erp
+echo DATABASE_URL=postgresql://seabridge:!DBPASS!@postgres:5432/seabridge_erp
+echo REDIS_URL=redis://redis:6379
+echo JWT_SECRET=!JWTSEC!
+echo JWT_EXPIRES_IN=7d
+echo PORT=4000
+echo NODE_ENV=production
+echo CORS_ORIGIN=http://localhost:3000
+echo VITE_API_URL=
+echo PDF_STORAGE_PATH=./storage/pdfs
+echo COMPANY_NAME=SeaBridge Exports
+echo COMPANY_PRIMARY_COLOR=#1e3a5f
+echo COMPANY_SECONDARY_COLOR=#c9a227
+) > ".env"
+
+echo       [OK] created .env with secure credentials
+echo       Database password: !DBPASS!
+
+:envdone
 
 REM ------------------------------------------------------------- 3. reset
 echo.
@@ -190,6 +220,8 @@ docker compose build
 if errorlevel 1 (
   echo.
   echo ERROR: image build failed. Scroll up for the compiler output.
+  echo.
+  echo If the error mentions POSTGRES_PASSWORD, run: deploy.cmd fixenv
   echo.
   exit /b 1
 )
@@ -226,9 +258,6 @@ if "!DBREADY!"=="0" (
 echo       [OK] PostgreSQL is accepting connections
 
 REM The health check only proves the server is up, not that our password works.
-REM A Postgres volume keeps the password it was created with, so changing
-REM POSTGRES_PASSWORD in .env later causes confusing auth failures.
-REM The $VARS below expand inside the container, so nothing is parsed here.
 docker compose exec -T postgres sh -c "PGPASSWORD=$POSTGRES_PASSWORD psql -h 127.0.0.1 -U $POSTGRES_USER -d $POSTGRES_DB -c 'select 1'" >nul 2>&1
 if errorlevel 1 (
   echo.
@@ -346,12 +375,8 @@ echo   Open the app:   http://localhost:3000
 echo   API health:     http://localhost:4000/health
 echo.
 if "%DO_SEED%"=="1" (
-  echo   Sign in with:
-  echo     founder@seabridge.com  /  admin123   ^(Founder - full access^)
-  echo     hiren@seabridge.com    /  admin123   ^(Sales^)
-  echo.
-  echo   IMPORTANT: change BOTH passwords now - Settings -^> Profile -^> Change Password
-  echo              These credentials are public in the source code.
+  echo   Sign in with: founder@seabridge.com
+  echo   ^(Password was displayed during seed - check output above^)
   echo.
 )
 echo   Commands
@@ -360,6 +385,7 @@ echo     deploy.cmd stop       stop, keeps data
 echo     deploy.cmd status     what is running
 echo     deploy.cmd logs       follow logs
 echo     deploy.cmd reset      wipe data and start over
+echo     deploy.cmd fixenv     regenerate .env file
 echo.
 
 REM Keep the window open if launched by double-click.
@@ -379,6 +405,7 @@ echo   deploy.cmd noseed       deploy without inserting starter data
 echo   deploy.cmd stop         stop the stack, keep all data
 echo   deploy.cmd logs         follow container logs
 echo   deploy.cmd status       show what is running
+echo   deploy.cmd fixenv       regenerate .env file (fixes format issues)
 echo   deploy.cmd help         this message
 echo.
 echo Requires only Docker Desktop. Node.js is not needed.
