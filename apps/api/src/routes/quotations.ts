@@ -154,8 +154,14 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
     const additionalCosts = costs?.reduce((sum, c) => sum + c.amount, 0) || 0;
     totalCost += additionalCosts;
 
-    const totalMargin = subtotal - totalCost;
-    const marginPercent = calculateMarginPercent(totalCost, subtotal);
+    // Calculate margin based on goods cost only (not including freight/additional costs)
+    // This matches business expectation: margin = selling price - procurement cost
+    const goodsCost = totalCost - additionalCosts;
+    const totalMargin = subtotal - goodsCost;
+    const marginPercent = goodsCost > 0 ? Math.round((totalMargin / goodsCost) * 10000) / 100 : 0;
+
+    // grandTotal = subtotal + additional costs (freight, insurance, etc.)
+    const grandTotal = subtotal + additionalCosts;
 
     const quotation = await prisma.quotation.create({
       data: {
@@ -165,7 +171,7 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
         totalCost,
         totalMargin,
         marginPercent,
-        grandTotal: subtotal,
+        grandTotal,
         items: { create: processedItems },
         costs: costs ? { create: costs } : undefined,
       },

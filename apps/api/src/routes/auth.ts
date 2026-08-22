@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { prisma } from '@seabridge/database';
 import { AppError, ValidationError } from '../middleware/errorHandler';
-import { authenticate } from '../middleware/auth';
+import { authenticate, can } from '../middleware/auth';
 
 const router: Router = Router();
 
@@ -91,8 +91,9 @@ router.post('/login', async (req, res, next) => {
   }
 });
 
-// Register (Admin/Founder only in production)
-router.post('/register', async (req, res, next) => {
+// Register new user (requires authentication and USER_MANAGE permission)
+// In production, only existing admins/founders can create new users
+router.post('/register', authenticate, can('USER_MANAGE'), async (req: any, res, next) => {
   try {
     const validation = registerSchema.safeParse(req.body);
     if (!validation.success) {
@@ -100,6 +101,11 @@ router.post('/register', async (req, res, next) => {
     }
 
     const { email, password, firstName, lastName, role } = validation.data;
+
+    // Only FOUNDER can create other FOUNDERs (prevent privilege escalation)
+    if (role === 'FOUNDER' && req.user.role !== 'FOUNDER') {
+      throw new AppError('Only a Founder can create another Founder account', 403);
+    }
 
     const existingUser = await prisma.user.findUnique({
       where: { email },
