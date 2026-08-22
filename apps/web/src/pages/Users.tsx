@@ -47,7 +47,7 @@ export default function Users() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['users'],
-    queryFn: () => usersApi.list({ limit: 200 }).then((r) => r.data),
+    queryFn: () => usersApi.list({ limit: 200 }).then((r: any) => r.data),
     retry: false,
   });
 

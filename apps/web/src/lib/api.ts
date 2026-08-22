@@ -275,3 +275,107 @@ export const automationApi = {
   updateAutomation: (id: string, data: any) => api.put(`/automation/automations/${id}`, data),
   deleteAutomation: (id: string) => api.delete(`/automation/automations/${id}`),
 };
+
+// ============================================
+// LIFECYCLE API (deactivation, reactivation, deletion)
+// ============================================
+
+export const lifecycleApi = {
+  preview: (resource: string, id: string) =>
+    api.get(`/lifecycle/${resource}/${id}/preview`),
+  previewDelete: (resource: string, id: string) =>
+    api.get(`/lifecycle/${resource}/${id}/preview-delete`),
+  deactivate: (resource: string, id: string) =>
+    api.post(`/lifecycle/${resource}/${id}/deactivate`),
+  reactivate: (resource: string, id: string) =>
+    api.post(`/lifecycle/${resource}/${id}/reactivate`),
+  deleteRecord: (resource: string, id: string) =>
+    api.delete(`/lifecycle/${resource}/${id}`),
+  reactivateUser: (id: string) =>
+    api.post(`/users/${id}/reactivate`),
+};
+
+// ============================================
+// EXCHANGE RATES API
+// ============================================
+
+export const exchangeRatesApi = {
+  list: (params?: any) => api.get('/exchange-rates', { params }),
+  get: (id: string) => api.get(`/exchange-rates/${id}`),
+  create: (data: any) => api.post('/exchange-rates', data),
+  update: (id: string, data: any) => api.put(`/exchange-rates/${id}`, data),
+  delete: (id: string) => api.delete(`/exchange-rates/${id}`),
+  remove: (id: string) => api.delete(`/exchange-rates/${id}`),
+  getLatest: (from: string, to: string) =>
+    api.get('/exchange-rates/latest', { params: { from, to } }),
+  current: (params?: any) => api.get('/exchange-rates/current', { params }),
+  history: (currencyId: string) => api.get(`/exchange-rates/history/${currencyId}`),
+  createNotification: (data: any) => api.post('/exchange-rates/notification', data),
+  meta: () => api.get('/exchange-rates/meta'),
+};
+
+// ============================================
+// EXPENSES API
+// ============================================
+
+export const expensesApi = {
+  list: (params?: any) => api.get('/expenses', { params }),
+  get: (id: string) => api.get(`/expenses/${id}`),
+  create: (data: any) => api.post('/expenses', data),
+  update: (id: string, data: any) => api.put(`/expenses/${id}`, data),
+  delete: (id: string) => api.delete(`/expenses/${id}`),
+  remove: (id: string) => api.delete(`/expenses/${id}`),
+  setStatus: (id: string, status: string) =>
+    api.patch(`/expenses/${id}/status`, { status }),
+  meta: () => api.get('/expenses/meta'),
+};
+
+// ============================================
+// INCOME API
+// ============================================
+
+export const incomeApi = {
+  list: (params?: any) => api.get('/income', { params }),
+  get: (id: string) => api.get(`/income/${id}`),
+  create: (data: any) => api.post('/income', data),
+  update: (id: string, data: any) => api.put(`/income/${id}`, data),
+  delete: (id: string) => api.delete(`/income/${id}`),
+  remove: (id: string) => api.delete(`/income/${id}`),
+  setStatus: (id: string, status: string) =>
+    api.patch(`/income/${id}/status`, { status }),
+  options: () => api.get('/income/options'),
+  forexGain: (invoiceId: string) => api.get(`/income/forex-gain/${invoiceId}`),
+  meta: () => api.get('/income/meta'),
+};
+
+// ============================================
+// TASKS API
+// ============================================
+
+export const tasksApi = {
+  list: (params?: any) => api.get('/tasks', { params }),
+  get: (id: string) => api.get(`/tasks/${id}`),
+  create: (data: any) => api.post('/tasks', data),
+  update: (id: string, data: any) => api.put(`/tasks/${id}`, data),
+  delete: (id: string) => api.delete(`/tasks/${id}`),
+  remove: (id: string) => api.delete(`/tasks/${id}`),
+  complete: (id: string) => api.post(`/tasks/${id}/complete`),
+  reopen: (id: string) => api.post(`/tasks/${id}/reopen`),
+};
+
+// ============================================
+// USERS API
+// ============================================
+
+export const usersApi = {
+  list: (params?: any) => api.get('/users', { params }),
+  get: (id: string) => api.get(`/users/${id}`),
+  create: (data: any) => api.post('/auth/register', data),
+  update: (id: string, data: any) => api.put(`/users/${id}`, data),
+  delete: (id: string) => api.delete(`/users/${id}`),
+  remove: (id: string) => api.delete(`/users/${id}`),
+  deactivate: (id: string) => api.post(`/users/${id}/deactivate`),
+  reactivate: (id: string) => api.post(`/users/${id}/reactivate`),
+  resetPassword: (id: string, password: string) =>
+    api.post(`/users/${id}/reset-password`, { password }),
+};

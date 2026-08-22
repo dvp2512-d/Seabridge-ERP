@@ -43,14 +43,14 @@ export default function Tasks() {
           assigneeId: assigneeId || undefined,
           overdue: overdueOnly ? 'true' : undefined,
         })
-        .then((r) => r.data),
+        .then((r: any) => r.data),
   });
 
   // Only privileged roles can list users, so this quietly yields nothing for
   // others and the assignee filter simply does not appear.
   const { data: usersData } = useQuery({
     queryKey: ['users-for-tasks'],
-    queryFn: () => usersApi.list({ limit: 100 }).then((r) => r.data.data),
+    queryFn: () => usersApi.list({ limit: 100 }).then((r: any) => r.data.data),
     retry: false,
   });
   const users = usersData ?? [];

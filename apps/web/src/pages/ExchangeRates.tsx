@@ -27,7 +27,7 @@ export default function ExchangeRates() {
 
   const { data, isLoading } = useQuery({
     queryKey: ['exchange-rates', asOf, direction],
-    queryFn: () => exchangeRatesApi.current({ date: asOf, direction }).then((r) => r.data.data),
+    queryFn: () => exchangeRatesApi.current({ date: asOf, direction }).then((r: any) => r.data.data),
   });
 
   const rates = data?.rates ?? [];
@@ -419,7 +419,7 @@ function HistoryModal({
 
   const { data, isLoading } = useQuery({
     queryKey: ['exchange-rate-history', currency.currencyId],
-    queryFn: () => exchangeRatesApi.history(currency.currencyId).then((r) => r.data.data),
+    queryFn: () => exchangeRatesApi.history(currency.currencyId).then((r: any) => r.data.data),
   });
 
   const remove = useMutation({

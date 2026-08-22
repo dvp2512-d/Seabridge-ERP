@@ -64,7 +64,7 @@ export default function Expenses() {
     queryFn: () =>
       expensesApi
         .list({ search: search || undefined, category: category || undefined, status: status || undefined })
-        .then((r) => r.data),
+        .then((r: any) => r.data),
   });
 
   const expenses = data?.data ?? [];

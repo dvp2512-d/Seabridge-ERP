@@ -62,7 +62,7 @@ export default function Income() {
           category: category || undefined,
           status: status || undefined,
         })
-        .then((r) => r.data),
+        .then((r: any) => r.data),
   });
 
   const entries = data?.data ?? [];
@@ -386,7 +386,7 @@ function IncomeFormModal({
 
   const { data: options } = useQuery({
     queryKey: ['income-options'],
-    queryFn: () => incomeApi.options().then((r) => r.data.data),
+    queryFn: () => incomeApi.options().then((r: any) => r.data.data),
   });
   const currencies = options?.currencies ?? [];
   const baseCode = currencies.find((c: any) => c.isBaseCurrency)?.code ?? 'INR';
@@ -428,7 +428,7 @@ function IncomeFormModal({
   // Suggested gain from the booked and realised rates on the chosen invoice.
   const { data: forexSuggestion, isFetching: loadingForex } = useQuery({
     queryKey: ['forex-gain', form.linkedInvoiceId],
-    queryFn: () => incomeApi.forexGain(form.linkedInvoiceId).then((r) => r.data.data),
+    queryFn: () => incomeApi.forexGain(form.linkedInvoiceId).then((r: any) => r.data.data),
     enabled: isForexGain && !!form.linkedInvoiceId,
     retry: false,
   });
