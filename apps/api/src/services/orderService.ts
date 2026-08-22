@@ -1,7 +1,6 @@
 import { prisma } from '@seabridge/database';
 import { AppError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
-import { calculateInclusiveUnitPrices } from './inclusivePricing';
 
 /**
  * Default export documentation checklist created with every new order.
@@ -20,15 +19,6 @@ export interface CreateOrderOptions {
   orderDate?: Date;
   expectedDate?: Date;
   poNumber?: string;
-  /** Sea / Air / Road - printed in the header of every export document */
-  dispatchMethod?: string;
-  /** FCL / LCL / Sample Shipment */
-  shipmentType?: string;
-  /** Override the quotation's ports; otherwise they are inherited */
-  portOfLoadingId?: string;
-  portOfDischargeId?: string;
-  /** Quantity tolerance printed on proforma and commercial invoices */
-  variationPercent?: number;
   notes?: string;
 }
 
@@ -47,9 +37,6 @@ export async function createOrderFromQuotation(
     include: {
       items: true,
       currency: true,
-      // Needed to fold the additional costs into the order's unit prices, so the
-      // order lines sum to its own total.
-      costs: true,
     },
   });
 
@@ -64,40 +51,10 @@ export async function createOrderFromQuotation(
     where: { quotationId },
     select: { id: true, orderNumber: true },
   });
-
   if (existingOrder) {
     throw new AppError(
       `Order ${existingOrder.orderNumber} already exists for this quotation`,
       409
-    );
-  }
-
-  /**
-   * Fold the quotation's additional costs into the unit prices.
-   *
-   * The buyer was quoted one all-inclusive figure per unit, so that is what the
-   * order carries. Doing it here rather than at print time means the order's
-   * lines sum to its own totalValue, and every document built from the order
-   * inherits figures that reconcile.
-   */
-  const additionalCosts = quotation.costs.reduce((sum, c) => sum + Number(c.amount), 0);
-  const pricing = calculateInclusiveUnitPrices(
-    quotation.items.map((item) => ({
-      ...item,
-      quantity: Number(item.quantity),
-      unitPrice: Number(item.unitPrice),
-    })),
-    additionalCosts
-  );
-
-  // The order's own lines always sum to its totalValue, which is the fault being
-  // fixed. Where a per-unit cost cannot be expressed exactly - spreading 137.77
-  // across 25,000 units, say - the order total ends a few paise from the
-  // quotation's, and that is logged rather than refused. Blocking the order over
-  // a rounding difference would be worse than the difference.
-  if (!pricing.reconciled) {
-    console.warn(
-      `[order] ${quotation.quotationNumber}: additional costs leave a rounding remainder of ${pricing.remainder}; order total is ${pricing.total}`
     );
   }
 
@@ -113,37 +70,20 @@ export async function createOrderFromQuotation(
         poNumber: options.poNumber || null,
         orderDate: options.orderDate ?? new Date(),
         expectedDate: options.expectedDate ?? null,
-        // Copy shipping details from quotation, allow override from options
-        dispatchMethod: options.dispatchMethod ?? quotation.dispatchMethod ?? null,
-        shipmentType: options.shipmentType ?? quotation.shipmentType ?? null,
-        // Carried across so invoices and packing lists can print the ports
-        // before any shipment record exists.
-        portOfLoadingId: options.portOfLoadingId ?? quotation.portOfLoadingId ?? null,
-        portOfDischargeId: options.portOfDischargeId ?? quotation.portOfDischargeId ?? null,
-        variationPercent: options.variationPercent ?? null,
-        // Equals the sum of the line amounts above, which is the same figure as
-        // the quotation's grandTotal once rounding has reconciled.
-        totalValue: pricing.total,
+        totalValue: quotation.grandTotal,
         // Carry the quotation's currency across instead of defaulting to USD.
         currency: quotation.currency.code,
         paymentTerms: quotation.paymentTerms,
         deliveryTerms: quotation.deliveryTerms,
         notes: options.notes,
         items: {
-          create: pricing.lines.map((line) => ({
-            productId: line.item.productId,
-            quantity: line.item.quantity,
-            unit: line.item.unit,
-            /**
-             * All-inclusive: goods price plus the additional costs spread per
-             * unit. Previously the goods-only price was copied while totalValue
-             * carried the costs, so the order's lines did not sum to its own
-             * total and the commercial invoice printed lines that disagreed with
-             * its total.
-             */
-            unitPrice: line.unitPrice,
-            totalPrice: line.amount,
-            notes: line.item.specifications,
+          create: quotation.items.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            unit: item.unit,
+            unitPrice: item.unitPrice,
+            totalPrice: item.totalPrice,
+            notes: item.specifications,
           })),
         },
         documents: {

@@ -1,38 +1,22 @@
 import { prisma } from '@seabridge/database';
 
-/**
- * Generate sequential codes like BYR-00001, INQ-00001, etc.
- *
- * CRITICAL: This uses a single atomic SQL statement with INSERT ... ON CONFLICT
- * and RETURNING. The previous Prisma upsert was NOT atomic — two concurrent
- * calls could read the same currentNo before either incremented it, producing
- * duplicate codes.
- *
- * The raw SQL guarantees:
- *  1. INSERT or UPDATE happens in one statement (no read-then-write race)
- *  2. RETURNING gives us the new value, not the old one
- *  3. PostgreSQL's row-level locking prevents concurrent duplicates
- */
+// Generate sequential codes like BYR-00001, INQ-00001, etc.
 export async function generateCode(entityType: string, prefix: string): Promise<string> {
-  const result = await prisma.$queryRaw<
-    { current_no: number; pad_length: number; prefix: string }[]
-  >`
-    INSERT INTO number_sequences (id, entity_type, prefix, current_no, pad_length, created_at, updated_at)
-    VALUES (gen_random_uuid(), ${entityType}, ${prefix}, 1, 5, NOW(), NOW())
-    ON CONFLICT (entity_type)
-    DO UPDATE SET 
-      current_no = number_sequences.current_no + 1,
-      updated_at = NOW()
-    RETURNING current_no, pad_length, prefix
-  `;
+  const sequence = await prisma.numberSequence.upsert({
+    where: { entityType },
+    create: {
+      entityType,
+      prefix,
+      currentNo: 1,
+      padLength: 5,
+    },
+    update: {
+      currentNo: { increment: 1 },
+    },
+  });
 
-  if (!result || result.length === 0) {
-    throw new Error(`Failed to generate code for entity type: ${entityType}`);
-  }
-
-  const { current_no, pad_length, prefix: storedPrefix } = result[0];
-  const paddedNo = String(current_no).padStart(pad_length, '0');
-  return `${storedPrefix}-${paddedNo}`;
+  const paddedNo = String(sequence.currentNo).padStart(sequence.padLength, '0');
+  return `${sequence.prefix}-${paddedNo}`;
 }
 
 // Format currency

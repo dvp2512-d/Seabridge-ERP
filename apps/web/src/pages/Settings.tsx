@@ -1,13 +1,12 @@
 // Settings Page - Complete System Configuration
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/authStore';
-import { authApi, automationApi, settingsApi, getApiErrorMessage } from '@/lib/api';
+import { authApi, automationApi } from '@/lib/api';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import { cn } from '@/lib/utils';
-import { can } from '@/lib/permissions';
 import {
   User,
   Building2,
@@ -24,7 +23,6 @@ import {
   Eye,
   EyeOff,
   Mail,
-  AlertTriangle,
 } from 'lucide-react';
 
 type SettingsTab = 'profile' | 'company' | 'templates' | 'webhooks' | 'automations' | 'api';
@@ -90,31 +88,8 @@ function ProfileSettings({ user }: { user: any }) {
   const [formData, setFormData] = useState({
     firstName: user?.firstName || '',
     lastName: user?.lastName || '',
-    phone: user?.phone || '',
   });
   const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const updateUser = useAuthStore((state) => state.updateUser);
-
-  const mutation = useMutation({
-    mutationFn: () => authApi.updateProfile(formData),
-    onSuccess: (response) => {
-      // Update the stored session so the sidebar and initials refresh at once.
-      const updated = response.data?.data;
-      if (updated) {
-        updateUser({ firstName: updated.firstName, lastName: updated.lastName });
-      }
-      toast.success('Profile updated');
-    },
-    onError: (error) => toast.error(getApiErrorMessage(error, 'Failed to update profile')),
-  });
-
-  const handleSave = () => {
-    if (!formData.firstName.trim() || !formData.lastName.trim()) {
-      toast.error('First and last name are required');
-      return;
-    }
-    mutation.mutate();
-  };
 
   return (
     <div className="space-y-6">
@@ -126,23 +101,14 @@ function ProfileSettings({ user }: { user: any }) {
           <div className="grid grid-cols-2 gap-4">
             <FormField
               label="First Name"
-              required
               value={formData.firstName}
               onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
             />
             <FormField
               label="Last Name"
-              required
               value={formData.lastName}
               onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
             />
-            <div className="col-span-2">
-              <FormField
-                label="Phone"
-                value={formData.phone}
-                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              />
-            </div>
             <div className="col-span-2">
               <FormField
                 label="Email"
@@ -161,13 +127,7 @@ function ProfileSettings({ user }: { user: any }) {
             <button onClick={() => setShowPasswordModal(true)} className="btn btn-secondary">
               Change Password
             </button>
-            <button
-              onClick={handleSave}
-              className="btn btn-primary"
-              disabled={mutation.isPending}
-            >
-              {mutation.isPending ? 'Saving...' : 'Save Changes'}
-            </button>
+            <button className="btn btn-primary">Save Changes</button>
           </div>
         </div>
       </div>
@@ -238,251 +198,69 @@ function PasswordChangeModal({ onClose }: { onClose: () => void }) {
 
 // Company Settings
 function CompanySettings() {
-  const queryClient = useQueryClient();
-  const { user } = useAuthStore();
-  const canEdit = can(user?.role as any, 'SETTINGS_MANAGE');
-  const [form, setForm] = useState<Record<string, string>>({});
-  const [loaded, setLoaded] = useState(false);
-
-  const { data, isLoading } = useQuery({
-    queryKey: ['company-profile'],
-    queryFn: () => settingsApi.getCompany().then((r: any) => r.data.data),
-  });
-
-  // Seed the form once the profile arrives, without clobbering later edits.
-  useEffect(() => {
-    if (data && !loaded) {
-      const next: Record<string, string> = {};
-      Object.entries(data).forEach(([k, v]) => {
-        if (typeof v === 'string' || typeof v === 'number') next[k] = String(v);
-      });
-      setForm(next);
-      setLoaded(true);
-    }
-  }, [data, loaded]);
-
-  const save = useMutation({
-    mutationFn: (payload: any) => settingsApi.updateCompany(payload),
-    onSuccess: () => {
-      toast.success('Company details saved');
-      queryClient.invalidateQueries({ queryKey: ['company-profile'] });
-    },
-    onError: (error: any) => {
-      const errors = error.response?.data?.errors;
-      toast.error(errors?.[0]?.message || error.response?.data?.message || 'Could not save');
-    },
-  });
-
-  const set = (key: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-    setForm({ ...form, [key]: e.target.value });
-
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!form.legalName?.trim()) {
-      toast.error('Legal name is required - it appears on every document');
-      return;
-    }
-    // Drop the fields the API does not accept, and blank strings.
-    const { id, createdAt, updatedAt, ...rest } = form as any;
-    const payload: Record<string, string> = {};
-    Object.entries(rest).forEach(([k, v]) => {
-      if (v !== '' && v !== undefined) payload[k] = v as string;
-    });
-    save.mutate(payload);
-  };
-
-  if (isLoading) return <div className="p-8 text-center text-gray-500">Loading...</div>;
-
   return (
-    <form onSubmit={submit} className="space-y-6">
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
-        <AlertTriangle className="w-5 h-5 text-blue-600 flex-shrink-0" />
-        <div className="text-sm text-blue-800">
-          These details are printed on your quotations, invoices and packing lists.
-          Changing them affects every document generated from now on.
-        </div>
-      </div>
-
+    <div className="space-y-6">
       <div className="card">
         <div className="card-header">
-          <h2 className="font-semibold">Exporter Details</h2>
+          <h2 className="font-semibold">Company Information</h2>
         </div>
         <div className="card-body">
           <div className="grid grid-cols-2 gap-4">
-            <FormField
-              label="Legal Name"
-              value={form.legalName ?? ''}
-              onChange={set('legalName')}
-              disabled={!canEdit}
-              required
-              hint="Appears as the Exporter on every document"
-            />
-            <FormField
-              label="Trading Name"
-              value={form.tradeName ?? ''}
-              onChange={set('tradeName')}
-              disabled={!canEdit}
-            />
             <div className="col-span-2">
-              <FormField
-                label="Address Line 1"
-                value={form.addressLine1 ?? ''}
-                onChange={set('addressLine1')}
-                disabled={!canEdit}
-              />
+              <FormField label="Company Name" defaultValue="SeaBridge Exports" />
             </div>
+            <FormField label="Tax ID / GST" defaultValue="" placeholder="Enter tax ID" />
+            <FormField label="Registration No" defaultValue="" placeholder="Company registration" />
             <div className="col-span-2">
-              <FormField
-                label="Address Line 2"
-                value={form.addressLine2 ?? ''}
-                onChange={set('addressLine2')}
-                disabled={!canEdit}
-              />
+              <TextareaField label="Address" rows={2} defaultValue="" placeholder="Company address" />
             </div>
-            <FormField label="City" value={form.city ?? ''} onChange={set('city')} disabled={!canEdit} />
-            <FormField label="State" value={form.state ?? ''} onChange={set('state')} disabled={!canEdit} />
-            <FormField
-              label="Postal Code"
-              value={form.postalCode ?? ''}
-              onChange={set('postalCode')}
-              disabled={!canEdit}
-            />
-            <FormField
-              label="Country"
-              value={form.country ?? ''}
-              onChange={set('country')}
-              disabled={!canEdit}
-            />
-            <FormField
-              label="Country of Origin of Goods"
-              value={form.originCountry ?? ''}
-              onChange={set('originCountry')}
-              disabled={!canEdit}
-              hint="Printed in the document header"
-            />
-            <FormField
-              label="GST Number"
-              value={form.gstNumber ?? ''}
-              onChange={set('gstNumber')}
-              disabled={!canEdit}
-            />
-            <FormField
-              label="IEC Code"
-              value={form.iecCode ?? ''}
-              onChange={set('iecCode')}
-              disabled={!canEdit}
-            />
-            <FormField label="Phone" value={form.phone ?? ''} onChange={set('phone')} disabled={!canEdit} />
-            <FormField
-              label="Contact Person"
-              value={form.contactPerson ?? ''}
-              onChange={set('contactPerson')}
-              disabled={!canEdit}
-            />
-            <FormField
-              label="Email"
-              type="email"
-              value={form.email ?? ''}
-              onChange={set('email')}
-              disabled={!canEdit}
-            />
+            <FormField label="City" defaultValue="" />
+            <FormField label="Country" defaultValue="India" />
+            <FormField label="Phone" defaultValue="" />
+            <FormField label="Email" defaultValue="" />
+            <div className="col-span-2">
+              <FormField label="Website" defaultValue="" />
+            </div>
+          </div>
+          <div className="mt-6">
+            <button className="btn btn-primary">Save Changes</button>
           </div>
         </div>
       </div>
 
       <div className="card">
         <div className="card-header">
-          <h2 className="font-semibold">Bank Details</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            Printed on proforma and commercial invoices so buyers know where to pay.
-          </p>
+          <h2 className="font-semibold">Default Settings</h2>
         </div>
         <div className="card-body">
           <div className="grid grid-cols-2 gap-4">
-            <FormField
-              label="Bank Name"
-              value={form.bankName ?? ''}
-              onChange={set('bankName')}
-              disabled={!canEdit}
+            <SelectField
+              label="Default Currency"
+              defaultValue="USD"
+              options={[
+                { value: 'USD', label: 'USD - US Dollar' },
+                { value: 'EUR', label: 'EUR - Euro' },
+                { value: 'INR', label: 'INR - Indian Rupee' },
+              ]}
             />
-            <FormField
-              label="Branch"
-              value={form.bankBranch ?? ''}
-              onChange={set('bankBranch')}
-              disabled={!canEdit}
+            <SelectField
+              label="Date Format"
+              defaultValue="DD MMM YYYY"
+              options={[
+                { value: 'DD MMM YYYY', label: 'DD MMM YYYY' },
+                { value: 'MM/DD/YYYY', label: 'MM/DD/YYYY' },
+                { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
+              ]}
             />
-            <FormField
-              label="Account Number"
-              value={form.bankAccountNo ?? ''}
-              onChange={set('bankAccountNo')}
-              disabled={!canEdit}
-            />
-            <FormField
-              label="Beneficiary Name"
-              value={form.bankBeneficiary ?? ''}
-              onChange={set('bankBeneficiary')}
-              disabled={!canEdit}
-            />
-            <FormField
-              label="SWIFT Code"
-              value={form.bankSwiftCode ?? ''}
-              onChange={set('bankSwiftCode')}
-              disabled={!canEdit}
-            />
-            <FormField
-              label="IFSC Code"
-              value={form.bankIfscCode ?? ''}
-              onChange={set('bankIfscCode')}
-              disabled={!canEdit}
-            />
-            <div className="col-span-2">
-              <TextareaField
-                label="Banking Charges Note"
-                rows={2}
-                value={form.bankChargesNote ?? ''}
-                onChange={set('bankChargesNote')}
-                disabled={!canEdit}
-              />
-            </div>
+            <FormField label="Default Payment Terms" defaultValue="30 days" />
+            <FormField label="Quotation Validity (days)" type="number" defaultValue="30" />
+          </div>
+          <div className="mt-6">
+            <button className="btn btn-primary">Save Changes</button>
           </div>
         </div>
       </div>
-
-      <div className="card">
-        <div className="card-header">
-          <h2 className="font-semibold">Standard Wording</h2>
-        </div>
-        <div className="card-body space-y-4">
-          <TextareaField
-            label="Quotation Terms & Conditions"
-            rows={7}
-            value={form.quotationTerms ?? ''}
-            onChange={set('quotationTerms')}
-            disabled={!canEdit}
-            hint="One term per line; each is printed as a bullet"
-          />
-          <TextareaField
-            label="Invoice Declaration"
-            rows={2}
-            value={form.invoiceDeclaration ?? ''}
-            onChange={set('invoiceDeclaration')}
-            disabled={!canEdit}
-          />
-        </div>
-      </div>
-
-      {canEdit ? (
-        <div className="flex justify-end">
-          <button type="submit" className="btn btn-primary" disabled={save.isPending}>
-            {save.isPending ? 'Saving...' : 'Save Company Details'}
-          </button>
-        </div>
-      ) : (
-        <p className="text-sm text-gray-500 text-right">
-          Your role can view these details but not change them.
-        </p>
-      )}
-    </form>
+    </div>
   );
 }
 
@@ -1022,44 +800,16 @@ function AutomationsSettings() {
     },
   });
 
-  // Starting points for a rule. Only task creation is supported, so every
-  // suggestion here is something the engine can actually carry out - offering an
-  // email action would imply a capability that does not exist.
+  // Predefined automation templates
   const automationTemplates = [
-    {
-      name: 'Follow up on a new inquiry',
-      trigger: 'inquiry.created',
-      description: 'Create a task to contact the buyer',
-    },
-    {
-      name: 'Chase an accepted quotation',
-      trigger: 'quotation.accepted',
-      description: 'Create a task to raise the order',
-    },
-    {
-      name: 'Prepare documents for a new order',
-      trigger: 'order.created',
-      description: 'Create a task to collect the export paperwork',
-    },
-    {
-      name: 'Reconcile a received payment',
-      trigger: 'payment.recorded',
-      description: 'Create a task to match the payment against the bank',
-    },
+    { name: 'Auto follow-up reminder', trigger: 'inquiry.created', description: 'Create task for follow-up after new inquiry' },
+    { name: 'Quotation expiry alert', trigger: 'quotation.expiring', description: 'Notify when quotation is about to expire' },
+    { name: 'Invoice overdue notification', trigger: 'invoice.overdue', description: 'Send reminder when invoice becomes overdue' },
+    { name: 'Order confirmation email', trigger: 'order.created', description: 'Send confirmation email to buyer' },
   ];
 
   return (
     <div className="space-y-6">
-      {/* State the one action the engine performs, so nobody configures a rule
-          expecting an email that will never be sent. */}
-      <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-50 border border-blue-200">
-        <AlertTriangle className="w-4 h-4 text-blue-600 flex-shrink-0 mt-0.5" />
-        <div className="text-sm text-blue-800">
-          <strong>Rules create tasks.</strong> When the chosen event happens, a task is added to
-          someone's list. Sending email is not supported, so a rule cannot contact a buyer directly.
-        </div>
-      </div>
-
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold">Automation Rules</h2>

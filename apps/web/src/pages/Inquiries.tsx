@@ -1,21 +1,8 @@
-// Enhanced Inquiries Page with Pipeline View
-import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
-import toast from 'react-hot-toast';
-import { inquiriesApi, buyersApi, masterApi, productsApi } from '@/lib/api';
-import PageHeader from '@/components/ui/PageHeader';
-import Modal from '@/components/ui/Modal';
-import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
-import { formatCurrency, formatDate, getStatusColor, getPriorityColor, cn } from '@/lib/utils';
-import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
-import RowActions from '@/components/ui/RowActions';
-import ConfirmDialog from '@/components/ui/ConfirmDialog';
-import { useLifecycleActions } from '@/hooks/useLifecycleActions';
-import { refreshAggregates } from '@/lib/queryKeys';
-import {
+// Enhanced Inquiries Page with Pipeline Viewimport { useState } from 'react';import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';import { useNavigate } from 'react-router-dom';import toast from 'react-hot-toast';import { inquiriesApi, buyersApi, masterApi, productsApi } from '@/lib/api';import PageHeader from '@/components/ui/PageHeader';import Modal from '@/components/ui/Modal';import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';import { formatCurrency, formatDate, getStatusColor, getPriorityColor, cn } from '@/lib/utils';
+import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';import {
   Plus,
   Search,
+  Eye,
   LayoutGrid,
   List,
   Calendar,
@@ -40,12 +27,6 @@ export default function Inquiries() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
-
-  // Deactivate / cancel flow, shared with every other list so the
-
-  // wording and confirmations stay consistent.
-
-  const lifecycle = useLifecycleActions(['inquiries']);
   const [stageFilter, setStageFilter] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('table');
@@ -88,21 +69,6 @@ export default function Inquiries() {
 
   return (
     <div className="space-y-6">
-      {/* Confirmation for deactivate, cancel and delete */}
-      {lifecycle.dialog && (
-        <ConfirmDialog
-          isOpen
-          title={lifecycle.dialog.title}
-          message={lifecycle.dialog.message}
-          consequences={lifecycle.dialog.consequences}
-          tone={lifecycle.dialog.tone}
-          requireTyping={lifecycle.dialog.requireTyping}
-          confirmLabel={lifecycle.dialog.confirmLabel}
-          isPending={lifecycle.isPending}
-          onConfirm={lifecycle.confirm}
-          onCancel={lifecycle.dismiss}
-        />
-      )}
       <PageHeader
         title="Sales Pipeline"
         subtitle={`${pagination?.total || inquiries.length} inquiries • ${formatCurrency(totalPipelineValue)} pipeline value`}
@@ -195,11 +161,7 @@ export default function Inquiries() {
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-navy-900" />
         </div>
       ) : viewMode === 'table' ? (
-        <InquiryTable
-          inquiries={inquiries}
-          onView={(id) => navigate(`/inquiries/${id}`)}
-          onCancel={(id, label) => lifecycle.request({ kind: 'delete', resource: 'inquiries' }, id, label)}
-        />
+        <InquiryTable inquiries={inquiries} onView={(id) => navigate(`/inquiries/${id}`)} />
       ) : (
         <InquiryKanban inquiries={inquiries} onView={(id) => navigate(`/inquiries/${id}`)} />
       )}
@@ -237,8 +199,6 @@ export default function Inquiries() {
           onSuccess={(inquiry) => {
             setShowModal(false);
             queryClient.invalidateQueries({ queryKey: ['inquiries'] });
-      // The dashboard pipeline figure reads inquiries, so refresh it too
-      refreshAggregates(queryClient);
             if (inquiry?.id) navigate(`/inquiries/${inquiry.id}`);
           }}
         />
@@ -248,16 +208,7 @@ export default function Inquiries() {
 }
 
 // Table View Component
-function InquiryTable({
-  inquiries,
-  onView,
-  onCancel,
-}: {
-  inquiries: any[];
-  onView: (id: string) => void;
-  /** Mark lost. Handled by the parent so the confirmation dialog is shared. */
-  onCancel: (id: string, label: string) => void;
-}) {
+function InquiryTable({ inquiries, onView }: { inquiries: any[]; onView: (id: string) => void }) {
   if (inquiries.length === 0) {
     return (
       <div className="card p-12 text-center">
@@ -328,14 +279,9 @@ function InquiryTable({
               </td>
               <td className="text-gray-500">{formatDate(inquiry.createdAt)}</td>
               <td onClick={(e) => e.stopPropagation()}>
-                <RowActions
-                        destructivePermission="RECORD_DELETE"
-                  viewHref={`/inquiries/${inquiry.id}`}
-                  destructiveKind="delete"
-                  // Marked lost rather than deleted, which is the language the
-                  // pipeline already uses and keeps the record in the history.
-                  onDestructive={() => onCancel(inquiry.id, inquiry.inquiryNumber)}
-                />
+                <button onClick={() => onView(inquiry.id)} className="text-navy-600 hover:text-navy-800">
+                  <Eye className="w-4 h-4" />
+                </button>
               </td>
             </tr>
           ))}

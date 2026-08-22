@@ -3,7 +3,7 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
-import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
+import { ValidationError, NotFoundError } from '../middleware/errorHandler';
 
 const router: Router = Router();
 
@@ -145,78 +145,8 @@ router.put('/:id', can('USER_MANAGE'), async (req, res, next) => {
 // Delete user
 router.delete('/:id', can('USER_MANAGE'), async (req, res, next) => {
   try {
-    /**
-     * Deactivate rather than delete.
-     *
-     * Tasks reference a user through assigneeId and createdById with ON DELETE
-     * RESTRICT, so a real delete throws a raw database error for anyone who has
-     * ever been given or created a task - which is everyone who has used the
-     * system. The audit log points at users too, and losing that attribution
-     * would defeat the trail.
-     *
-     * INACTIVE users cannot sign in, which is what "remove this person" actually
-     * means in practice.
-     */
-    const target = await prisma.user.findUnique({ where: { id: req.params.id } });
-    if (!target) throw new NotFoundError('User');
-
-    // Removing your own access mid-session locks you out of your own system.
-    if (target.id === (req as any).user?.id) {
-      throw new AppError(
-        'You cannot deactivate your own account. Ask another founder or admin to do it.',
-        400
-      );
-    }
-
-    // Leaving nobody who can administer the system is unrecoverable without
-    // database access.
-    if (target.role === 'FOUNDER') {
-      const activeFounders = await prisma.user.count({
-        where: { role: 'FOUNDER', status: 'ACTIVE' },
-      });
-      if (activeFounders <= 1) {
-        throw new AppError(
-          'This is the only active founder account. Promote another user first, or you will lock yourself out.',
-          400
-        );
-      }
-    }
-
-    if (target.status === 'INACTIVE') {
-      throw new AppError('This user is already inactive', 400);
-    }
-
-    await prisma.user.update({
-      where: { id: req.params.id },
-      data: { status: 'INACTIVE' },
-    });
-
-    res.json({
-      success: true,
-      message: `${target.firstName} ${target.lastName} can no longer sign in. Their tasks and history are unchanged.`,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/** Restore access for a deactivated user. */
-router.put('/:id/reactivate', can('USER_MANAGE'), async (req, res, next) => {
-  try {
-    const target = await prisma.user.findUnique({ where: { id: req.params.id } });
-    if (!target) throw new NotFoundError('User');
-
-    if (target.status === 'ACTIVE') {
-      throw new AppError('This user is already active', 400);
-    }
-
-    const updated = await prisma.user.update({
-      where: { id: req.params.id },
-      data: { status: 'ACTIVE' },
-      select: { id: true, firstName: true, lastName: true, status: true },
-    });
-
-    res.json({ success: true, data: updated, message: 'Access restored.' });
+    await prisma.user.delete({ where: { id: req.params.id } });
+    res.json({ success: true, message: 'User deleted' });
   } catch (error) {
     next(error);
   }

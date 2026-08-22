@@ -6,33 +6,8 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Seeding database...');
 
-  /**
-   * Founder password resolution.
-   *
-   * In development, set SEED_FOUNDER_PASSWORD in your .env to a value you
-   * choose. In a first-time production deployment, leave it unset and the seed
-   * generates a random password, prints it ONCE, and never stores it anywhere.
-   * Copy it immediately and change it on first login.
-   *
-   * The password is printed to stdout only, never to any log file or the
-   * database. It is hashed with bcrypt before being stored, so even direct
-   * database access does not reveal it.
-   */
-  let founderPassword = process.env.SEED_FOUNDER_PASSWORD;
-  let generatedPassword = false;
-
-  if (!founderPassword) {
-    // Generate a cryptographically random password: 16 bytes → 22 base64 chars
-    // with special characters stripped for shell compatibility.
-    const { randomBytes } = await import('crypto');
-    founderPassword = randomBytes(16)
-      .toString('base64')
-      .replace(/[+/=]/g, '')   // keep alphanumeric only
-      .slice(0, 20);            // 20 chars is plenty
-    generatedPassword = true;
-  }
-
-  const passwordHash = await bcrypt.hash(founderPassword, 12);
+  // Create admin user
+  const passwordHash = await bcrypt.hash('admin123', 12);
   
   const founder = await prisma.user.upsert({
     where: { email: 'founder@seabridge.com' },
@@ -48,9 +23,7 @@ async function main() {
   });
   console.log('✅ Created founder user:', founder.email);
 
-  // Sample sales user — uses the same hash as founder for simplicity on a
-  // fresh dev install. In production, each user should set their own password
-  // on first login.
+  // Create sample users
   const salesUser = await prisma.user.upsert({
     where: { email: 'hiren@seabridge.com' },
     update: {},
@@ -71,7 +44,6 @@ async function main() {
     { code: 'GB', name: 'United Kingdom', region: 'Europe' },
     { code: 'DE', name: 'Germany', region: 'Europe' },
     { code: 'FR', name: 'France', region: 'Europe' },
-    { code: 'IT', name: 'Italy', region: 'Europe' },
     { code: 'IN', name: 'India', region: 'Asia' },
     { code: 'CN', name: 'China', region: 'Asia' },
     { code: 'JP', name: 'Japan', region: 'Asia' },
@@ -96,7 +68,7 @@ async function main() {
     { code: 'USD', name: 'US Dollar', symbol: '$', exchangeRate: 1 },
     { code: 'EUR', name: 'Euro', symbol: '€', exchangeRate: 0.92 },
     { code: 'GBP', name: 'British Pound', symbol: '£', exchangeRate: 0.79 },
-    { code: 'INR', name: 'Indian Rupee', symbol: '₹', exchangeRate: 83.12, isBaseCurrency: true },
+    { code: 'INR', name: 'Indian Rupee', symbol: '₹', exchangeRate: 83.12 },
     { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', exchangeRate: 3.67 },
     { code: 'JPY', name: 'Japanese Yen', symbol: '¥', exchangeRate: 149.50 },
   ];
@@ -104,8 +76,7 @@ async function main() {
   for (const currency of currencies) {
     await prisma.currency.upsert({
       where: { code: currency.code },
-        // Only the base-currency flag is refreshed; rates are left alone in case they have been maintained by hand.
-        update: { isBaseCurrency: (currency as any).isBaseCurrency ?? false },
+      update: {},
       create: currency,
     });
   }
@@ -129,61 +100,6 @@ async function main() {
     });
   }
   console.log('✅ Seeded incoterms');
-
-  // Seed Ports.
-  // The quotation and shipment screens select from this list, so without it the
-  // port dropdowns are empty on a fresh install. Indian ports of loading plus
-  // the discharge ports these buyers actually use. Type drives the filtering on
-  // the quotation form: a Sea dispatch should not offer an airport.
-  const ports = [
-    // Indian ports of loading - sea
-    { code: 'INNSA', name: 'Nhava Sheva (JNPT)', country: 'IN', type: 'SEA' },
-    { code: 'INMUN', name: 'Mundra', country: 'IN', type: 'SEA' },
-    { code: 'INPAV', name: 'Pipavav', country: 'IN', type: 'SEA' },
-    { code: 'INKAN', name: 'Kandla', country: 'IN', type: 'SEA' },
-    { code: 'INMAA', name: 'Chennai', country: 'IN', type: 'SEA' },
-    { code: 'INCOK', name: 'Cochin', country: 'IN', type: 'SEA' },
-    { code: 'INTUT', name: 'Tuticorin', country: 'IN', type: 'SEA' },
-    // Indian airports of loading
-    { code: 'INAMD', name: 'Ahmedabad', country: 'IN', type: 'AIR' },
-    { code: 'INBOM', name: 'Mumbai (Air)', country: 'IN', type: 'AIR' },
-    { code: 'INDEL', name: 'Delhi (Air)', country: 'IN', type: 'AIR' },
-    // Discharge ports - sea
-    { code: 'AEJEA', name: 'Jebel Ali', country: 'AE', type: 'SEA' },
-    { code: 'ITGOA', name: 'Genoa', country: 'IT', type: 'SEA' },
-    { code: 'GBFXT', name: 'Felixstowe', country: 'GB', type: 'SEA' },
-    { code: 'DEHAM', name: 'Hamburg', country: 'DE', type: 'SEA' },
-    { code: 'USNYC', name: 'New York', country: 'US', type: 'SEA' },
-    { code: 'SAJED', name: 'Jeddah', country: 'SA', type: 'SEA' },
-    { code: 'CNSHA', name: 'Shanghai', country: 'CN', type: 'SEA' },
-    { code: 'JPYOK', name: 'Yokohama', country: 'JP', type: 'SEA' },
-    { code: 'AUSYD', name: 'Sydney', country: 'AU', type: 'SEA' },
-    { code: 'FRMRS', name: 'Marseille', country: 'FR', type: 'SEA' },
-    // Discharge airports
-    { code: 'AEDXB', name: 'Dubai (Air)', country: 'AE', type: 'AIR' },
-    { code: 'ITMXP', name: 'Milan Malpensa', country: 'IT', type: 'AIR' },
-  ];
-
-  for (const port of ports) {
-    const country = await prisma.country.findUnique({ where: { code: port.country } });
-    // Skip rather than fail if a country is missing, so one bad row cannot
-    // abort the whole seed.
-    if (!country) {
-      console.log(`   skipped port ${port.code}: country ${port.country} not found`);
-      continue;
-    }
-    await prisma.port.upsert({
-      where: { code: port.code },
-      update: {},
-      create: {
-        code: port.code,
-        name: port.name,
-        countryId: country.id,
-        type: port.type,
-      },
-    });
-  }
-  console.log('✅ Seeded ports');
 
   // Seed Product Categories
   const categories = [
@@ -217,8 +133,6 @@ async function main() {
     { entityType: 'SHIPMENT', prefix: 'SHP', currentNo: 0, padLength: 5 },
     { entityType: 'PROCUREMENT', prefix: 'PO', currentNo: 0, padLength: 5 },
     { entityType: 'PAYMENT', prefix: 'PAY', currentNo: 0, padLength: 5 },
-    { entityType: 'EXPENSE', prefix: 'EXP', currentNo: 0, padLength: 5 },
-    { entityType: 'INCOME', prefix: 'INC', currentNo: 0, padLength: 5 },
   ];
 
   for (const seq of sequences) {
@@ -230,62 +144,10 @@ async function main() {
   }
   console.log('✅ Seeded number sequences');
 
-  // Company Profile - the Exporter block, bank details and standard wording
-  // printed on every outgoing document. Values taken from MASTER DRAFT.xlsx.
-  // Only created when absent, so later edits in Settings survive a re-seed.
-  const existingProfile = await prisma.companyProfile.findFirst();
-  if (!existingProfile) {
-    await prisma.companyProfile.create({
-      data: {
-        legalName: 'VISION LIMELITE',
-        tradeName: 'SeaBridge Exports',
-        addressLine1: 'BH-815, 8th Floor Arved Transcube Plaza, Opp. Metro Station',
-        addressLine2: 'Business Hub, Ranip',
-        city: 'Ahmedabad',
-        state: 'Gujarat',
-        postalCode: '380004',
-        country: 'INDIA',
-        originCountry: 'India',
-        gstNumber: '24DUBPP8360J1ZB',
-        iecCode: 'DUBPP8360J',
-        phone: '(+91) 83476 72514',
-        contactPerson: 'Vedant Patel',
-        email: 'info@seabridgeexports.com',
-        bankName: 'Kotak Mahindra Bank',
-        bankBranch: 'Satadhar, Ahmedabad',
-        bankAccountNo: '8347672514',
-        bankBeneficiary: 'VISION LIMELITE',
-        bankSwiftCode: 'KKBKINBBXX',
-        bankIfscCode: 'KKBK0002576',
-        bankChargesNote: 'ALL BANKING CHARGES OUTSIDE INDIA ARE IN ACCOUNT OF APPLICANT',
-        quotationTerms: [
-          'Prices quoted are on Basis as per Incoterms',
-          'Goods supplied shall comply with the applicable food safety regulations of the destination country and relevant international food safety standards.',
-          "Inspection will be conducted at seller's premises. Third-party inspection if required will be borne by buyer.",
-          'Seller shall not be liable for delay or non-performance due to circumstances beyond control such as natural calamities, war, strike, government restrictions, etc.',
-          'All disputes shall be subject to Ahmedabad (Gujarat) jurisdiction only.',
-        ].join('\n'),
-        invoiceDeclaration:
-          'We declare that this Invoice shows the actual Price of goods described and that all particulars are true and correct.',
-      },
-    });
-    console.log('✅ Seeded company profile (VISION LIMELITE)');
-  } else {
-    console.log('ℹ️  Company profile already present, left unchanged');
-  }
-
   console.log('🎉 Database seeding completed!');
   console.log('\n📋 Login credentials:');
   console.log('   Email: founder@seabridge.com');
-  if (generatedPassword) {
-    console.log('   Password: ' + founderPassword);
-    console.log('\n   ⚠️  This password was generated once and will not be shown again.');
-    console.log('   Copy it now and change it after your first login.');
-    console.log('   To set a fixed password for future re-seeds, add to .env:');
-    console.log('     SEED_FOUNDER_PASSWORD=your-chosen-password');
-  } else {
-    console.log('   Password: (the value you set in SEED_FOUNDER_PASSWORD)');
-  }
+  console.log('   Password: admin123');
 }
 
 main()

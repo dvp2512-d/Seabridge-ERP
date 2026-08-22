@@ -50,7 +50,6 @@ model User {
   createdTasks     Task[]          @relation("TaskCreatedBy")
   communications   Communication[]
   auditLogs        AuditLog[]
-  incomeRecorded Income[]
 
   @@map("users")
 }
@@ -100,10 +99,6 @@ model Port {
   country              Country    @relation(fields: [countryId], references: [id])
   shipmentsOrigin      Shipment[] @relation("ShipmentOriginPort")
   shipmentsDestination Shipment[] @relation("ShipmentDestinationPort")
-  quotationsLoading    Quotation[] @relation("QuotationPortOfLoading")
-  quotationsDischarge  Quotation[] @relation("QuotationPortOfDischarge")
-  ordersLoading        ExportOrder[] @relation("OrderPortOfLoading")
-  ordersDischarge      ExportOrder[] @relation("OrderPortOfDischarge")
 
   @@map("ports")
 }
@@ -113,69 +108,17 @@ model Currency {
   code         String   @unique // ISO 4217
   name         String
   symbol       String
-  /// DEPRECATED: superseded by the dated ExchangeRate history. Kept so existing
-  /// rows are not lost; do not read this for any calculation.
   exchangeRate Decimal  @default(1) @map("exchange_rate") @db.Decimal(10, 4)
-  /// True for the company's own reporting currency (INR for an Indian exporter).
-  /// Aggregates convert into this rather than assuming a hardcoded USD.
-  isBaseCurrency Boolean @default(false) @map("is_base_currency")
   isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   // Relations
-  buyers        Buyer[]
-  quotations    Quotation[]
-  invoices      Invoice[]
-  inquiries     Inquiry[]
-  exchangeRates ExchangeRate[]
+  buyers     Buyer[]
+  quotations Quotation[]
+  invoices   Invoice[]
 
   @@map("currencies")
-}
-
-/// A notified exchange rate, effective from a given date.
-///
-/// CBIC notifies rates for 22 currencies twice a month (1st and 3rd Thursday),
-/// effective from midnight of the following day, and publishes a separate rate
-/// for imports and for exports. Customs values a shipping bill using the rate
-/// in force on the relevant date, so rates are stored as a dated history rather
-/// than a single mutable number - a document issued last month must keep the
-/// rate it was issued under.
-///
-/// No rate is ever assumed. If none is on record for a date, callers are
-/// expected to fail rather than fall back to 1.0, which would silently
-/// misstate a customs value.
-model ExchangeRate {
-  id         String @id @default(cuid())
-  currencyId String @map("currency_id")
-
-  /// Rupees per one unit of the foreign currency, for imported goods
-  importRate Decimal @map("import_rate") @db.Decimal(12, 4)
-  /// Rupees per one unit of the foreign currency, for exported goods.
-  /// This is the one that applies to our shipping bills.
-  exportRate Decimal @map("export_rate") @db.Decimal(12, 4)
-
-  /// First date this rate applies to, inclusive
-  effectiveFrom DateTime  @map("effective_from") @db.Date
-  /// Last date this rate applies to, inclusive. Null means still in force.
-  effectiveTo   DateTime? @map("effective_to") @db.Date
-
-  /// CBIC | RBI | MARKET | MANUAL - where the figure came from
-  source String @default("CBIC")
-  /// e.g. "Notification No. 55/2026-Customs (N.T.)"
-  notificationRef String? @map("notification_ref")
-  notes           String?
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  currency Currency @relation(fields: [currencyId], references: [id])
-
-  /// One rate per currency per source per start date
-  @@unique([currencyId, source, effectiveFrom])
-  @@index([currencyId, effectiveFrom])
-  @@index([effectiveFrom])
-  @@map("exchange_rates")
 }
 
 model Incoterm {
@@ -222,12 +165,6 @@ model Product {
   categoryId  String   @map("category_id")
   hsnCode     String?  @map("hsn_code")
   unit        String   @default("KG") // KG, MT, PCS, CTN, etc.
-  /// Default packaging, used to prefill order lines and the Packing List.
-  /// e.g. 40 kg HDPE bag -> packageType "BAG", packageNetWeight 40
-  packageType       String?  @map("package_type")
-  packageNetWeight  Decimal? @map("package_net_weight") @db.Decimal(12, 3)
-  /// Packed weight of one unit including the bag/carton itself
-  packageGrossWeight Decimal? @map("package_gross_weight") @db.Decimal(12, 3)
   isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -508,9 +445,6 @@ model Inquiry {
   priority        InquiryPriority @default(MEDIUM)
   source          String?         // EMAIL, PHONE, WEBSITE, EXHIBITION
   expectedValue   Decimal?        @map("expected_value") @db.Decimal(15, 2)
-  /// Currency of expectedValue and the items' target prices. Without this the
-  /// pipeline total cannot be converted or even interpreted.
-  currencyId      String?         @map("currency_id")
   expectedDate    DateTime?       @map("expected_date")
   requirements    String?
   notes           String?
@@ -523,7 +457,6 @@ model Inquiry {
 
   // Relations
   buyer       Buyer         @relation(fields: [buyerId], references: [id])
-  currency    Currency?     @relation(fields: [currencyId], references: [id])
   salesOwner  User          @relation("InquirySalesOwner", fields: [salesOwnerId], references: [id])
   createdBy   User          @relation("InquiryCreatedBy", fields: [createdById], references: [id])
   items       InquiryItem[]
@@ -593,13 +526,6 @@ model Quotation {
   incotermId       String          @map("incoterm_id")
   status           QuotationStatus @default(DRAFT)
   validUntil       DateTime        @map("valid_until")
-  /// Shipping details - these flow to the order when quotation is converted
-  /// dispatchMethod: Sea / Air / Road / Rail / Courier
-  dispatchMethod       String?  @map("dispatch_method")
-  /// shipmentType: FCL / LCL / Sample Shipment / Bulk
-  shipmentType         String?  @map("shipment_type")
-  portOfLoadingId      String?  @map("port_of_loading_id")
-  portOfDischargeId    String?  @map("port_of_discharge_id")
   deliveryTerms    String?         @map("delivery_terms")
   paymentTerms     String?         @map("payment_terms")
   subtotal         Decimal         @default(0) @db.Decimal(15, 2)
@@ -616,15 +542,13 @@ model Quotation {
   updatedAt        DateTime        @updatedAt @map("updated_at")
 
   // Relations
-  inquiry          Inquiry?        @relation(fields: [inquiryId], references: [id])
-  buyer            Buyer           @relation(fields: [buyerId], references: [id])
-  currency         Currency        @relation(fields: [currencyId], references: [id])
-  incoterm         Incoterm        @relation(fields: [incotermId], references: [id])
-  portOfLoading    Port?           @relation("QuotationPortOfLoading", fields: [portOfLoadingId], references: [id])
-  portOfDischarge  Port?           @relation("QuotationPortOfDischarge", fields: [portOfDischargeId], references: [id])
-  items            QuotationItem[]
-  costs            QuotationCost[]
-  orders           ExportOrder[]
+  inquiry  Inquiry?        @relation(fields: [inquiryId], references: [id])
+  buyer    Buyer           @relation(fields: [buyerId], references: [id])
+  currency Currency        @relation(fields: [currencyId], references: [id])
+  incoterm Incoterm        @relation(fields: [incotermId], references: [id])
+  items    QuotationItem[]
+  costs    QuotationCost[]
+  orders   ExportOrder[]
 
   @@map("quotations")
 }
@@ -693,17 +617,6 @@ model ExportOrder {
   incotermId      String      @map("incoterm_id")
   status          OrderStatus @default(CONFIRMED)
   poNumber        String?     @map("po_number")
-  /// Printed in the header block of every export document.
-  /// dispatchMethod: Sea / Air / Road   shipmentType: FCL / LCL / Sample Shipment
-  dispatchMethod  String?     @map("dispatch_method")
-  shipmentType    String?     @map("shipment_type")
-  /// Carried from the quotation so invoices and packing lists can print the
-  /// ports before a shipment record exists. A shipment, once created, is the
-  /// more specific source and takes precedence.
-  portOfLoadingId   String?   @map("port_of_loading_id")
-  portOfDischargeId String?   @map("port_of_discharge_id")
-  /// Tolerance printed on Proforma and Commercial invoices, e.g. 10 for +/- 10%
-  variationPercent Decimal?   @map("variation_percent") @db.Decimal(5, 2)
   orderDate       DateTime    @map("order_date")
   expectedDate    DateTime?   @map("expected_date")
   totalValue      Decimal     @map("total_value") @db.Decimal(15, 2)
@@ -717,8 +630,6 @@ model ExportOrder {
   // Relations
   quotation    Quotation     @relation(fields: [quotationId], references: [id])
   buyer        Buyer         @relation(fields: [buyerId], references: [id])
-  portOfLoading   Port?       @relation("OrderPortOfLoading", fields: [portOfLoadingId], references: [id])
-  portOfDischarge Port?       @relation("OrderPortOfDischarge", fields: [portOfDischargeId], references: [id])
   incoterm     Incoterm      @relation(fields: [incotermId], references: [id])
   items        OrderItem[]
   procurements Procurement[]
@@ -737,12 +648,6 @@ model OrderItem {
   unit        String   @default("KG")
   unitPrice   Decimal  @map("unit_price") @db.Decimal(12, 2)
   totalPrice  Decimal  @map("total_price") @db.Decimal(15, 2)
-  /// Packing List figures. Prefilled from the product's packaging defaults and
-  /// editable per line, because the same product may ship in different packing.
-  numberOfPackages Int?     @map("number_of_packages")
-  packageWeight    Decimal? @map("package_weight") @db.Decimal(12, 3)
-  netWeight        Decimal? @map("net_weight") @db.Decimal(12, 3)
-  grossWeight      Decimal? @map("gross_weight") @db.Decimal(12, 3)
   notes       String?
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -848,8 +753,7 @@ model Invoice {
   orderId        String        @map("order_id")
   buyerId        String        @map("buyer_id")
   currencyId     String        @map("currency_id")
-  /// EXPORT (commercial), PROFORMA, or SAMPLE - each has its own document template
-  type           String        @default("EXPORT")
+  type           String        @default("EXPORT") // EXPORT, PROFORMA
   status         InvoiceStatus @default(DRAFT)
   invoiceDate    DateTime      @map("invoice_date")
   dueDate        DateTime      @map("due_date")
@@ -858,12 +762,7 @@ model Invoice {
   totalAmount    Decimal       @map("total_amount") @db.Decimal(15, 2)
   paidAmount     Decimal       @default(0) @map("paid_amount") @db.Decimal(15, 2)
   balanceAmount  Decimal       @map("balance_amount") @db.Decimal(15, 2)
-  /// CBIC export rate in force on the invoice date, in rupees per unit of the
-  /// invoice currency. Stamped at issue so the document stays reproducible even
-  /// after a new notification supersedes the rate.
   exchangeRate   Decimal       @default(1) @map("exchange_rate") @db.Decimal(10, 4)
-  exchangeRateRef String?      @map("exchange_rate_ref")
-  exchangeRateDate DateTime?   @map("exchange_rate_date") @db.Date
   notes          String?
   termsConditions String?      @map("terms_conditions")
   pdfPath        String?       @map("pdf_path")
@@ -876,7 +775,6 @@ model Invoice {
   buyer    Buyer       @relation(fields: [buyerId], references: [id])
   currency Currency    @relation(fields: [currencyId], references: [id])
   payments Payment[]
-  incomeEntries   Income[]
 
   @@map("invoices")
 }
@@ -893,11 +791,6 @@ model Payment {
   reference     String?
   bankDetails   String?  @map("bank_details")
   notes         String?
-  /// Client-generated unique key for duplicate prevention.
-  /// If set, a second request with the same key returns the existing payment
-  /// instead of creating a duplicate. This protects against double-submits,
-  /// network retries, and impatient users clicking "Pay" twice.
-  idempotencyKey String? @unique @map("idempotency_key")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -1006,106 +899,6 @@ model AuditLog {
   user User? @relation(fields: [userId], references: [id])
 
   @@map("audit_logs")
-}
-
-/// The exporter's own details, printed on every outgoing document.
-/// A single row; the documents read the first record.
-model CompanyProfile {
-  id            String   @id @default(cuid())
-  /// Legal entity name that appears in the Exporter block
-  legalName     String   @map("legal_name")
-  /// Trading name / brand, if different from the legal entity
-  tradeName     String?  @map("trade_name")
-  addressLine1  String?  @map("address_line1")
-  addressLine2  String?  @map("address_line2")
-  city          String?
-  state         String?
-  postalCode    String?  @map("postal_code")
-  country       String   @default("INDIA")
-  /// Printed as "Country of Origin of Goods" on export documents
-  originCountry String   @default("India") @map("origin_country")
-  gstNumber     String?  @map("gst_number")
-  iecCode       String?  @map("iec_code")
-  phone         String?
-  contactPerson String?  @map("contact_person")
-  email         String?
-  website       String?
-
-  // Bank details for the Proforma and Commercial invoice footers
-  bankName          String? @map("bank_name")
-  bankBranch        String? @map("bank_branch")
-  bankAccountNo     String? @map("bank_account_no")
-  bankBeneficiary   String? @map("bank_beneficiary")
-  bankSwiftCode     String? @map("bank_swift_code")
-  bankIfscCode      String? @map("bank_ifsc_code")
-  bankChargesNote   String? @map("bank_charges_note")
-
-  // Standard blocks of wording, editable without a code change
-  quotationTerms    String? @map("quotation_terms")
-  invoiceDeclaration String? @map("invoice_declaration")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  @@map("company_profile")
-}
-
-/// Non-export-sale receipts: duty drawback, RoDTEP scrips, interest, forex gain,
-/// commission, scrap sales, recovered sample charges.
-///
-/// Deliberately separate from Invoice and Payment. Export revenue and incentive
-/// income answer different questions, and merging them would make sales
-/// performance look better than it is and break period-to-period comparison.
-///
-/// Reporting rule, enforced in the API rather than left as a convention: every
-/// total, card and export sums amountINR only. originalAmount must never be
-/// summed across rows, because those rows may be in different currencies.
-model Income {
-  id           String @id @default(cuid())
-  incomeNumber String @unique @map("income_number")
-
-  /// DUTY_DRAWBACK | RODTEP_MEIS | INTEREST | FOREX_GAIN | COMMISSION |
-  /// SCRAP_SALES | SAMPLE_CHARGES | OTHER
-  /// Stored as a string to match Expense.category; validated by the API.
-  category    String
-  description String
-
-  /// The amount as actually received or booked, in originalCurrency.
-  originalAmount   Decimal @map("original_amount") @db.Decimal(15, 2)
-  /// ISO code, validated against the Currency master rather than a fixed list.
-  originalCurrency String  @default("INR") @map("original_currency")
-  /// Rupees per one unit of originalCurrency. Entered by the user, never fetched
-  /// automatically - for forex gain the rate that matters is what the bank
-  /// actually gave, which no rate table knows.
-  exchangeRate     Decimal @default(1.0000) @map("exchange_rate") @db.Decimal(12, 4)
-  /// originalAmount x exchangeRate. Recomputed server-side on every write; a
-  /// client-supplied value is always ignored.
-  amountINR        Decimal @map("amount_inr") @db.Decimal(15, 2)
-
-  /// Scrip number, drawback shipping bill, or the payment reference
-  reference String?
-
-  /// Set only for FOREX_GAIN, so the figure stays traceable to the invoice it
-  /// came from rather than floating free of the books.
-  linkedInvoiceId String? @map("linked_invoice_id")
-
-  /// RECEIVED | PENDING
-  status String @default("PENDING")
-
-  receivedDate DateTime @map("received_date") @db.Date
-  notes        String?
-
-  createdById String   @map("created_by_id")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-
-  linkedInvoice Invoice? @relation(fields: [linkedInvoiceId], references: [id])
-  createdBy     User     @relation(fields: [createdById], references: [id])
-
-  @@index([receivedDate])
-  @@index([category])
-  @@index([status])
-  @@map("income")
 }
 
 model SystemSetting {

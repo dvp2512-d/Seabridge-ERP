@@ -53,9 +53,6 @@ COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/packages/database ./packages/database
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/package*.json ./apps/api/
-# The PDF generator reads the logo from assets/ at runtime, resolved relative to
-# dist/services. Without this the documents render with no logo at all.
-COPY --from=builder /app/apps/api/assets ./apps/api/assets
 
 WORKDIR /app/apps/api
 

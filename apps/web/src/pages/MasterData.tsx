@@ -5,11 +5,8 @@ import { masterApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField } from '@/components/ui/FormFields';
-import { Plus } from 'lucide-react';
+import { Plus, Edit2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import RowActions from '@/components/ui/RowActions';
-import ConfirmDialog from '@/components/ui/ConfirmDialog';
-import { useLifecycleActions } from '@/hooks/useLifecycleActions';
 
 type TabType = 'countries' | 'currencies' | 'incoterms' | 'categories' | 'ports';
 
@@ -23,29 +20,11 @@ const tabs: { id: TabType; label: string }[] = [
 
 export default function MasterData() {
   const [activeTab, setActiveTab] = useState<TabType>('countries');
-  // Deactivate / cancel flow, shared with every other list so the
-  // wording and confirmations stay consistent.
-  const lifecycle = useLifecycleActions(['master-data']);
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
 
   return (
     <div className="space-y-6">
-      {/* Confirmation for deactivate, cancel and delete */}
-      {lifecycle.dialog && (
-        <ConfirmDialog
-          isOpen
-          title={lifecycle.dialog.title}
-          message={lifecycle.dialog.message}
-          consequences={lifecycle.dialog.consequences}
-          tone={lifecycle.dialog.tone}
-          requireTyping={lifecycle.dialog.requireTyping}
-          confirmLabel={lifecycle.dialog.confirmLabel}
-          isPending={lifecycle.isPending}
-          onConfirm={lifecycle.confirm}
-          onCancel={lifecycle.dismiss}
-        />
-      )}
       <PageHeader
         title="Master Data"
         subtitle="Manage dropdown values and reference data"
@@ -78,36 +57,11 @@ export default function MasterData() {
       </div>
 
       {/* Content */}
-      {activeTab === 'countries' && <CountriesTab
-              onEdit={(item) => { setEditItem(item); setShowModal(true); }}
-              onLifecycle={(kind, id, label) =>
-                lifecycle.request({ kind, resource: 'countries' }, id, label)
-              }
-            />}
-      {activeTab === 'currencies' && <CurrenciesTab
-              onEdit={(item) => { setEditItem(item); setShowModal(true); }}
-              onLifecycle={(kind, id, label) =>
-                lifecycle.request({ kind, resource: 'currencies' }, id, label)
-              }
-            />}
-      {activeTab === 'incoterms' && <IncotermsTab
-              onEdit={(item) => { setEditItem(item); setShowModal(true); }}
-              onLifecycle={(kind, id, label) =>
-                lifecycle.request({ kind, resource: 'incoterms' }, id, label)
-              }
-            />}
-      {activeTab === 'categories' && <CategoriesTab
-              onEdit={(item) => { setEditItem(item); setShowModal(true); }}
-              onLifecycle={(kind, id, label) =>
-                lifecycle.request({ kind, resource: 'product-categories' }, id, label)
-              }
-            />}
-      {activeTab === 'ports' && <PortsTab
-              onEdit={(item) => { setEditItem(item); setShowModal(true); }}
-              onLifecycle={(kind, id, label) =>
-                lifecycle.request({ kind, resource: 'ports' }, id, label)
-              }
-            />}
+      {activeTab === 'countries' && <CountriesTab onEdit={(item) => { setEditItem(item); setShowModal(true); }} />}
+      {activeTab === 'currencies' && <CurrenciesTab onEdit={(item) => { setEditItem(item); setShowModal(true); }} />}
+      {activeTab === 'incoterms' && <IncotermsTab onEdit={(item) => { setEditItem(item); setShowModal(true); }} />}
+      {activeTab === 'categories' && <CategoriesTab onEdit={(item) => { setEditItem(item); setShowModal(true); }} />}
+      {activeTab === 'ports' && <PortsTab onEdit={(item) => { setEditItem(item); setShowModal(true); }} />}
 
       {/* Add/Edit Modal */}
       {showModal && (
@@ -122,14 +76,7 @@ export default function MasterData() {
 }
 
 // Countries Tab
-function CountriesTab({
-  onEdit,
-  onLifecycle,
-}: {
-  onEdit: (item: any) => void;
-  /** Deactivate or reactivate, handled by the parent so the dialog is shared */
-  onLifecycle: (kind: 'deactivate' | 'reactivate', id: string, label: string) => void;
-}) {
+function CountriesTab({ onEdit }: { onEdit: (item: any) => void }) {
   const { data, isLoading } = useQuery({
     queryKey: ['countries'],
     queryFn: () => masterApi.getCountries(),
@@ -162,21 +109,9 @@ function CountriesTab({
                 <td>{c.region || '-'}</td>
                 <td><span className={`badge ${c.isActive ? 'badge-success' : 'badge-gray'}`}>{c.isActive ? 'Active' : 'Inactive'}</span></td>
                 <td>
-                  <RowActions
-                    onEdit={() => onEdit(c)}
-                    editPermission="MASTER_MANAGE"
-                    destructiveKind="deactivate"
-                    onDestructive={
-                      c.isActive
-                        ? () => onLifecycle('deactivate', c.id, c.name ?? c.code)
-                        : undefined
-                    }
-                    onReactivate={
-                      !c.isActive
-                        ? () => onLifecycle('reactivate', c.id, c.name ?? c.code)
-                        : undefined
-                    }
-                  />
+                  <button onClick={() => onEdit(c)} className="text-navy-600 hover:text-navy-800">
+                    <Edit2 className="w-4 h-4" />
+                  </button>
                 </td>
               </tr>
             ))
@@ -188,14 +123,7 @@ function CountriesTab({
 }
 
 // Currencies Tab
-function CurrenciesTab({
-  onEdit,
-  onLifecycle,
-}: {
-  onEdit: (item: any) => void;
-  /** Deactivate or reactivate, handled by the parent so the dialog is shared */
-  onLifecycle: (kind: 'deactivate' | 'reactivate', id: string, label: string) => void;
-}) {
+function CurrenciesTab({ onEdit }: { onEdit: (item: any) => void }) {
   const { data, isLoading } = useQuery({
     queryKey: ['currencies'],
     queryFn: () => masterApi.getCurrencies(),
@@ -230,21 +158,9 @@ function CurrenciesTab({
                 <td>{c.exchangeRate}</td>
                 <td><span className={`badge ${c.isActive ? 'badge-success' : 'badge-gray'}`}>{c.isActive ? 'Active' : 'Inactive'}</span></td>
                 <td>
-                  <RowActions
-                    onEdit={() => onEdit(c)}
-                    editPermission="MASTER_MANAGE"
-                    destructiveKind="deactivate"
-                    onDestructive={
-                      c.isActive
-                        ? () => onLifecycle('deactivate', c.id, c.name ?? c.code)
-                        : undefined
-                    }
-                    onReactivate={
-                      !c.isActive
-                        ? () => onLifecycle('reactivate', c.id, c.name ?? c.code)
-                        : undefined
-                    }
-                  />
+                  <button onClick={() => onEdit(c)} className="text-navy-600 hover:text-navy-800">
+                    <Edit2 className="w-4 h-4" />
+                  </button>
                 </td>
               </tr>
             ))
@@ -256,14 +172,7 @@ function CurrenciesTab({
 }
 
 // Incoterms Tab
-function IncotermsTab({
-  onEdit,
-  onLifecycle,
-}: {
-  onEdit: (item: any) => void;
-  /** Deactivate or reactivate, handled by the parent so the dialog is shared */
-  onLifecycle: (kind: 'deactivate' | 'reactivate', id: string, label: string) => void;
-}) {
+function IncotermsTab({ onEdit }: { onEdit: (item: any) => void }) {
   const { data, isLoading } = useQuery({
     queryKey: ['incoterms'],
     queryFn: () => masterApi.getIncoterms(),
@@ -296,21 +205,9 @@ function IncotermsTab({
                 <td className="max-w-xs truncate">{i.description || '-'}</td>
                 <td><span className={`badge ${i.isActive ? 'badge-success' : 'badge-gray'}`}>{i.isActive ? 'Active' : 'Inactive'}</span></td>
                 <td>
-                  <RowActions
-                    onEdit={() => onEdit(i)}
-                    editPermission="MASTER_MANAGE"
-                    destructiveKind="deactivate"
-                    onDestructive={
-                      i.isActive
-                        ? () => onLifecycle('deactivate', i.id, i.name ?? i.code)
-                        : undefined
-                    }
-                    onReactivate={
-                      !i.isActive
-                        ? () => onLifecycle('reactivate', i.id, i.name ?? i.code)
-                        : undefined
-                    }
-                  />
+                  <button onClick={() => onEdit(i)} className="text-navy-600 hover:text-navy-800">
+                    <Edit2 className="w-4 h-4" />
+                  </button>
                 </td>
               </tr>
             ))
@@ -322,14 +219,7 @@ function IncotermsTab({
 }
 
 // Categories Tab
-function CategoriesTab({
-  onEdit,
-  onLifecycle,
-}: {
-  onEdit: (item: any) => void;
-  /** Deactivate or reactivate, handled by the parent so the dialog is shared */
-  onLifecycle: (kind: 'deactivate' | 'reactivate', id: string, label: string) => void;
-}) {
+function CategoriesTab({ onEdit }: { onEdit: (item: any) => void }) {
   const { data, isLoading } = useQuery({
     queryKey: ['productCategories'],
     queryFn: () => masterApi.getProductCategories(),
@@ -360,21 +250,9 @@ function CategoriesTab({
                 <td>{c.description || '-'}</td>
                 <td><span className={`badge ${c.isActive ? 'badge-success' : 'badge-gray'}`}>{c.isActive ? 'Active' : 'Inactive'}</span></td>
                 <td>
-                  <RowActions
-                    onEdit={() => onEdit(c)}
-                    editPermission="MASTER_MANAGE"
-                    destructiveKind="deactivate"
-                    onDestructive={
-                      c.isActive
-                        ? () => onLifecycle('deactivate', c.id, c.name ?? c.code)
-                        : undefined
-                    }
-                    onReactivate={
-                      !c.isActive
-                        ? () => onLifecycle('reactivate', c.id, c.name ?? c.code)
-                        : undefined
-                    }
-                  />
+                  <button onClick={() => onEdit(c)} className="text-navy-600 hover:text-navy-800">
+                    <Edit2 className="w-4 h-4" />
+                  </button>
                 </td>
               </tr>
             ))
@@ -386,14 +264,7 @@ function CategoriesTab({
 }
 
 // Ports Tab
-function PortsTab({
-  onEdit,
-  onLifecycle,
-}: {
-  onEdit: (item: any) => void;
-  /** Deactivate or reactivate, handled by the parent so the dialog is shared */
-  onLifecycle: (kind: 'deactivate' | 'reactivate', id: string, label: string) => void;
-}) {
+function PortsTab({ onEdit }: { onEdit: (item: any) => void }) {
   const { data, isLoading } = useQuery({
     queryKey: ['ports'],
     queryFn: () => masterApi.getPorts(),
@@ -428,21 +299,9 @@ function PortsTab({
                 <td><span className="badge badge-navy">{p.type}</span></td>
                 <td><span className={`badge ${p.isActive ? 'badge-success' : 'badge-gray'}`}>{p.isActive ? 'Active' : 'Inactive'}</span></td>
                 <td>
-                  <RowActions
-                    onEdit={() => onEdit(p)}
-                    editPermission="MASTER_MANAGE"
-                    destructiveKind="deactivate"
-                    onDestructive={
-                      p.isActive
-                        ? () => onLifecycle('deactivate', p.id, p.name ?? p.code)
-                        : undefined
-                    }
-                    onReactivate={
-                      !p.isActive
-                        ? () => onLifecycle('reactivate', p.id, p.name ?? p.code)
-                        : undefined
-                    }
-                  />
+                  <button onClick={() => onEdit(p)} className="text-navy-600 hover:text-navy-800">
+                    <Edit2 className="w-4 h-4" />
+                  </button>
                 </td>
               </tr>
             ))

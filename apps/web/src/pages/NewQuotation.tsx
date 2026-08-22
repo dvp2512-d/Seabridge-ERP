@@ -1,9 +1,4 @@
-// New Quotation Page with Automatic Costing Calculator
-import { useState, useEffect, useMemo } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
-import toast from 'react-hot-toast';
-import {
+// New Quotation Page with Automatic Costing Calculatorimport { useState, useEffect, useMemo } from 'react';import { useNavigate, useSearchParams } from 'react-router-dom';import { useQuery, useMutation } from '@tanstack/react-query';import toast from 'react-hot-toast';import {
   quotationsApi,
   inquiriesApi,
   buyersApi,
@@ -11,12 +6,7 @@ import {
   productsApi,
   chaApi,
   transportersApi,
-} from '@/lib/api';
-import PageHeader from '@/components/ui/PageHeader';
-import Modal from '@/components/ui/Modal';
-import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
-import { formatCurrency, cn } from '@/lib/utils';
-import {
+} from '@/lib/api';import PageHeader from '@/components/ui/PageHeader';import Modal from '@/components/ui/Modal';import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';import { formatCurrency, cn } from '@/lib/utils';import {
   Plus,
   Trash2,
   Calculator,
@@ -68,11 +58,6 @@ export default function NewQuotation() {
     date.setDate(date.getDate() + 30);
     return date.toISOString().split('T')[0];
   });
-  // Shipping details
-  const [dispatchMethod, setDispatchMethod] = useState('');
-  const [shipmentType, setShipmentType] = useState('');
-  const [portOfLoadingId, setPortOfLoadingId] = useState('');
-  const [portOfDischargeId, setPortOfDischargeId] = useState('');
   const [paymentTerms, setPaymentTerms] = useState('');
   const [deliveryTerms, setDeliveryTerms] = useState('');
   const [notes, setNotes] = useState('');
@@ -95,49 +80,6 @@ export default function NewQuotation() {
     queryKey: ['dropdowns'],
     queryFn: () => masterApi.getDropdowns(),
   });
-
-  const { data: portsData } = useQuery({
-    queryKey: ['ports'],
-    queryFn: () => masterApi.getPorts({ limit: 500 }),
-  });
-
-  /**
-   * Ports relevant to the chosen dispatch method. Port.type is SEA, AIR or LAND,
-   * so sending by air should not offer sea ports.
-   *
-   * Ports with no type recorded are always kept, otherwise a gap in master data
-   * would silently make a port unselectable.
-   */
-  const relevantPorts = useMemo(() => {
-    const all: any[] = portsData?.data?.data || [];
-    const wanted: Record<string, string> = {
-      Sea: 'SEA',
-      Air: 'AIR',
-      Road: 'LAND',
-      Rail: 'LAND',
-      Courier: 'AIR',
-    };
-    const type = wanted[dispatchMethod];
-    if (!type) return all;
-    return all.filter((p) => !p.type || p.type === type);
-  }, [portsData, dispatchMethod]);
-
-  const portOptions = useMemo(
-    () =>
-      relevantPorts.map((p: any) => ({
-        value: p.id,
-        label: `${p.name} (${p.code})${p.country ? ` - ${p.country.name}` : ''}`,
-      })),
-    [relevantPorts]
-  );
-
-  // Clear a port that the new dispatch method no longer offers, so a stale
-  // selection cannot be submitted invisibly.
-  useEffect(() => {
-    const ids = new Set(relevantPorts.map((p: any) => p.id));
-    if (portOfLoadingId && !ids.has(portOfLoadingId)) setPortOfLoadingId('');
-    if (portOfDischargeId && !ids.has(portOfDischargeId)) setPortOfDischargeId('');
-  }, [relevantPorts, portOfLoadingId, portOfDischargeId]);
 
   const { data: buyersData } = useQuery({
     queryKey: ['buyers-list'],
@@ -196,12 +138,8 @@ export default function NewQuotation() {
     const itemsSubtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
     const itemsCost = items.reduce((sum, item) => sum + item.totalCost, 0);
     const additionalCostsTotal = additionalCosts.reduce((sum, cost) => sum + cost.amount, 0);
-
-    // Additional costs sit under total cost and are billed on to the buyer, but
-    // they do not earn margin. Margin comes from the line items only, so adding
-    // a shipment cost never reduces it.
     const totalCost = itemsCost + additionalCostsTotal;
-    const totalMargin = itemsSubtotal - itemsCost;
+    const totalMargin = itemsSubtotal - totalCost;
     const marginPercent = itemsSubtotal > 0 ? (totalMargin / itemsSubtotal) * 100 : 0;
 
     return {
@@ -211,7 +149,7 @@ export default function NewQuotation() {
       totalCost,
       totalMargin,
       marginPercent,
-      grandTotal: itemsSubtotal + additionalCostsTotal,
+      grandTotal: itemsSubtotal,
     };
   }, [items, additionalCosts]);
 
@@ -247,11 +185,6 @@ export default function NewQuotation() {
       currencyId,
       incotermId,
       validUntil,
-      // Shipping details
-      dispatchMethod: dispatchMethod || undefined,
-      shipmentType: shipmentType || undefined,
-      portOfLoadingId: portOfLoadingId || undefined,
-      portOfDischargeId: portOfDischargeId || undefined,
       paymentTerms,
       deliveryTerms,
       notes,
@@ -344,45 +277,6 @@ export default function NewQuotation() {
                   type="date"
                   value={validUntil}
                   onChange={(e) => setValidUntil(e.target.value)}
-                />
-                <SelectField
-                  label="Method of Dispatch"
-                  value={dispatchMethod}
-                  onChange={(e) => setDispatchMethod(e.target.value)}
-                  options={[
-                    { value: 'Sea', label: 'Sea' },
-                    { value: 'Air', label: 'Air' },
-                    { value: 'Road', label: 'Road' },
-                    { value: 'Rail', label: 'Rail' },
-                    { value: 'Courier', label: 'Courier' },
-                  ]}
-                  placeholder="Select Dispatch Method"
-                />
-                <SelectField
-                  label="Type of Shipment"
-                  value={shipmentType}
-                  onChange={(e) => setShipmentType(e.target.value)}
-                  options={[
-                    { value: 'FCL', label: 'FCL (Full Container Load)' },
-                    { value: 'LCL', label: 'LCL (Less than Container Load)' },
-                    { value: 'Bulk', label: 'Bulk' },
-                    { value: 'Sample Shipment', label: 'Sample Shipment' },
-                  ]}
-                  placeholder="Select Shipment Type"
-                />
-                <SelectField
-                  label="Port of Loading"
-                  value={portOfLoadingId}
-                  onChange={(e) => setPortOfLoadingId(e.target.value)}
-                  options={portOptions}
-                  placeholder="Select Port of Loading"
-                />
-                <SelectField
-                  label="Port of Discharge"
-                  value={portOfDischargeId}
-                  onChange={(e) => setPortOfDischargeId(e.target.value)}
-                  options={portOptions}
-                  placeholder="Select Port of Discharge"
                 />
                 <FormField
                   label="Payment Terms"
@@ -859,7 +753,7 @@ function ItemCostingModal({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4 mt-3">
+          <div className="mt-3">
             <FormField
               label="Supplier Price (per unit)"
               required
@@ -869,25 +763,26 @@ function ItemCostingModal({
               onChange={(e) => setFormData({ ...formData, supplierPrice: e.target.value })}
               placeholder="Cost from supplier"
             />
+          </div>
+        </div>
+
+        {/* Additional Cost, Margin & Pricing */}
+        <div className="bg-green-50 rounded-lg p-4">
+          <h3 className="font-semibold text-green-900 mb-3 flex items-center gap-2">
+            <Percent className="w-5 h-5" />
+            Additional Cost, Margin &amp; Selling Price
+          </h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <FormField
               label="Additional Cost (per unit)"
               type="number"
               step="0.01"
+              min={0}
               value={formData.additionalCost}
               onChange={(e) => setFormData({ ...formData, additionalCost: e.target.value })}
-              placeholder="Packaging, handling..."
-              hint="Packaging, processing, etc."
+              placeholder="0.00"
+              hint="Packaging, handling, processing"
             />
-          </div>
-        </div>
-
-        {/* Margin & Pricing */}
-        <div className="bg-green-50 rounded-lg p-4">
-          <h3 className="font-semibold text-green-900 mb-3 flex items-center gap-2">
-            <Percent className="w-5 h-5" />
-            Margin & Selling Price
-          </h3>
-          <div className="grid grid-cols-3 gap-4">
             <FormField
               label="Margin %"
               type="number"
@@ -903,6 +798,9 @@ function ItemCostingModal({
               <div className="input bg-gray-100 font-bold text-green-700">
                 {formatCurrency(calculations.unitPrice, currency?.code)}
               </div>
+              <p className="mt-1 text-sm text-gray-500">
+                Cost {formatCurrency(calculations.unitCost, currency?.code)}/unit
+              </p>
             </div>
             <div>
               <label className="label">Total Price</label>
@@ -984,22 +882,16 @@ function AddCostModal({
   });
 
   const handleSave = () => {
-    if (!formData.description.trim()) {
-      toast.error('Please enter a description');
+    if (!formData.description || !formData.amount) {
+      toast.error('Please fill in all fields');
       return;
     }
-    // "0" is truthy as a string, so an explicit numeric check is needed or a
-    // zero-value row gets added and clutters the quotation.
-    const amount = parseFloat(formData.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      toast.error('Amount must be greater than zero');
-      return;
-    }
+
     onSave({
       id: crypto.randomUUID(),
       costType: formData.costType,
       description: formData.description,
-      amount,
+      amount: parseFloat(formData.amount),
       currency: currency?.code || 'USD',
     });
   };

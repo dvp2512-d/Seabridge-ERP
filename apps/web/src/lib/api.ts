@@ -73,12 +73,12 @@ export function getApiErrorMessage(error: any, fallback = 'Something went wrong'
 export const authApi = {
   login: (email: string, password: string) =>
     api.post('/auth/login', { email, password }),
-
+  
+  register: (data: { email: string; password: string; firstName: string; lastName: string; role?: string }) =>
+    api.post('/auth/register', data),
+  
   me: () => api.get('/auth/me'),
-
-  updateProfile: (data: { firstName: string; lastName: string; phone?: string }) =>
-    api.put('/auth/me', data),
-
+  
   changePassword: (currentPassword: string, newPassword: string) =>
     api.post('/auth/change-password', { currentPassword, newPassword }),
 };
@@ -219,133 +219,8 @@ export const ordersApi = {
   update: (id: string, data: any) => api.put(`/orders/${id}`, data),
   addProcurement: (id: string, data: any) => api.post(`/orders/${id}/procurements`, data),
   addShipment: (id: string, data: any) => api.post(`/orders/${id}/shipments`, data),
-  /** Update a shipment - status, container, vessel, BL, dates */
-  updateShipment: (orderId: string, shipmentId: string, data: any) =>
-    api.put(`/orders/${orderId}/shipments/${shipmentId}`, data),
   updateDocument: (orderId: string, docId: string, data: any) => 
     api.put(`/orders/${orderId}/documents/${docId}`, data),
-  /** Packing List PDF, rendered from the Packing List template */
-  downloadPackingList: (id: string) =>
-    api.get(`/orders/${id}/packing-list`, { responseType: 'blob' }),
-  /** Record cartons and net/gross weights against an order line */
-  updateItemPacking: (orderId: string, itemId: string, data: any) =>
-    api.put(`/orders/${orderId}/items/${itemId}/packing`, data),
-};
-
-// ============================================
-// EXCHANGE RATES API
-// ============================================
-
-export const exchangeRatesApi = {
-  /** Rates in force on a date, one row per currency */
-  current: (params?: { date?: string; direction?: 'EXPORT' | 'IMPORT' }) =>
-    api.get('/exchange-rates/current', { params }),
-  history: (currencyId: string) => api.get(`/exchange-rates/history/${currencyId}`),
-  /** Record a CBIC notification: one effective date, many currency rates */
-  createNotification: (data: any) => api.post('/exchange-rates/notification', data),
-  update: (id: string, data: any) => api.put(`/exchange-rates/${id}`, data),
-  remove: (id: string) => api.delete(`/exchange-rates/${id}`),
-  /** Which currencies cannot currently be converted */
-  coverage: (date?: string) => api.get('/exchange-rates/coverage', { params: { date } }),
-};
-
-// ============================================
-// RECORD LIFECYCLE
-// ============================================
-
-/**
- * Deactivate, reactivate and cancel.
- *
- * Master data deactivates because foreign keys are RESTRICT - a hard delete of a
- * product that appears on any order fails at the database. Business documents
- * cancel because their numbers appear on customs paperwork. Only drafts and
- * internal records really delete.
- */
-export const lifecycleApi = {
-  /** What deactivating would affect, for the confirmation dialog */
-  preview: (resource: string, id: string) =>
-    api.get(`/lifecycle/${resource}/${id}/preview`),
-  deactivate: (resource: string, id: string) =>
-    api.put(`/lifecycle/${resource}/${id}/deactivate`),
-  reactivate: (resource: string, id: string) =>
-    api.put(`/lifecycle/${resource}/${id}/reactivate`),
-
-  /**
-   * Permanent deletion of business records, founder only.
-   *
-   * These cascade: deleting an invoice removes its payments, deleting an order
-   * removes its invoices and their payments. previewDelete reports exactly what
-   * will go so the confirmation can list it.
-   */
-  previewDelete: (resource: string, id: string) =>
-    api.get(`/records/${resource}/${id}/preview`),
-  deleteRecord: (resource: string, id: string) => api.delete(`/records/${resource}/${id}`),
-
-  reactivateUser: (id: string) => api.put(`/users/${id}/reactivate`),
-};
-
-// ============================================
-// EXPENSES, TASKS, AUDIT
-// ============================================
-
-export const expensesApi = {
-  list: (params?: any) => api.get('/expenses', { params }),
-  get: (id: string) => api.get(`/expenses/${id}`),
-  create: (data: any) => api.post('/expenses', data),
-  update: (id: string, data: any) => api.put(`/expenses/${id}`, data),
-  setStatus: (id: string, status: string) => api.put(`/expenses/${id}/status`, { status }),
-  remove: (id: string) => api.delete(`/expenses/${id}`),
-  options: () => api.get('/expenses/meta/options'),
-};
-
-/**
- * Other Income. Every figure returned is already in INR - the server converts on
- * write, so no client ever sums a foreign-currency amount.
- */
-export const incomeApi = {
-  list: (params?: any) => api.get('/income', { params }),
-  get: (id: string) => api.get(`/income/${id}`),
-  create: (data: any) => api.post('/income', data),
-  update: (id: string, data: any) => api.put(`/income/${id}`, data),
-  setStatus: (id: string, status: string) => api.patch(`/income/${id}/status`, { status }),
-  remove: (id: string) => api.delete(`/income/${id}`),
-  options: () => api.get('/income/meta/options'),
-  /** Suggested forex gain from an invoice's booked and realised rates */
-  forexGain: (invoiceId: string) => api.get(`/income/forex-gain/${invoiceId}`),
-};
-
-export const tasksApi = {
-  list: (params?: any) => api.get('/tasks', { params }),
-  get: (id: string) => api.get(`/tasks/${id}`),
-  create: (data: any) => api.post('/tasks', data),
-  update: (id: string, data: any) => api.put(`/tasks/${id}`, data),
-  remove: (id: string) => api.delete(`/tasks/${id}`),
-  options: () => api.get('/tasks/meta/options'),
-};
-
-export const auditApi = {
-  /** Read-only: entries are written by middleware, never through the API */
-  list: (params?: any) => api.get('/audit', { params }),
-  forEntity: (entityType: string, entityId: string) =>
-    api.get(`/audit/entity/${entityType}/${entityId}`),
-};
-
-export const usersApi = {
-  list: (params?: any) => api.get('/users', { params }),
-  get: (id: string) => api.get(`/users/${id}`),
-  create: (data: any) => api.post('/users', data),
-  update: (id: string, data: any) => api.put(`/users/${id}`, data),
-  remove: (id: string) => api.delete(`/users/${id}`),
-};
-
-// ============================================
-// SETTINGS API
-// ============================================
-
-export const settingsApi = {
-  /** Exporter details printed on every outgoing document */
-  getCompany: () => api.get('/settings/company'),
-  updateCompany: (data: any) => api.put('/settings/company', data),
 };
 
 // ============================================

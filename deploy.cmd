@@ -138,63 +138,6 @@ echo [2/7] Preparing configuration (.env)
 
 if exist ".env" (
   echo       [OK] .env already exists - leaving it untouched
-
-  REM An existing .env is never overwritten, so it can still hold the
-  REM placeholders from .env.example or the weak defaults this repo once
-  REM published. Placeholders could never have worked, so fail on those.
-  REM Known-weak real values are warned about instead of failed, because the
-  REM database was created with them and rotating needs a deliberate step.
-  findstr /C:"CHANGE_ME" ".env" >nul 2>&1
-  if not errorlevel 1 (
-    echo.
-    echo       ERROR: .env still contains CHANGE_ME placeholders.
-    echo.
-    echo       Edit .env and set POSTGRES_PASSWORD and JWT_SECRET to real
-    echo       values, or delete .env and re-run this script to have strong
-    echo       ones generated for you.
-    exit /b 1
-  )
-
-  findstr /C:"seabridge123" ".env" >nul 2>&1
-  if not errorlevel 1 (
-    echo.
-    echo       [!] WARNING: .env uses a password that was published in this
-    echo           repository's history. Anyone who has seen the repo knows it.
-    echo.
-    echo           To rotate safely, back up your data first:
-    echo             docker compose exec -T postgres pg_dump -U seabridge seabridge_erp ^> backup.sql
-    echo           then change POSTGRES_PASSWORD in .env, and run:
-    echo             deploy.cmd fresh
-    echo           which recreates the database with the new password.
-    echo.
-    echo           Continuing in 10 seconds. Press Ctrl+C to stop.
-    timeout /t 10 >nul 2>&1
-  )
-
-  REM Reject known test/development credentials that must never reach production.
-  REM These values appear in the repository's local .env and seed files.
-  findstr /C:"testpass123" ".env" >nul 2>&1
-  if not errorlevel 1 (
-    echo.
-    echo       ERROR: .env contains the test credential "testpass123".
-    echo.
-    echo       This value is checked into the repository and is publicly known.
-    echo       Delete .env and re-run this script to generate a strong password,
-    echo       or manually set POSTGRES_PASSWORD and DATABASE_URL to a real value.
-    exit /b 1
-  )
-
-  REM Match testsecret... prefix used by the local verification .env
-  findstr /C:"testsecret" ".env" >nul 2>&1
-  if not errorlevel 1 (
-    echo.
-    echo       ERROR: .env contains a test JWT secret ("testsecret...").
-    echo.
-    echo       This value is publicly known. Delete .env and re-run this script
-    echo       to generate a strong JWT_SECRET, or set it manually to at least
-    echo       32 random characters.
-    exit /b 1
-  )
 ) else (
   REM Generate cryptographically strong secrets. PowerShell ships with Windows,
   REM so this keeps the script to a single file without needing Node.js.
@@ -404,14 +347,11 @@ echo   API health:     http://localhost:4000/health
 echo.
 if "%DO_SEED%"=="1" (
   echo   Sign in with:
-  echo     Email:    founder@seabridge.com
-  echo     Password: shown in the seed output above
+  echo     founder@seabridge.com  /  admin123   ^(Founder - full access^)
+  echo     hiren@seabridge.com    /  admin123   ^(Sales^)
   echo.
-  echo   If you missed the password, run:  deploy.cmd reset
-  echo   which wipes the database and re-seeds with a new random password.
-  echo.
-  echo   Change the password on first login:
-  echo     Settings -^> Profile -^> Change Password
+  echo   IMPORTANT: change BOTH passwords now - Settings -^> Profile -^> Change Password
+  echo              These credentials are public in the source code.
   echo.
 )
 echo   Commands

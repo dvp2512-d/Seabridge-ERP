@@ -62,8 +62,8 @@ router.get('/:id', can('BUYER_VIEW'), async (req, res, next) => {
         communications: { take: 10, orderBy: { createdAt: 'desc' }, include: { user: { select: { firstName: true, lastName: true } } } },
         inquiries: { take: 10, orderBy: { createdAt: 'desc' }, select: { id: true, inquiryNumber: true, stage: true, expectedValue: true, createdAt: true } },
         quotations: { take: 10, orderBy: { createdAt: 'desc' }, select: { id: true, quotationNumber: true, status: true, grandTotal: true, createdAt: true } },
-        orders: { take: 10, orderBy: { createdAt: 'desc' }, select: { id: true, orderNumber: true, status: true, totalValue: true, currency: true, orderDate: true, createdAt: true } },
-        invoices: { take: 10, orderBy: { createdAt: 'desc' }, select: { id: true, invoiceNumber: true, status: true, totalAmount: true, balanceAmount: true, invoiceDate: true, dueDate: true } },
+        orders: { take: 10, orderBy: { createdAt: 'desc' }, select: { id: true, orderNumber: true, status: true, totalValue: true, createdAt: true } },
+        invoices: { take: 10, orderBy: { createdAt: 'desc' }, select: { id: true, invoiceNumber: true, status: true, totalAmount: true, balanceAmount: true } },
       },
     });
 

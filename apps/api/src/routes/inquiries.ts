@@ -4,7 +4,6 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
-import { emitEvent } from '../services/eventService';
 
 const router: Router = Router();
 
@@ -114,8 +113,6 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
       },
     });
 
-    emitEvent('inquiry.created', inquiry);
-    
     res.status(201).json({ success: true, data: inquiry });
   } catch (error) {
     next(error);

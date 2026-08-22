@@ -26,13 +26,12 @@ FormField.displayName = 'FormField';
 interface SelectFieldProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
   label: string;
   error?: string;
-  hint?: string;
   options: { value: string; label: string }[];
   placeholder?: string;
 }
 
 export const SelectField = forwardRef<HTMLSelectElement, SelectFieldProps>(
-  ({ label, error, hint, options, placeholder, className, required, ...props }, ref) => (
+  ({ label, error, options, placeholder, className, required, ...props }, ref) => (
     <div className={className}>
       <label className="label">
         {label}
@@ -45,7 +44,6 @@ export const SelectField = forwardRef<HTMLSelectElement, SelectFieldProps>(
         ))}
       </select>
       {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
-      {hint && !error && <p className="mt-1 text-sm text-gray-500">{hint}</p>}
     </div>
   )
 );
@@ -55,11 +53,10 @@ SelectField.displayName = 'SelectField';
 interface TextareaFieldProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
   label: string;
   error?: string;
-  hint?: string;
 }
 
 export const TextareaField = forwardRef<HTMLTextAreaElement, TextareaFieldProps>(
-  ({ label, error, hint, className, required, ...props }, ref) => (
+  ({ label, error, className, required, ...props }, ref) => (
     <div className={className}>
       <label className="label">
         {label}
@@ -67,7 +64,6 @@ export const TextareaField = forwardRef<HTMLTextAreaElement, TextareaFieldProps>
       </label>
       <textarea ref={ref} className={cn('input', error && 'border-red-500')} {...props} />
       {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
-      {hint && !error && <p className="mt-1 text-sm text-gray-500">{hint}</p>}
     </div>
   )
 );

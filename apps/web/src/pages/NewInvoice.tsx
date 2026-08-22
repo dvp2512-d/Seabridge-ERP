@@ -20,7 +20,7 @@ export default function NewInvoice() {
   const preselectedOrderId = searchParams.get('orderId');
 
   const [orderId, setOrderId] = useState(preselectedOrderId || '');
-  const [type, setType] = useState<'EXPORT' | 'PROFORMA' | 'SAMPLE'>('EXPORT');
+  const [type, setType] = useState<'EXPORT' | 'PROFORMA'>('EXPORT');
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState(() => {
     const date = new Date();
@@ -217,11 +217,9 @@ export default function NewInvoice() {
                   value={type}
                   onChange={(e) => setType(e.target.value as any)}
                   options={[
-                    { value: 'EXPORT', label: 'Commercial Invoice' },
+                    { value: 'EXPORT', label: 'Export Invoice' },
                     { value: 'PROFORMA', label: 'Proforma Invoice' },
-                    { value: 'SAMPLE', label: 'Sample Invoice (not for sale)' },
                   ]}
-                  hint="Each type prints its own document template"
                 />
                 <FormField
                   label="Invoice Date"
@@ -312,7 +310,7 @@ export default function NewInvoice() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Type</span>
-                      <span className="font-medium">{type === 'PROFORMA' ? 'Proforma' : type === 'SAMPLE' ? 'Sample' : 'Commercial'}</span>
+                      <span className="font-medium">{type === 'PROFORMA' ? 'Proforma' : 'Export'}</span>
                     </div>
                   </div>
 

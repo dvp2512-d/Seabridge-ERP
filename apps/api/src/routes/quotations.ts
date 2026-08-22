@@ -4,9 +4,7 @@ import { prisma, Prisma, InquiryStage } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode, calculateMarginPercent } from '../utils/helpers';
-import { buildQuotationDocument } from '../services/exportDocuments';
-import { buildRateMap } from '../services/exchangeRateService';
-import { emitEvent } from '../services/eventService';
+import { generateQuotationPDF } from '../services/pdfService';
 import { createOrderFromQuotation } from '../services/orderService';
 
 const router: Router = Router();
@@ -28,7 +26,7 @@ router.get('/', can('SALES_VIEW'), async (req, res, next) => {
       ];
     }
 
-    const [quotations, total, statusGroups] = await Promise.all([
+    const [quotations, total, statusGroups, valueTotals] = await Promise.all([
       prisma.quotation.findMany({
         where,
         include: {
@@ -43,32 +41,19 @@ router.get('/', can('SALES_VIEW'), async (req, res, next) => {
       }),
       prisma.quotation.count({ where }),
       // Status counts for the whole filtered set so the summary cards are correct
-      // even when the list is paginated. Grouped by currency too, since quotation
-      // totals in different currencies cannot be added directly.
+      // even when the list is paginated.
       prisma.quotation.groupBy({
-        by: ['status', 'currencyId'],
+        by: ['status'],
         where,
         _count: { _all: true },
         _sum: { grandTotal: true },
       }),
+      prisma.quotation.aggregate({ where, _sum: { grandTotal: true } }),
     ]);
 
-    // Fold the currency dimension away, converting into the base currency.
-    const { base, rates } = await buildRateMap(new Date());
-
     const countByStatus: Record<string, number> = {};
-    let totalValue = 0;
-    let unconverted = 0;
-
     for (const group of statusGroups) {
-      countByStatus[group.status] = (countByStatus[group.status] ?? 0) + group._count._all;
-
-      const rate = rates.get(group.currencyId);
-      if (rate === undefined) {
-        unconverted += group._count._all;
-        continue;
-      }
-      totalValue += Number(group._sum.grandTotal ?? 0) * rate;
+      countByStatus[group.status] = group._count._all;
     }
 
     res.json({
@@ -76,11 +61,8 @@ router.get('/', can('SALES_VIEW'), async (req, res, next) => {
       data: quotations,
       pagination: { page: Number(page), limit: Number(limit), total },
       summary: {
-        // totalValue is in this currency, not each quotation's own.
-        baseCurrency: base,
-        unconvertedRecords: unconverted,
         countByStatus,
-        totalValue: Math.round((totalValue + Number.EPSILON) * 100) / 100,
+        totalValue: Number(valueTotals._sum.grandTotal ?? 0),
       },
     });
   } catch (error) {
@@ -98,8 +80,6 @@ router.get('/:id', can('SALES_VIEW'), async (req, res, next) => {
         inquiry: { select: { id: true, inquiryNumber: true } },
         currency: true,
         incoterm: true,
-        portOfLoading: { include: { country: true } },
-        portOfDischarge: { include: { country: true } },
         items: { include: { product: true } },
         costs: true,
         // Needed so the UI can tell whether this quotation is already an order.
@@ -123,11 +103,6 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
       currencyId: z.string().min(1),
       incotermId: z.string().min(1),
       validUntil: z.string().transform(s => new Date(s)),
-      // Shipping details
-      dispatchMethod: z.string().optional(),
-      shipmentType: z.string().optional(),
-      portOfLoadingId: z.string().optional(),
-      portOfDischargeId: z.string().optional(),
       deliveryTerms: z.string().optional(),
       paymentTerms: z.string().optional(),
       notes: z.string().optional(),
@@ -156,7 +131,7 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
 
     // Calculate totals
     let subtotal = 0;
-    let itemsCost = 0;
+    let totalCost = 0;
     const processedItems = items.map(item => {
       const itemTotalCost = item.unitCost * item.quantity;
       const itemTotalPrice = item.unitPrice * item.quantity;
@@ -164,7 +139,7 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
       const marginPercent = calculateMarginPercent(itemTotalCost, itemTotalPrice);
 
       subtotal += itemTotalPrice;
-      itemsCost += itemTotalCost;
+      totalCost += itemTotalCost;
 
       return {
         ...item,
@@ -175,15 +150,12 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
       };
     });
 
+    // Add other costs
     const additionalCosts = costs?.reduce((sum, c) => sum + c.amount, 0) || 0;
+    totalCost += additionalCosts;
 
-    // Additional costs (CHA, transport, insurance...) are recorded under total
-    // cost and billed on to the buyer, but they do NOT earn margin. Margin comes
-    // from the line items only, so adding a shipment cost never reduces it.
-    const totalCost = itemsCost + additionalCosts;
-    const totalMargin = subtotal - itemsCost;
-    const grandTotal = subtotal + additionalCosts;
-    const marginPercent = calculateMarginPercent(itemsCost, subtotal);
+    const totalMargin = subtotal - totalCost;
+    const marginPercent = calculateMarginPercent(totalCost, subtotal);
 
     const quotation = await prisma.quotation.create({
       data: {
@@ -193,7 +165,7 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
         totalCost,
         totalMargin,
         marginPercent,
-        grandTotal,
+        grandTotal: subtotal,
         items: { create: processedItems },
         costs: costs ? { create: costs } : undefined,
       },
@@ -214,7 +186,6 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
       });
     }
 
-    emitEvent('quotation.created', quotation);
     res.status(201).json({ success: true, data: quotation });
   } catch (error) {
     next(error);
@@ -227,11 +198,6 @@ router.put('/:id', can('SALES_MANAGE'), async (req, res, next) => {
     const schema = z.object({
       status: z.enum(['DRAFT', 'SENT', 'REVISED', 'ACCEPTED', 'REJECTED', 'EXPIRED']).optional(),
       validUntil: z.string().transform(s => new Date(s)).optional(),
-      // Shipping details
-      dispatchMethod: z.string().nullable().optional(),
-      shipmentType: z.string().nullable().optional(),
-      portOfLoadingId: z.string().nullable().optional(),
-      portOfDischargeId: z.string().nullable().optional(),
       deliveryTerms: z.string().optional(),
       paymentTerms: z.string().optional(),
       notes: z.string().optional(),
@@ -276,7 +242,7 @@ router.patch('/:id/status', can('SALES_MANAGE'), async (req, res, next) => {
 
     const existing = await prisma.quotation.findUnique({
       where: { id: req.params.id },
-      select: { id: true, notes: true, status: true },
+      select: { id: true, notes: true },
     });
     if (!existing) throw new NotFoundError('Quotation');
 
@@ -293,15 +259,6 @@ router.patch('/:id/status', can('SALES_MANAGE'), async (req, res, next) => {
       data: updateData,
       include: { buyer: true, currency: true, incoterm: true },
     });
-
-    // Announce the transitions worth acting on. Guarded on the previous status so
-    // re-saving an already-sent quotation does not re-fire a webhook.
-    if (status === 'SENT' && existing.status !== 'SENT') {
-      emitEvent('quotation.sent', quotation);
-    }
-    if (status === 'ACCEPTED' && existing.status !== 'ACCEPTED') {
-      emitEvent('quotation.accepted', quotation);
-    }
 
     // Keep the linked inquiry's pipeline stage in sync.
     if (quotation.inquiryId) {
@@ -338,12 +295,6 @@ router.post('/:id/convert-to-order', can('SALES_MANAGE'), async (req, res, next)
     const schema = z.object({
       expectedDeliveryDate: z.string().optional(),
       poNumber: z.string().optional(),
-        // Printed in the header of every export document
-        dispatchMethod: z.string().optional(),
-        shipmentType: z.string().optional(),
-        portOfLoadingId: z.string().optional(),
-        portOfDischargeId: z.string().optional(),
-        variationPercent: z.number().min(0).max(100).optional(),
       notes: z.string().optional(),
     });
 
@@ -365,15 +316,9 @@ router.post('/:id/convert-to-order', can('SALES_MANAGE'), async (req, res, next)
         ? new Date(validation.data.expectedDeliveryDate)
         : undefined,
       poNumber: validation.data.poNumber,
-      dispatchMethod: validation.data.dispatchMethod,
-      shipmentType: validation.data.shipmentType,
-      portOfLoadingId: validation.data.portOfLoadingId,
-      portOfDischargeId: validation.data.portOfDischargeId,
-      variationPercent: validation.data.variationPercent,
       notes: validation.data.notes,
     });
 
-    emitEvent('order.created', order);
     res.status(201).json({ success: true, data: order });
   } catch (error) {
     next(error);
@@ -389,8 +334,6 @@ router.get('/:id/pdf', can('SALES_VIEW'), async (req, res, next) => {
         buyer: { include: { country: true, contacts: { where: { isPrimary: true } } } },
         currency: true,
         incoterm: true,
-        portOfLoading: { include: { country: true } },
-        portOfDischarge: { include: { country: true } },
         items: { include: { product: true } },
         costs: true,
       },
@@ -398,16 +341,7 @@ router.get('/:id/pdf', can('SALES_VIEW'), async (req, res, next) => {
 
     if (!quotation) throw new NotFoundError('Quotation');
 
-    const company = await prisma.companyProfile.findFirst();
-    if (!company) {
-      throw new AppError(
-        'Company profile is not set up. Seed the database or add it in Settings before generating documents.',
-        400
-      );
-    }
-
-    // Rendered from the QUOTE FORMATE sheet of MASTER DRAFT.xlsx
-    const pdfBuffer = await buildQuotationDocument(quotation, company);
+    const pdfBuffer = await generateQuotationPDF(quotation);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${quotation.quotationNumber}.pdf"`);

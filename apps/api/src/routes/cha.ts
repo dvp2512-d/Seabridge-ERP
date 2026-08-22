@@ -25,8 +25,6 @@ router.get('/', can('MASTER_VIEW'), async (req, res, next) => {
 
     const chas = await prisma.cHA.findMany({
       where,
-      // Rates are included so quotations can offer them as selectable values.
-      include: { chaRates: { where: { isActive: true }, orderBy: { serviceType: 'asc' } } },
       orderBy: { name: 'asc' },
     });
 

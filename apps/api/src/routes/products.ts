@@ -68,10 +68,6 @@ router.post('/', can('MASTER_MANAGE'), async (req, res, next) => {
       categoryId: z.string().min(1),
       hsnCode: z.string().optional(),
       unit: z.string().optional(),
-      // Default packaging, used to prefill order lines and the Packing List
-      packageType: z.string().optional(),
-      packageNetWeight: z.number().positive().optional(),
-      packageGrossWeight: z.number().positive().optional(),
     });
 
     const validation = schema.safeParse(req.body);
@@ -99,10 +95,6 @@ router.put('/:id', can('MASTER_MANAGE'), async (req, res, next) => {
       categoryId: z.string().optional(),
       hsnCode: z.string().optional(),
       unit: z.string().optional(),
-      // Default packaging, used to prefill order lines and the Packing List
-      packageType: z.string().optional(),
-      packageNetWeight: z.number().positive().nullable().optional(),
-      packageGrossWeight: z.number().positive().nullable().optional(),
       isActive: z.boolean().optional(),
     });
 

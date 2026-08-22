@@ -7,7 +7,6 @@ import { quotationsApi } from '@/lib/api';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
-import { refreshAggregates } from '@/lib/queryKeys';
 import {
   ArrowLeft,
   FileText,
@@ -65,8 +64,6 @@ export default function QuotationDetail() {
       quotationsApi.updateStatus(id!, status, notes),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['quotation', id] });
-      // Totals and the dashboard read this data, so refresh them too
-      refreshAggregates(queryClient);
       toast.success('Status updated successfully');
       setShowStatusModal(false);
     },
@@ -117,13 +114,12 @@ export default function QuotationDetail() {
   // relation as an array so take the first entry if it exists.
   const linkedOrder = quotation.orders?.[0] ?? null;
 
-  // Calculate totals. Additional costs are recorded under total cost and billed
-  // on to the buyer, but they do not earn margin - margin is from line items only.
-  const itemsTotal = quotation.items?.reduce((sum: number, item: any) => sum + Number(item.totalPrice || 0), 0) || 0;
-  const itemsCost = quotation.items?.reduce((sum: number, item: any) => sum + Number(item.totalCost || 0), 0) || 0;
-  const additionalCosts = quotation.costs?.reduce((sum: number, cost: any) => sum + Number(cost.amount || 0), 0) || 0;
+  // Calculate totals
+  const itemsTotal = quotation.items?.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0) || 0;
+  const itemsCost = quotation.items?.reduce((sum: number, item: any) => sum + (item.totalCost || 0), 0) || 0;
+  const additionalCosts = quotation.costs?.reduce((sum: number, cost: any) => sum + (cost.amount || 0), 0) || 0;
   const totalCost = itemsCost + additionalCosts;
-  const margin = itemsTotal - itemsCost;
+  const margin = itemsTotal - totalCost;
   const marginPercent = itemsTotal > 0 ? (margin / itemsTotal) * 100 : 0;
 
   return (
@@ -546,42 +542,6 @@ function QuickInfoCard({ quotation }: { quotation: any }) {
             </div>
           </div>
         )}
-        {quotation.dispatchMethod && (
-          <div className="flex items-center gap-3">
-            <Package className="w-4 h-4 text-gray-400" />
-            <div>
-              <div className="text-xs text-gray-500">Method of Dispatch</div>
-              <div className="font-medium">{quotation.dispatchMethod}</div>
-            </div>
-          </div>
-        )}
-        {quotation.shipmentType && (
-          <div className="flex items-center gap-3">
-            <Package className="w-4 h-4 text-gray-400" />
-            <div>
-              <div className="text-xs text-gray-500">Type of Shipment</div>
-              <div className="font-medium">{quotation.shipmentType}</div>
-            </div>
-          </div>
-        )}
-        {quotation.portOfLoading && (
-          <div className="flex items-center gap-3">
-            <MapPin className="w-4 h-4 text-gray-400" />
-            <div>
-              <div className="text-xs text-gray-500">Port of Loading</div>
-              <div className="font-medium">{quotation.portOfLoading.name} ({quotation.portOfLoading.code})</div>
-            </div>
-          </div>
-        )}
-        {quotation.portOfDischarge && (
-          <div className="flex items-center gap-3">
-            <MapPin className="w-4 h-4 text-gray-400" />
-            <div>
-              <div className="text-xs text-gray-500">Port of Discharge</div>
-              <div className="font-medium">{quotation.portOfDischarge.name} ({quotation.portOfDischarge.code})</div>
-            </div>
-          </div>
-        )}
         {quotation.validUntil && new Date(quotation.validUntil) < new Date() && (
           <div className="flex items-center gap-3">
             <Clock className="w-4 h-4 text-red-400" />
@@ -755,10 +715,7 @@ function ConvertToOrderModal({
             <span className="text-green-700">Total Value:</span>
             <span className="font-medium">
               {formatCurrency(
-                // The order is created from the quotation's grand total, which
-                // includes additional costs - not just the line item subtotal.
-                quotation.grandTotal ??
-                  (quotation.items?.reduce((s: number, i: any) => s + Number(i.totalPrice || 0), 0) || 0),
+                quotation.items?.reduce((s: number, i: any) => s + (i.totalPrice || 0), 0) || 0,
                 quotation.currency?.code
               )}
             </span>

@@ -3,7 +3,6 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
 import { cn, getInitials } from '@/lib/utils';
 import { can, type Permission } from '@/lib/permissions';
-import Logo from '@/components/ui/Logo';
 import {
   LayoutDashboard,
   Users,
@@ -18,13 +17,10 @@ import {
   X,
   ChevronDown,
   Building2,
+  Ship,
   ClipboardList,
   Anchor,
   Database,
-  TrendingUp,
-  Receipt,
-  CheckSquare,
-  UserCog,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -52,11 +48,6 @@ const navigation: {
   { name: 'Orders', href: '/orders', icon: ShoppingCart, permission: 'OPERATIONS_VIEW' },
   { name: 'Invoices', href: '/invoices', icon: DollarSign, permission: 'FINANCE_VIEW' },
   { name: 'Master Data', href: '/master-data', icon: Database, permission: 'MASTER_MANAGE' },
-  { name: 'Exchange Rates', href: '/exchange-rates', icon: TrendingUp, permission: 'MASTER_VIEW' },
-  { name: 'Expenses', href: '/expenses', icon: Receipt, permission: 'FINANCE_VIEW' },
-  { name: 'Other Income', href: '/income', icon: TrendingUp, permission: 'FINANCE_VIEW' },
-  { name: 'Tasks', href: '/tasks', icon: CheckSquare, permission: 'OPERATIONS_VIEW' },
-  { name: 'Users', href: '/users', icon: UserCog, permission: 'SETTINGS_MANAGE' },
 ];
 
 export default function Layout({ children }: LayoutProps) {
@@ -97,13 +88,12 @@ export default function Layout({ children }: LayoutProps) {
       >
         {/* Logo */}
         <div className="flex items-center justify-between h-16 px-4 border-b border-navy-800 flex-shrink-0">
-          <Link
-            to="/"
-            className="flex items-center min-w-0"
-            onClick={() => setSidebarOpen(false)}
-          >
-            {/* The logo contains the company name, so no text label beside it. */}
-            <Logo className="h-10 max-w-[170px]" onDark alt="SeaBridge Exports - go to dashboard" />
+          <Link to="/" className="flex items-center gap-2" onClick={() => setSidebarOpen(false)}>
+            <Ship className="w-8 h-8 text-gold-500" />
+            <div>
+              <div className="text-lg font-bold text-white">SeaBridge</div>
+              <div className="text-xs text-navy-300">Founder OS</div>
+            </div>
           </Link>
           <button
             className="lg:hidden text-white"

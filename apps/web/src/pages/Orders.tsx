@@ -5,13 +5,10 @@ import { useNavigate } from 'react-router-dom';
 import { ordersApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { formatCurrency, formatDate, getStatusColor, isPastDue, cn } from '@/lib/utils';
-import UnconvertedNotice from '@/components/ui/UnconvertedNotice';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
-import RowActions from '@/components/ui/RowActions';
-import ConfirmDialog from '@/components/ui/ConfirmDialog';
-import { useLifecycleActions } from '@/hooks/useLifecycleActions';
 import {
   Search,
+  Eye,
   Package,
   Ship,
   CheckCircle,
@@ -31,12 +28,6 @@ const ORDER_STATUSES = [
 export default function Orders() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
-
-  // Deactivate / cancel flow, shared with every other list so the
-
-  // wording and confirmations stay consistent.
-
-  const lifecycle = useLifecycleActions(['orders']);
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
 
@@ -55,11 +46,6 @@ export default function Orders() {
   // Pipeline figures come from the API so they reflect all matching orders
   // rather than only the current page.
   const summary = data?.data?.summary;
-  // Summary money is converted into the company's base currency, so it must
-  // be labelled with that rather than each record's own currency.
-  const baseCode = summary?.baseCurrency?.code;
-  // Non-zero means some records had no exchange rate and are excluded.
-  const unconvertedRecords = summary?.unconvertedRecords ?? 0;
 
   const handleSearch = useDebouncedCallback((value: string) => {
     setSearch(value);
@@ -83,22 +69,6 @@ export default function Orders() {
 
   return (
     <div className="space-y-6">
-      {/* Confirmation for deactivate, cancel and delete */}
-      {lifecycle.dialog && (
-        <ConfirmDialog
-          isOpen
-          title={lifecycle.dialog.title}
-          message={lifecycle.dialog.message}
-          consequences={lifecycle.dialog.consequences}
-          tone={lifecycle.dialog.tone}
-          requireTyping={lifecycle.dialog.requireTyping}
-          confirmLabel={lifecycle.dialog.confirmLabel}
-          isPending={lifecycle.isPending}
-          onConfirm={lifecycle.confirm}
-          onCancel={lifecycle.dismiss}
-        />
-      )}
-      <UnconvertedNotice count={unconvertedRecords} baseCode={baseCode} />
       <PageHeader
         title="Export Orders"
         subtitle={`${pagination?.total || orders.length} orders • Track order lifecycle from confirmation to delivery`}
@@ -139,7 +109,7 @@ export default function Orders() {
             <TrendingUp className="w-4 h-4" />
             <span className="text-sm font-medium">Total Value</span>
           </div>
-          <div className="text-xl font-bold text-gray-900">{formatCurrency(stats.totalValue, baseCode)}</div>
+          <div className="text-xl font-bold text-gray-900">{formatCurrency(stats.totalValue)}</div>
         </div>
       </div>
 
@@ -257,17 +227,12 @@ export default function Orders() {
                       <DocProgress documents={order.documents} count={order._count?.documents} />
                     </td>
                     <td onClick={(e) => e.stopPropagation()}>
-                      <RowActions
-                        destructivePermission="RECORD_DELETE"
-                        viewHref={`/orders/${order.id}`}
-                        destructiveKind="delete"
-                        // Cancelling keeps the order number. Blocked once the goods
-                        // have shipped or an invoice exists, because from that
-                        // point the order records what actually happened.
-                        onDestructive={() =>
-                          lifecycle.request({ kind: 'delete', resource: 'orders' }, order.id, order.orderNumber)
-                        }
-                      />
+                      <button
+                        onClick={() => navigate(`/orders/${order.id}`)}
+                        className="text-navy-600 hover:text-navy-800 p-1"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
                     </td>
                   </tr>
                 );

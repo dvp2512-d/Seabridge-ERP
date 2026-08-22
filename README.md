@@ -1,4 +1,4 @@
-# SeaBridge
+# SeaBridge Founder OS
 
 **Master Enterprise Edition V1.0**
 
@@ -292,21 +292,14 @@ Present but **not finished** — do not depend on these yet:
 
 | Area | State |
 |---|---|
-| Automation rules | Fire on real events, but the only action is creating a task. No email or webhook action, and no condition matching. |
+| Automation rules | Stored by the API, but no visual builder and rules never fire |
+| Webhooks | Can be created and test-pinged, but business events do not trigger them |
 | API keys | Settings tab shows sample data only; not wired to real keys |
+| Expenses | Database table exists; no API routes or screen, so profitability excludes costs entered here |
+| Tasks | Shown on the dashboard; no screen to create or complete them |
+| User management | API works; no UI |
+| Audit log | Table exists; nothing writes to it yet |
 | Redis | Container runs; no code uses it |
-| Exchange rates | Entered by hand from the CBIC notification. There is no reliable machine-readable feed, so nothing fetches them automatically. |
-
-### Recently completed
-
-| Area | State |
-|---|---|
-| Webhooks | Fire on real events, signed with HMAC-SHA256 when a secret is set, every attempt logged, deactivated after 10 consecutive failures |
-| Expenses | Full API and screen, with an approval flow and currency-converted totals |
-| Tasks | Full API and screen, scoped by role, with overdue tracking |
-| User management | Screen for creating users and assigning roles |
-| Audit log | Written by middleware on every successful write, with credentials redacted |
-| Currency conversion | Aggregates convert into the base currency instead of adding different currencies together |
 
 ## 🔄 Business Flow
 

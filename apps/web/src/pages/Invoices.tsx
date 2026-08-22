@@ -6,11 +6,7 @@ import toast from 'react-hot-toast';
 import { invoicesApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { formatCurrency, formatDate, getStatusColor, downloadFile, isPastDue, cn } from '@/lib/utils';
-import UnconvertedNotice from '@/components/ui/UnconvertedNotice';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
-import RowActions from '@/components/ui/RowActions';
-import ConfirmDialog from '@/components/ui/ConfirmDialog';
-import { useLifecycleActions } from '@/hooks/useLifecycleActions';
 import {
   Search,
   Eye,
@@ -34,12 +30,6 @@ const INVOICE_STATUSES = [
 export default function Invoices() {
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
-
-  // Deactivate / cancel flow, shared with every other list so the
-
-  // wording and confirmations stay consistent.
-
-  const lifecycle = useLifecycleActions(['invoices']);
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
 
@@ -64,11 +54,6 @@ export default function Invoices() {
   // Summary comes from the API so the figures cover every matching invoice,
   // not just the rows on the current page.
   const summary = data?.data?.summary;
-  // Summary money is converted into the company's base currency, so it must
-  // be labelled with that rather than each record's own currency.
-  const baseCode = summary?.baseCurrency?.code;
-  // Non-zero means some records had no exchange rate and are excluded.
-  const unconvertedRecords = summary?.unconvertedRecords ?? 0;
   const receivables = receivablesData?.data?.data;
 
   const handleSearch = useDebouncedCallback((value: string) => {
@@ -100,22 +85,6 @@ export default function Invoices() {
 
   return (
     <div className="space-y-6">
-      {/* Confirmation for deactivate, cancel and delete */}
-      {lifecycle.dialog && (
-        <ConfirmDialog
-          isOpen
-          title={lifecycle.dialog.title}
-          message={lifecycle.dialog.message}
-          consequences={lifecycle.dialog.consequences}
-          tone={lifecycle.dialog.tone}
-          requireTyping={lifecycle.dialog.requireTyping}
-          confirmLabel={lifecycle.dialog.confirmLabel}
-          isPending={lifecycle.isPending}
-          onConfirm={lifecycle.confirm}
-          onCancel={lifecycle.dismiss}
-        />
-      )}
-      <UnconvertedNotice count={unconvertedRecords} baseCode={baseCode} />
       <PageHeader
         title="Invoices & Receivables"
         subtitle={`${pagination?.total || invoices.length} invoices • Manage billing and payments`}
@@ -135,7 +104,7 @@ export default function Invoices() {
             <span className="text-sm font-medium">Total Receivable</span>
           </div>
           <div className="text-2xl font-bold text-gray-900">
-            {formatCurrency(stats.totalReceivable, baseCode)}
+            {formatCurrency(stats.totalReceivable)}
           </div>
           <div className="text-xs text-gray-500 mt-1">
             {stats.overdue} overdue
@@ -147,7 +116,7 @@ export default function Invoices() {
             <span className="text-sm font-medium">Total Collected</span>
           </div>
           <div className="text-2xl font-bold text-gray-900">
-            {formatCurrency(stats.totalPaid, baseCode)}
+            {formatCurrency(stats.totalPaid)}
           </div>
           <div className="text-xs text-gray-500 mt-1">
             {stats.paid} invoices paid
@@ -315,21 +284,6 @@ export default function Invoices() {
                         >
                           <Download className="w-4 h-4" />
                         </button>
-                        <RowActions
-                        destructivePermission="RECORD_DELETE"
-                          destructiveKind="delete"
-                          // The invoice number appears on customs paperwork, so it
-                          // is voided rather than deleted. Blocked once any payment
-                          // exists, which would otherwise leave the buyer's ledger
-                          // showing money paid against nothing.
-                          onDestructive={() =>
-                            lifecycle.request(
-                              { kind: 'delete', resource: 'invoices' },
-                              invoice.id,
-                              invoice.invoiceNumber
-                            )
-                          }
-                        />
                       </div>
                     </td>
                   </tr>

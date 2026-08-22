@@ -6,11 +6,7 @@ import toast from 'react-hot-toast';
 import { quotationsApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { formatCurrency, formatDate, getStatusColor, downloadFile, isPastDue, cn } from '@/lib/utils';
-import UnconvertedNotice from '@/components/ui/UnconvertedNotice';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
-import RowActions from '@/components/ui/RowActions';
-import ConfirmDialog from '@/components/ui/ConfirmDialog';
-import { useLifecycleActions } from '@/hooks/useLifecycleActions';
 import { Plus, Search, Eye, Download, FileText, Clock, CheckCircle } from 'lucide-react';
 
 const STATUSES = [
@@ -25,12 +21,6 @@ const STATUSES = [
 export default function Quotations() {
   const navigate = useNavigate();  const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-
-  // Deactivate / cancel flow, shared with every other list so the
-
-  // wording and confirmations stay consistent.
-
-  const lifecycle = useLifecycleActions(['quotations']);
   const [page, setPage] = useState(1);
 
   const { data, isLoading } = useQuery({
@@ -47,11 +37,6 @@ export default function Quotations() {
   const pagination = data?.data?.pagination;
   // Counts/totals come from the API so they aren't limited to this page.
   const summary = data?.data?.summary;
-  // Summary money is converted into the company's base currency, so it must
-  // be labelled with that rather than each record's own currency.
-  const baseCode = summary?.baseCurrency?.code;
-  // Non-zero means some records had no exchange rate and are excluded.
-  const unconvertedRecords = summary?.unconvertedRecords ?? 0;
 
   const handleSearch = useDebouncedCallback((value: string) => {
     setSearch(value);
@@ -78,22 +63,6 @@ export default function Quotations() {
 
   return (
     <div className="space-y-6">
-      {/* Confirmation for deactivate, cancel and delete */}
-      {lifecycle.dialog && (
-        <ConfirmDialog
-          isOpen
-          title={lifecycle.dialog.title}
-          message={lifecycle.dialog.message}
-          consequences={lifecycle.dialog.consequences}
-          tone={lifecycle.dialog.tone}
-          requireTyping={lifecycle.dialog.requireTyping}
-          confirmLabel={lifecycle.dialog.confirmLabel}
-          isPending={lifecycle.isPending}
-          onConfirm={lifecycle.confirm}
-          onCancel={lifecycle.dismiss}
-        />
-      )}
-      <UnconvertedNotice count={unconvertedRecords} baseCode={baseCode} />
       <PageHeader
         title="Quotations"
         subtitle={`${pagination?.total || quotations.length} quotations`}
@@ -130,7 +99,7 @@ export default function Quotations() {
         </div>
         <div className="card p-4">
           <div className="text-sm text-gray-500 mb-1">Total Value</div>
-          <div className="text-2xl font-bold text-green-600">{formatCurrency(stats.totalValue, baseCode)}</div>
+          <div className="text-2xl font-bold text-green-600">{formatCurrency(stats.totalValue)}</div>
         </div>
       </div>
 
@@ -205,22 +174,13 @@ export default function Quotations() {
                   </td>
                   <td>{q._count?.items || 0}</td>
                   <td className="font-medium">{formatCurrency(q.grandTotal, q.currency?.code)}</td>
-                  {(() => {
-                    // Guard against null/undefined margins on older records,
-                    // which would otherwise render as "null%" or "NaN%".
-                    const pct = Number(q.marginPercent);
-                    const hasMargin = Number.isFinite(pct);
-                    return (
-                      <td className={cn(
-                        'font-medium',
-                        !hasMargin ? 'text-gray-400' :
-                        pct >= 15 ? 'text-green-600' :
-                        pct >= 10 ? 'text-yellow-600' : 'text-red-600'
-                      )}>
-                        {hasMargin ? `${pct.toFixed(1)}%` : '-'}
-                      </td>
-                    );
-                  })()}
+                  <td className={cn(
+                    'font-medium',
+                    parseFloat(q.marginPercent) >= 15 ? 'text-green-600' :
+                    parseFloat(q.marginPercent) >= 10 ? 'text-yellow-600' : 'text-red-600'
+                  )}>
+                    {q.marginPercent}%
+                  </td>
                   <td className={cn(
                     isPastDue(q.validUntil) && q.status === 'SENT' ? 'text-red-600 font-medium' : 'text-gray-600'
                   )}>
@@ -241,21 +201,6 @@ export default function Quotations() {
                       >
                         <Download className="w-4 h-4" />
                       </button>
-                      <RowActions
-                        destructivePermission="RECORD_DELETE"
-                        // Deletable at any stage. If the quotation became an
-                        // order, the order and its invoices go too - the database
-                        // will not allow the quotation to be removed otherwise.
-                        // The confirmation lists exactly what that means.
-                        destructiveKind="delete"
-                        onDestructive={() =>
-                          lifecycle.request(
-                            { kind: 'delete', resource: 'quotations' },
-                            q.id,
-                            q.quotationNumber
-                          )
-                        }
-                      />
                     </div>
                   </td>
                 </tr>

@@ -6,8 +6,6 @@ import { dashboardApi } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { can } from '@/lib/permissions';
 import { formatCurrency, formatDate, getStatusColor, cn } from '@/lib/utils';
-import UnconvertedNotice from '@/components/ui/UnconvertedNotice';
-import NetPositionPanel from '@/components/ui/NetPositionPanel';
 import {
   TrendingUp,
   Users,
@@ -79,26 +77,9 @@ export default function Dashboard() {
   }
 
   const kpis = dashboard?.kpis || {};
-  // Every money KPI is converted into this currency before being summed, so it
-  // must be labelled with it rather than defaulting to USD.
-  const baseCode: string | undefined = dashboard?.baseCurrency?.code;
-  // Non-zero means some records had no exchange rate for today and are missing
-  // from the totals, which has to be stated rather than shown as a clean figure.
-  const unconvertedRecords: number = dashboard?.unconvertedRecords ?? 0;
-  // Always INR: income is converted when recorded, so nothing here needs a rate.
-  const otherIncome = dashboard?.otherIncome ?? { received: 0, pending: 0, byCategory: [] };
-  // Total income less expenses paid, with every component shown on the panel.
-  const netPosition = dashboard?.netPosition;
-  /**
-   * The period and basis these figures cover. Labelled on the cards so a number
-   * is never presented without saying what it measures - the income page defaults
-   * to all time, so an unlabelled dashboard figure looked like a mismatch.
-   */
-  const period = dashboard?.period;
 
   return (
     <div className="space-y-6">
-      <UnconvertedNotice count={unconvertedRecords} baseCode={baseCode} />
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -163,8 +144,8 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
           title="Monthly Revenue"
-          value={formatCurrency(kpis.monthlyRevenue || 0, baseCode)}
-          subtitle={`${period?.label ?? 'YTD'}: ${formatCurrency(kpis.yearlyRevenue || 0, baseCode)}`}
+          value={formatCurrency(kpis.monthlyRevenue || 0)}
+          subtitle={`YTD: ${formatCurrency(kpis.yearlyRevenue || 0)}`}
           icon={TrendingUp}
           iconBg="bg-green-100"
           iconColor="text-green-600"
@@ -173,7 +154,7 @@ export default function Dashboard() {
         />
         <KPICard
           title="Pipeline Value"
-          value={formatCurrency(kpis.pipelineValue || 0, baseCode)}
+          value={formatCurrency(kpis.pipelineValue || 0)}
           subtitle={`${kpis.openInquiries || 0} open inquiries`}
           icon={Target}
           iconBg="bg-blue-100"
@@ -189,40 +170,14 @@ export default function Dashboard() {
         />
         <KPICard
           title="Total Receivables"
-          value={formatCurrency(kpis.totalReceivables || 0, baseCode)}
-          subtitle={kpis.overdueReceivables > 0 ? `${formatCurrency(kpis.overdueReceivables, baseCode)} overdue` : 'All current'}
+          value={formatCurrency(kpis.totalReceivables || 0)}
+          subtitle={kpis.overdueReceivables > 0 ? `${formatCurrency(kpis.overdueReceivables)} overdue` : 'All current'}
           icon={DollarSign}
           iconBg={kpis.overdueReceivables > 0 ? "bg-red-100" : "bg-green-100"}
           iconColor={kpis.overdueReceivables > 0 ? "text-red-600" : "text-green-600"}
           alert={kpis.overdueReceivables > 0}
         />
-        {/* Separate from Revenue on purpose: drawback, RoDTEP, interest and forex
-            gain are real receipts but not export sales, and folding them in would
-            flatter sales performance. Always INR - converted when recorded. */}
-        <KPICard
-          title="Other Income"
-          value={formatCurrency(otherIncome.received || 0, 'INR')}
-          subtitle={
-            otherIncome.pending > 0
-              ? `Received ${period?.label ?? ''} · ${formatCurrency(
-                  otherIncome.pending,
-                  'INR'
-                )} pending`
-              : `Received ${period?.label ?? ''}`
-          }
-          icon={TrendingUp}
-          iconBg="bg-teal-100"
-          iconColor="text-teal-600"
-        />
       </div>
-
-      {/* Total income less expenses paid. Placed above the pipeline detail because
-          it answers the question most often asked of a dashboard. */}
-      {netPosition && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <NetPositionPanel net={netPosition} periodLabel={period?.label} />
-        </div>
-      )}
 
       {/* Secondary KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
@@ -546,16 +501,14 @@ function PipelineChart({ data }: { data: any[] }) {
     { key: 'LOST', label: 'Lost', color: 'bg-red-500' },
   ];
 
-  // Each row is { key, count, value } from the collapsed analytics response, and
-  // value is already converted into the base currency.
-  const totalValue = data.reduce((sum, d) => sum + (d.value || 0), 0);
+  const totalValue = data.reduce((sum, d) => sum + (d._sum?.expectedValue || 0), 0);
 
   return (
     <div className="space-y-3">
       {stages.map(stage => {
-        const stageData = data.find(d => d.key === stage.key);
-        const count = stageData?.count || 0;
-        const value = stageData?.value || 0;
+        const stageData = data.find(d => d.stage === stage.key);
+        const count = stageData?._count?.id || 0;
+        const value = stageData?._sum?.expectedValue || 0;
         const percentage = totalValue > 0 ? (value / totalValue) * 100 : 0;
 
         if (count === 0 && !['NEW', 'WON', 'LOST'].includes(stage.key)) return null;
@@ -695,11 +648,8 @@ function ReceivablesAging({ data }: { data: any[] }) {
 
 // Helper function to calculate conversion rate
 function calculateConversionRate(inquiriesByStage: any[]): string {
-  // The analytics endpoint groups by currency internally and collapses the result,
-  // so each row is { key, count, value } rather than Prisma's raw
-  // { stage, _count, _sum }. Reading the old shape silently produced zero.
-  const won = inquiriesByStage.find(s => s.key === 'WON')?.count || 0;
-  const lost = inquiriesByStage.find(s => s.key === 'LOST')?.count || 0;
+  const won = inquiriesByStage.find(s => s.stage === 'WON')?._count?.id || 0;
+  const lost = inquiriesByStage.find(s => s.stage === 'LOST')?._count?.id || 0;
   const total = won + lost;
   
   if (total === 0) return '-';

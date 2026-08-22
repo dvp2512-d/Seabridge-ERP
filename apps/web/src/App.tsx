@@ -21,11 +21,6 @@ import InvoiceDetail from '@/pages/InvoiceDetail';
 import NewInvoice from '@/pages/NewInvoice';
 import Settings from '@/pages/Settings';
 import MasterData from '@/pages/MasterData';
-import ExchangeRates from '@/pages/ExchangeRates';
-import Expenses from '@/pages/Expenses';
-import Income from '@/pages/Income';
-import Tasks from '@/pages/Tasks';
-import Users from '@/pages/Users';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore();
@@ -66,11 +61,6 @@ function App() {
                 <Route path="/invoices/new" element={<NewInvoice />} />
                 <Route path="/invoices/:id" element={<InvoiceDetail />} />
                 <Route path="/master-data" element={<MasterData />} />
-              <Route path="/exchange-rates" element={<ExchangeRates />} />
-              <Route path="/expenses" element={<Expenses />} />
-              <Route path="/income" element={<Income />} />
-              <Route path="/tasks" element={<Tasks />} />
-              <Route path="/users" element={<Users />} />
                 <Route path="/settings" element={<Settings />} />
               </Routes>
             </Layout>
