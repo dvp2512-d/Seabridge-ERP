@@ -50,6 +50,7 @@ model User {
   createdTasks     Task[]          @relation("TaskCreatedBy")
   communications   Communication[]
   auditLogs        AuditLog[]
+  incomeEntries    Income[]
 
   @@map("users")
 }
@@ -96,9 +97,13 @@ model Port {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
-  country              Country    @relation(fields: [countryId], references: [id])
-  shipmentsOrigin      Shipment[] @relation("ShipmentOriginPort")
-  shipmentsDestination Shipment[] @relation("ShipmentDestinationPort")
+  country              Country       @relation(fields: [countryId], references: [id])
+  shipmentsOrigin      Shipment[]    @relation("ShipmentOriginPort")
+  shipmentsDestination Shipment[]    @relation("ShipmentDestinationPort")
+  quotationsLoading    Quotation[]   @relation("QuotationLoadingPort")
+  quotationsDischarge  Quotation[]   @relation("QuotationDischargePort")
+  ordersLoading        ExportOrder[] @relation("OrderLoadingPort")
+  ordersDischarge      ExportOrder[] @relation("OrderDischargePort")
 
   @@map("ports")
 }
@@ -117,6 +122,7 @@ model Currency {
   buyers     Buyer[]
   quotations Quotation[]
   invoices   Invoice[]
+  inquiries  Inquiry[]
 
   @@map("currencies")
 }
@@ -441,6 +447,7 @@ model Inquiry {
   buyerId         String          @map("buyer_id")
   salesOwnerId    String          @map("sales_owner_id")
   createdById     String          @map("created_by_id")
+  currencyId      String?         @map("currency_id")
   stage           InquiryStage    @default(NEW)
   priority        InquiryPriority @default(MEDIUM)
   source          String?         // EMAIL, PHONE, WEBSITE, EXHIBITION
@@ -459,6 +466,7 @@ model Inquiry {
   buyer       Buyer         @relation(fields: [buyerId], references: [id])
   salesOwner  User          @relation("InquirySalesOwner", fields: [salesOwnerId], references: [id])
   createdBy   User          @relation("InquiryCreatedBy", fields: [createdById], references: [id])
+  currency    Currency?     @relation(fields: [currencyId], references: [id])
   items       InquiryItem[]
   quotations  Quotation[]
   followUps   FollowUp[]
@@ -518,37 +526,43 @@ enum QuotationStatus {
 }
 
 model Quotation {
-  id               String          @id @default(cuid())
-  quotationNumber  String          @unique @map("quotation_number")
-  inquiryId        String?         @map("inquiry_id")
-  buyerId          String          @map("buyer_id")
-  currencyId       String          @map("currency_id")
-  incotermId       String          @map("incoterm_id")
-  status           QuotationStatus @default(DRAFT)
-  validUntil       DateTime        @map("valid_until")
-  deliveryTerms    String?         @map("delivery_terms")
-  paymentTerms     String?         @map("payment_terms")
-  subtotal         Decimal         @default(0) @db.Decimal(15, 2)
-  totalCost        Decimal         @default(0) @map("total_cost") @db.Decimal(15, 2)
-  totalMargin      Decimal         @default(0) @map("total_margin") @db.Decimal(15, 2)
-  marginPercent    Decimal         @default(0) @map("margin_percent") @db.Decimal(5, 2)
-  grandTotal       Decimal         @default(0) @map("grand_total") @db.Decimal(15, 2)
-  notes            String?
-  termsConditions  String?         @map("terms_conditions")
-  sentAt           DateTime?       @map("sent_at")
-  acceptedAt       DateTime?       @map("accepted_at")
-  pdfPath          String?         @map("pdf_path")
-  createdAt        DateTime        @default(now()) @map("created_at")
-  updatedAt        DateTime        @updatedAt @map("updated_at")
+  id                  String          @id @default(cuid())
+  quotationNumber     String          @unique @map("quotation_number")
+  inquiryId           String?         @map("inquiry_id")
+  buyerId             String          @map("buyer_id")
+  currencyId          String          @map("currency_id")
+  incotermId          String          @map("incoterm_id")
+  portOfLoadingId     String?         @map("port_of_loading_id")
+  portOfDischargeId   String?         @map("port_of_discharge_id")
+  dispatchMethod      String?         @map("dispatch_method")
+  shipmentType        String?         @map("shipment_type")
+  status              QuotationStatus @default(DRAFT)
+  validUntil          DateTime        @map("valid_until")
+  deliveryTerms       String?         @map("delivery_terms")
+  paymentTerms        String?         @map("payment_terms")
+  subtotal            Decimal         @default(0) @db.Decimal(15, 2)
+  totalCost           Decimal         @default(0) @map("total_cost") @db.Decimal(15, 2)
+  totalMargin         Decimal         @default(0) @map("total_margin") @db.Decimal(15, 2)
+  marginPercent       Decimal         @default(0) @map("margin_percent") @db.Decimal(5, 2)
+  grandTotal          Decimal         @default(0) @map("grand_total") @db.Decimal(15, 2)
+  notes               String?
+  termsConditions     String?         @map("terms_conditions")
+  sentAt              DateTime?       @map("sent_at")
+  acceptedAt          DateTime?       @map("accepted_at")
+  pdfPath             String?         @map("pdf_path")
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
 
   // Relations
-  inquiry  Inquiry?        @relation(fields: [inquiryId], references: [id])
-  buyer    Buyer           @relation(fields: [buyerId], references: [id])
-  currency Currency        @relation(fields: [currencyId], references: [id])
-  incoterm Incoterm        @relation(fields: [incotermId], references: [id])
-  items    QuotationItem[]
-  costs    QuotationCost[]
-  orders   ExportOrder[]
+  inquiry         Inquiry?        @relation(fields: [inquiryId], references: [id])
+  buyer           Buyer           @relation(fields: [buyerId], references: [id])
+  currency        Currency        @relation(fields: [currencyId], references: [id])
+  incoterm        Incoterm        @relation(fields: [incotermId], references: [id])
+  portOfLoading   Port?           @relation("QuotationLoadingPort", fields: [portOfLoadingId], references: [id])
+  portOfDischarge Port?           @relation("QuotationDischargePort", fields: [portOfDischargeId], references: [id])
+  items           QuotationItem[]
+  costs           QuotationCost[]
+  orders          ExportOrder[]
 
   @@map("quotations")
 }
@@ -610,32 +624,36 @@ enum OrderStatus {
 }
 
 model ExportOrder {
-  id              String      @id @default(cuid())
-  orderNumber     String      @unique @map("order_number")
-  quotationId     String      @map("quotation_id")
-  buyerId         String      @map("buyer_id")
-  incotermId      String      @map("incoterm_id")
-  status          OrderStatus @default(CONFIRMED)
-  poNumber        String?     @map("po_number")
-  orderDate       DateTime    @map("order_date")
-  expectedDate    DateTime?   @map("expected_date")
-  totalValue      Decimal     @map("total_value") @db.Decimal(15, 2)
-  currency        String      @default("USD")
-  paymentTerms    String?     @map("payment_terms")
-  deliveryTerms   String?     @map("delivery_terms")
-  notes           String?
-  createdAt       DateTime    @default(now()) @map("created_at")
-  updatedAt       DateTime    @updatedAt @map("updated_at")
+  id                String      @id @default(cuid())
+  orderNumber       String      @unique @map("order_number")
+  quotationId       String      @map("quotation_id")
+  buyerId           String      @map("buyer_id")
+  incotermId        String      @map("incoterm_id")
+  portOfLoadingId   String?     @map("port_of_loading_id")
+  portOfDischargeId String?     @map("port_of_discharge_id")
+  status            OrderStatus @default(CONFIRMED)
+  poNumber          String?     @map("po_number")
+  orderDate         DateTime    @map("order_date")
+  expectedDate      DateTime?   @map("expected_date")
+  totalValue        Decimal     @map("total_value") @db.Decimal(15, 2)
+  currency          String      @default("USD")
+  paymentTerms      String?     @map("payment_terms")
+  deliveryTerms     String?     @map("delivery_terms")
+  notes             String?
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
 
   // Relations
-  quotation    Quotation     @relation(fields: [quotationId], references: [id])
-  buyer        Buyer         @relation(fields: [buyerId], references: [id])
-  incoterm     Incoterm      @relation(fields: [incotermId], references: [id])
-  items        OrderItem[]
-  procurements Procurement[]
-  documents    Document[]
-  shipments    Shipment[]
-  invoices     Invoice[]
+  quotation       Quotation     @relation(fields: [quotationId], references: [id])
+  buyer           Buyer         @relation(fields: [buyerId], references: [id])
+  incoterm        Incoterm      @relation(fields: [incotermId], references: [id])
+  portOfLoading   Port?         @relation("OrderLoadingPort", fields: [portOfLoadingId], references: [id])
+  portOfDischarge Port?         @relation("OrderDischargePort", fields: [portOfDischargeId], references: [id])
+  items           OrderItem[]
+  procurements    Procurement[]
+  documents       Document[]
+  shipments       Shipment[]
+  invoices        Invoice[]
 
   @@map("export_orders")
 }
@@ -775,6 +793,7 @@ model Invoice {
   buyer    Buyer       @relation(fields: [buyerId], references: [id])
   currency Currency    @relation(fields: [currencyId], references: [id])
   payments Payment[]
+  incomeEntries Income[]
 
   @@map("invoices")
 }
@@ -816,6 +835,63 @@ model Expense {
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   @@map("expenses")
+}
+
+model Income {
+  id               String   @id @default(cuid())
+  incomeNumber     String   @unique @map("income_number")
+  category         String   // EXPORT_REVENUE, FOREX_GAIN, INTEREST, DUTY_DRAWBACK, MEIS_SCRIP, OTHER
+  description      String
+  originalAmount   Decimal  @map("original_amount") @db.Decimal(15, 2)
+  originalCurrency String   @default("INR") @map("original_currency")
+  exchangeRate     Decimal  @default(1) @map("exchange_rate") @db.Decimal(10, 4)
+  amountINR        Decimal  @map("amount_inr") @db.Decimal(15, 2)
+  receivedDate     DateTime @map("received_date")
+  reference        String?
+  linkedInvoiceId  String?  @map("linked_invoice_id")
+  status           String   @default("PENDING") // PENDING, RECEIVED
+  notes            String?
+  createdById      String   @map("created_by_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  linkedInvoice Invoice? @relation(fields: [linkedInvoiceId], references: [id])
+  createdBy     User     @relation(fields: [createdById], references: [id])
+
+  @@map("income")
+}
+
+model CompanyProfile {
+  id                 String   @id @default(cuid())
+  legalName          String   @map("legal_name")
+  tradeName          String?  @map("trade_name")
+  addressLine1       String?  @map("address_line_1")
+  addressLine2       String?  @map("address_line_2")
+  city               String?
+  state              String?
+  postalCode         String?  @map("postal_code")
+  country            String   @default("India")
+  originCountry      String   @default("India") @map("origin_country")
+  gstNumber          String?  @map("gst_number")
+  iecCode            String?  @map("iec_code")
+  phone              String?
+  contactPerson      String?  @map("contact_person")
+  email              String?
+  website            String?
+  bankName           String?  @map("bank_name")
+  bankBranch         String?  @map("bank_branch")
+  bankAccountNo      String?  @map("bank_account_no")
+  bankBeneficiary    String?  @map("bank_beneficiary")
+  bankSwiftCode      String?  @map("bank_swift_code")
+  bankIfscCode       String?  @map("bank_ifsc_code")
+  bankChargesNote    String?  @map("bank_charges_note")
+  quotationTerms     String?  @map("quotation_terms")
+  invoiceDeclaration String?  @map("invoice_declaration")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@map("company_profile")
 }
 
 
