@@ -32,9 +32,14 @@ export const authenticate = async (
     }
 
     const token = authHeader.split(' ')[1];
-    const secret = process.env.JWT_SECRET || 'default_secret';
+    const secret = process.env.JWT_SECRET;
 
-    const decoded = jwt.verify(token, secret) as { userId: string };
+    if (!secret) {
+      console.error('FATAL: JWT_SECRET is not configured');
+      throw new UnauthorizedError('Authentication configuration error');
+    }
+
+    const decoded = jwt.verify(token, secret, { algorithms: ['HS256'] }) as { userId: string };
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
@@ -126,6 +131,9 @@ export const PERMISSIONS = {
   // System settings, templates, webhooks and automation rules
   SETTINGS_MANAGE: [UserRole.FOUNDER, UserRole.ADMIN],
   SETTINGS_VIEW: [UserRole.FOUNDER, UserRole.ADMIN, UserRole.SALES, UserRole.OPERATIONS, UserRole.FINANCE],
+
+  // Record deletion - Founder only (hard delete of business records)
+  RECORD_DELETE: [UserRole.FOUNDER],
 };
 
 export const can = (permission: keyof typeof PERMISSIONS) => {

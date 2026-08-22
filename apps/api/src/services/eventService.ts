@@ -15,9 +15,11 @@
  *  - Payloads are signed when a secret is set, so the receiver can verify the
  *    call came from us.
  *  - Repeatedly failing webhooks are deactivated rather than retried forever.
+ *  - URLs are validated to prevent SSRF attacks against internal networks.
  */
 import crypto from 'crypto';
 import { prisma } from '@seabridge/database';
+import { isObviouslyUnsafeUrl } from '../utils/urlValidator';
 
 /** Events the rest of the application can raise. */
 export type DomainEvent =
@@ -49,6 +51,25 @@ function sign(body: string, secret: string): string {
 
 /** Deliver to one webhook, recording the outcome either way. */
 async function deliver(webhook: any, event: DomainEvent, payload: unknown): Promise<void> {
+  // SSRF Protection: Validate URL before making request
+  if (isObviouslyUnsafeUrl(webhook.url)) {
+    console.warn(`[webhook] "${webhook.name}" blocked: URL failed SSRF validation`);
+    // Log the blocked attempt
+    try {
+      await prisma.webhookLog.create({
+        data: {
+          webhookId: webhook.id,
+          event,
+          payload: { blocked: true, reason: 'SSRF protection' },
+          status: 0,
+          error: 'URL blocked by SSRF protection',
+          duration: 0,
+        },
+      });
+    } catch {}
+    return;
+  }
+
   const body = JSON.stringify({
     event,
     occurredAt: new Date().toISOString(),

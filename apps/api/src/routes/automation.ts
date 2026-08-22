@@ -2,7 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
-import { ValidationError, NotFoundError } from '../middleware/errorHandler';
+import { ValidationError, NotFoundError, AppError } from '../middleware/errorHandler';
+import { validateWebhookUrl, isObviouslyUnsafeUrl } from '../utils/urlValidator';
 import crypto from 'crypto';
 
 const router: Router = Router();
@@ -39,6 +40,12 @@ router.post('/webhooks', can('SETTINGS_MANAGE'), async (req, res, next) => {
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
+    // SSRF Protection: Validate URL before storing
+    const urlValidation = await validateWebhookUrl(validation.data.url);
+    if (!urlValidation.valid) {
+      throw new AppError(`Invalid webhook URL: ${urlValidation.error}`, 400);
+    }
+
     const webhook = await prisma.webhook.create({
       data: {
         ...validation.data,
@@ -64,6 +71,14 @@ router.put('/webhooks/:id', can('SETTINGS_MANAGE'), async (req, res, next) => {
 
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
+
+    // SSRF Protection: Validate URL if being updated
+    if (validation.data.url) {
+      const urlValidation = await validateWebhookUrl(validation.data.url);
+      if (!urlValidation.valid) {
+        throw new AppError(`Invalid webhook URL: ${urlValidation.error}`, 400);
+      }
+    }
 
     const webhook = await prisma.webhook.update({
       where: { id: req.params.id },
@@ -94,6 +109,11 @@ router.post('/webhooks/:id/test', can('SETTINGS_MANAGE'), async (req, res, next)
     });
 
     if (!webhook) throw new NotFoundError('Webhook');
+
+    // SSRF Protection: Re-validate URL at request time (defense in depth)
+    if (isObviouslyUnsafeUrl(webhook.url)) {
+      throw new AppError('Webhook URL failed security validation', 400);
+    }
 
     // Send test payload
     const testPayload = {

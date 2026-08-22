@@ -13,8 +13,12 @@ const router: Router = Router();
  * between login and register, and so the types are handled in one place.
  */
 function signToken(userId: string): string {
-  const secret: jwt.Secret = process.env.JWT_SECRET || 'default_secret';
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET is not configured');
+  }
   const options: jwt.SignOptions = {
+    algorithm: 'HS256',
     expiresIn: (process.env.JWT_EXPIRES_IN || '7d') as jwt.SignOptions['expiresIn'],
   };
   return jwt.sign({ userId }, secret, options);
