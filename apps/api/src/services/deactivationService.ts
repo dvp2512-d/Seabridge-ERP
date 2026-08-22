@@ -100,15 +100,12 @@ const DEPENDENTS: Record<string, (id: string) => Promise<DependentCount[]>> = {
   },
 
   port: async (id) => {
-    const [loadingQuotes, dischargeQuotes, originShipments, destShipments] = await Promise.all([
-      prisma.quotation.count({ where: { portOfLoadingId: id } }),
-      prisma.quotation.count({ where: { portOfDischargeId: id } }),
+    // Only count shipments - quotation/order port fields may not exist yet
+    const [originShipments, destShipments] = await Promise.all([
       prisma.shipment.count({ where: { originPortId: id } }),
       prisma.shipment.count({ where: { destinationPortId: id } }),
     ]);
     return [
-      { label: 'quotations as port of loading', count: loadingQuotes },
-      { label: 'quotations as port of discharge', count: dischargeQuotes },
       { label: 'shipments as origin', count: originShipments },
       { label: 'shipments as destination', count: destShipments },
     ];
