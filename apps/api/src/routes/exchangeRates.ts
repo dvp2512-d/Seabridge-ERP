@@ -1,14 +1,11 @@
 /**
- * Notified exchange rates.
+ * Exchange rates management.
  *
- * CBIC notifies rates for 22 currencies twice a month (1st and 3rd Thursday),
- * effective from midnight of the following day, with a separate rate for
- * imports and exports. There is no reliable machine-readable feed - the
- * community API is dead and CBIC publishes notification PDFs - so rates are
- * entered from the notification, which is 24 entries a year.
+ * This simplified implementation stores a single exchange rate per currency
+ * in the Currency model itself (exchangeRate field). For full CBIC notification
+ * history tracking, a separate ExchangeRateHistory model would be needed.
  *
- * Entering a notification closes off the previous period automatically, so the
- * history stays contiguous and a lookup by date can only match one row.
+ * Exchange rates represent units of INR per one unit of the foreign currency.
  */
 import { Router } from 'express';
 import { z } from 'zod';
@@ -21,77 +18,40 @@ const router: Router = Router();
 
 router.use(authenticate);
 
-/** Midnight UTC, so a date is not shifted by the server's timezone. */
-function parseDate(value: string): Date {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) {
-    throw new AppError(`'${value}' is not a valid date`, 400);
-  }
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-}
-
 // ---------------------------------------------------------------- list
 
 /**
- * Rates in force on a date, one row per currency, with how old each one is.
- * Defaults to today so the screen opens on the current position.
+ * Current rates for all active currencies.
  */
 router.get('/current', can('MASTER_VIEW'), async (req, res, next) => {
   try {
-    const onDate = req.query.date ? parseDate(String(req.query.date)) : new Date();
-    const direction = String(req.query.direction ?? 'EXPORT').toUpperCase() as 'EXPORT' | 'IMPORT';
-
     const currencies = await prisma.currency.findMany({
       where: { isActive: true },
-      orderBy: [{ isBaseCurrency: 'desc' }, { code: 'asc' }],
+      orderBy: { code: 'asc' },
     });
 
     const base = await getBaseCurrency();
 
-    const rows = await Promise.all(
-      currencies.map(async (currency) => {
-        // The base currency has no rate against itself.
-        if (currency.id === base.id) {
-          return {
-            currencyId: currency.id,
-            code: currency.code,
-            name: currency.name,
-            symbol: currency.symbol,
-            isBaseCurrency: true,
-            rate: 1,
-            source: null,
-            notificationRef: null,
-            effectiveFrom: null,
-            ageInDays: null,
-          };
-        }
-
-        const resolved = await findRate(currency.id, onDate, direction);
-        return {
-          currencyId: currency.id,
-          code: currency.code,
-          name: currency.name,
-          symbol: currency.symbol,
-          isBaseCurrency: false,
-          rate: resolved?.rate ?? null,
-          source: resolved?.source ?? null,
-          notificationRef: resolved?.notificationRef ?? null,
-          effectiveFrom: resolved?.effectiveFrom ?? null,
-          ageInDays: resolved
-            ? Math.floor((onDate.getTime() - resolved.effectiveFrom.getTime()) / 86400000)
-            : null,
-        };
-      })
-    );
+    const rows = currencies.map((currency) => {
+      const isBase = currency.code === 'INR' || currency.id === base.id;
+      return {
+        currencyId: currency.id,
+        code: currency.code,
+        name: currency.name,
+        symbol: currency.symbol,
+        isBaseCurrency: isBase,
+        rate: isBase ? 1 : Number(currency.exchangeRate),
+        updatedAt: currency.updatedAt,
+      };
+    });
 
     res.json({
       success: true,
       data: {
-        asOf: onDate,
-        direction,
+        asOf: new Date(),
         baseCurrency: { code: base.code, symbol: base.symbol },
         rates: rows,
-        missingCount: rows.filter((r) => !r.isBaseCurrency && r.rate === null).length,
+        missingCount: rows.filter((r) => !r.isBaseCurrency && (!r.rate || r.rate === 0)).length,
       },
     });
   } catch (error) {
@@ -99,200 +59,100 @@ router.get('/current', can('MASTER_VIEW'), async (req, res, next) => {
   }
 });
 
-/** Full history for one currency, newest first. */
-router.get('/history/:currencyId', can('MASTER_VIEW'), async (req, res, next) => {
+// ---------------------------------------------------------------- update rate
+
+const updateRateSchema = z.object({
+  exchangeRate: z.number().positive('Exchange rate must be greater than zero'),
+});
+
+/**
+ * Update the exchange rate for a currency.
+ */
+router.put('/:currencyId', can('MASTER_MANAGE'), async (req, res, next) => {
   try {
-    const history = await prisma.exchangeRate.findMany({
-      where: { currencyId: req.params.currencyId },
-      orderBy: { effectiveFrom: 'desc' },
-      include: { currency: { select: { code: true, name: true } } },
-      take: 100,
+    const validation = updateRateSchema.safeParse(req.body);
+    if (!validation.success) throw new ValidationError(validation.error.errors);
+
+    const currency = await prisma.currency.findUnique({
+      where: { id: req.params.currencyId },
+    });
+    if (!currency) throw new NotFoundError('Currency');
+
+    // Don't allow setting rate for base currency
+    if (currency.code === 'INR') {
+      throw new AppError('Cannot set exchange rate for the base currency (INR)', 400);
+    }
+
+    const updated = await prisma.currency.update({
+      where: { id: req.params.currencyId },
+      data: { exchangeRate: validation.data.exchangeRate },
     });
 
-    res.json({ success: true, data: history });
+    res.json({
+      success: true,
+      data: {
+        currencyId: updated.id,
+        code: updated.code,
+        name: updated.name,
+        exchangeRate: Number(updated.exchangeRate),
+        updatedAt: updated.updatedAt,
+      },
+    });
   } catch (error) {
     next(error);
   }
 });
 
-// ---------------------------------------------------------------- create
-
-const notificationSchema = z.object({
-  /** e.g. "Notification No. 55/2026-Customs (N.T.)" */
-  notificationRef: z.string().min(1, 'Notification reference is required'),
-  effectiveFrom: z.string().min(1, 'Effective date is required'),
-  source: z.enum(['CBIC', 'RBI', 'MARKET', 'MANUAL']).default('CBIC'),
-  notes: z.string().optional(),
+/**
+ * Bulk update rates (for entering CBIC notifications).
+ */
+const bulkUpdateSchema = z.object({
+  notificationRef: z.string().optional(),
   rates: z
     .array(
       z.object({
         currencyId: z.string().min(1),
-        importRate: z.number().positive('Import rate must be greater than zero'),
-        exportRate: z.number().positive('Export rate must be greater than zero'),
+        exchangeRate: z.number().positive('Exchange rate must be greater than zero'),
       })
     )
     .min(1, 'At least one rate is required'),
 });
 
-/**
- * Record a notification: one effective date, many currency rates.
- *
- * Runs in a transaction so a partial entry cannot leave the history with some
- * currencies updated and others not, which would make totals inconsistent
- * depending on which currency a document happened to use.
- */
-router.post('/notification', can('MASTER_MANAGE'), async (req, res, next) => {
+router.post('/bulk-update', can('MASTER_MANAGE'), async (req, res, next) => {
   try {
-    const validation = notificationSchema.safeParse(req.body);
+    const validation = bulkUpdateSchema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
-    const { notificationRef, source, notes, rates } = validation.data;
-    const effectiveFrom = parseDate(validation.data.effectiveFrom);
+    const { rates } = validation.data;
 
-    const base = await getBaseCurrency();
-
-    // The base currency has no rate against itself; accepting one would create
-    // two competing definitions of parity.
-    const baseIncluded = rates.find((r) => r.currencyId === base.id);
-    if (baseIncluded) {
-      throw new AppError(
-        `${base.code} is the base currency and cannot have a rate against itself.`,
-        400
-      );
-    }
-
-    // An export rate above the import rate is the wrong way round; CBIC always
-    // notifies the import rate higher. Catching it here prevents a typo from
-    // undervaluing every shipping bill in the period.
-    const inverted = rates.filter((r) => r.exportRate > r.importRate);
-    if (inverted.length > 0) {
-      const codes = await prisma.currency.findMany({
-        where: { id: { in: inverted.map((r) => r.currencyId) } },
-        select: { code: true },
-      });
-      throw new AppError(
-        `Export rate is higher than the import rate for ${codes
-          .map((c) => c.code)
-          .join(', ')}. CBIC notifies the import rate higher; check the columns are not swapped.`,
-        400
-      );
-    }
-
-    const result = await prisma.$transaction(async (tx) => {
-      const created: string[] = [];
-
-      for (const entry of rates) {
-        // Close off whatever was in force for this currency, so lookups by date
-        // match exactly one row.
-        await tx.exchangeRate.updateMany({
-          where: {
-            currencyId: entry.currencyId,
-            source,
-            effectiveTo: null,
-            effectiveFrom: { lt: effectiveFrom },
-          },
-          data: { effectiveTo: new Date(effectiveFrom.getTime() - 86400000) },
-        });
-
-        // Re-entering the same notification should correct it, not fail.
-        await tx.exchangeRate.upsert({
-          where: {
-            currencyId_source_effectiveFrom: {
-              currencyId: entry.currencyId,
-              source,
-              effectiveFrom,
-            },
-          },
-          update: {
-            importRate: entry.importRate,
-            exportRate: entry.exportRate,
-            notificationRef,
-            notes,
-          },
-          create: {
-            currencyId: entry.currencyId,
-            importRate: entry.importRate,
-            exportRate: entry.exportRate,
-            effectiveFrom,
-            source,
-            notificationRef,
-            notes,
-          },
-        });
-        created.push(entry.currencyId);
-      }
-
-      return created;
+    // Check for base currency in the update
+    const currencies = await prisma.currency.findMany({
+      where: { id: { in: rates.map((r) => r.currencyId) } },
+      select: { id: true, code: true },
     });
 
-    res.status(201).json({
+    const inrCurrency = currencies.find((c) => c.code === 'INR');
+    if (inrCurrency && rates.some((r) => r.currencyId === inrCurrency.id)) {
+      throw new AppError('Cannot set exchange rate for the base currency (INR)', 400);
+    }
+
+    // Update all rates in a transaction
+    await prisma.$transaction(
+      rates.map((rate) =>
+        prisma.currency.update({
+          where: { id: rate.currencyId },
+          data: { exchangeRate: rate.exchangeRate },
+        })
+      )
+    );
+
+    res.json({
       success: true,
-      data: { notificationRef, effectiveFrom, source, currencyCount: result.length },
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/** Correct a single rate row. */
-const updateSchema = z.object({
-  importRate: z.number().positive().optional(),
-  exportRate: z.number().positive().optional(),
-  notificationRef: z.string().optional(),
-  notes: z.string().optional(),
-});
-
-router.put('/:id', can('MASTER_MANAGE'), async (req, res, next) => {
-  try {
-    const validation = updateSchema.safeParse(req.body);
-    if (!validation.success) throw new ValidationError(validation.error.errors);
-
-    const existing = await prisma.exchangeRate.findUnique({ where: { id: req.params.id } });
-    if (!existing) throw new NotFoundError('Exchange rate');
-
-    const importRate = validation.data.importRate ?? Number(existing.importRate);
-    const exportRate = validation.data.exportRate ?? Number(existing.exportRate);
-    if (exportRate > importRate) {
-      throw new AppError('Export rate cannot be higher than the import rate', 400);
-    }
-
-    const updated = await prisma.exchangeRate.update({
-      where: { id: req.params.id },
-      data: validation.data,
-      include: { currency: { select: { code: true } } },
-    });
-
-    res.json({ success: true, data: updated });
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.delete('/:id', can('MASTER_MANAGE'), async (req, res, next) => {
-  try {
-    const existing = await prisma.exchangeRate.findUnique({ where: { id: req.params.id } });
-    if (!existing) throw new NotFoundError('Exchange rate');
-
-    await prisma.exchangeRate.delete({ where: { id: req.params.id } });
-
-    // Reopen the preceding period so the history does not develop a hole that
-    // would make documents in that window unconvertible.
-    const previous = await prisma.exchangeRate.findFirst({
-      where: {
-        currencyId: existing.currencyId,
-        source: existing.source,
-        effectiveFrom: { lt: existing.effectiveFrom },
+      data: {
+        updatedCount: rates.length,
+        notificationRef: validation.data.notificationRef,
       },
-      orderBy: { effectiveFrom: 'desc' },
     });
-    if (previous) {
-      await prisma.exchangeRate.update({
-        where: { id: previous.id },
-        data: { effectiveTo: existing.effectiveTo },
-      });
-    }
-
-    res.json({ success: true, data: { id: existing.id } });
   } catch (error) {
     next(error);
   }
@@ -301,11 +161,10 @@ router.delete('/:id', can('MASTER_MANAGE'), async (req, res, next) => {
 /** Which currencies cannot currently be converted, for warning banners. */
 router.get('/coverage', can('MASTER_VIEW'), async (req, res, next) => {
   try {
-    const onDate = req.query.date ? parseDate(String(req.query.date)) : new Date();
-    const { base, missing } = await buildRateMap(onDate);
+    const { base, missing } = await buildRateMap(new Date());
     res.json({
       success: true,
-      data: { asOf: onDate, baseCurrency: base, missing, complete: missing.length === 0 },
+      data: { asOf: new Date(), baseCurrency: base, missing, complete: missing.length === 0 },
     });
   } catch (error) {
     next(error);
