@@ -21,6 +21,11 @@ import {
   ClipboardList,
   Anchor,
   Database,
+  Receipt,
+  Wallet,
+  CheckSquare,
+  UserCog,
+  TrendingUp,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -47,6 +52,11 @@ const navigation: {
   { name: 'Quotations', href: '/quotations', icon: FileText, permission: 'SALES_VIEW' },
   { name: 'Orders', href: '/orders', icon: ShoppingCart, permission: 'OPERATIONS_VIEW' },
   { name: 'Invoices', href: '/invoices', icon: DollarSign, permission: 'FINANCE_VIEW' },
+  { name: 'Expenses', href: '/expenses', icon: Receipt, permission: 'FINANCE_VIEW' },
+  { name: 'Income', href: '/income', icon: Wallet, permission: 'FINANCE_VIEW' },
+  { name: 'Tasks', href: '/tasks', icon: CheckSquare, permission: 'MASTER_VIEW' },
+  { name: 'Exchange Rates', href: '/exchange-rates', icon: TrendingUp, permission: 'MASTER_VIEW' },
+  { name: 'Users', href: '/users', icon: UserCog, permission: 'USER_MANAGE' },
   { name: 'Master Data', href: '/master-data', icon: Database, permission: 'MASTER_MANAGE' },
 ];
 

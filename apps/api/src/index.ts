@@ -18,6 +18,12 @@ import { invoiceRouter } from './routes/invoices';
 import { dashboardRouter } from './routes/dashboard';
 import { masterDataRouter } from './routes/masterData';
 import { automationRouter } from './routes/automation';
+import { expenseRouter } from './routes/expenses';
+import { incomeRouter } from './routes/income';
+import { taskRouter } from './routes/tasks';
+import { exchangeRateRouter } from './routes/exchangeRates';
+import { settingsRouter } from './routes/settings';
+import { lifecycleRouter } from './routes/lifecycle';
 
 dotenv.config();
 
@@ -53,6 +59,12 @@ app.use('/api/invoices', invoiceRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/master', masterDataRouter);
 app.use('/api/automation', automationRouter);
+app.use('/api/expenses', expenseRouter);
+app.use('/api/income', incomeRouter);
+app.use('/api/tasks', taskRouter);
+app.use('/api/exchange-rates', exchangeRateRouter);
+app.use('/api/settings', settingsRouter);
+app.use('/api/lifecycle', lifecycleRouter);
 
 // Error handling
 // 404 for anything that didn't match a route above, then the error handler.
