@@ -72,8 +72,8 @@ async function assertKnownCurrency(code: string): Promise<void> {
 
 /** The base currency needs no conversion, and claiming otherwise is an error. */
 async function assertRateConsistent(code: string, rate: number): Promise<void> {
-  const base = await prisma.currency.findFirst({ where: { isBaseCurrency: true } });
-  if (base && code === base.code && Math.abs(rate - 1) > 0.00005) {
+  // INR is the base currency for Indian exporters
+  if (code === 'INR' && Math.abs(rate - 1) > 0.00005) {
     throw new AppError(
       `${code} is the base currency, so its exchange rate must be 1.0000.`,
       400
@@ -461,10 +461,15 @@ router.get('/meta/options', can('FINANCE_VIEW'), async (_req, res, next) => {
   try {
     const currencies = await prisma.currency.findMany({
       where: { isActive: true },
-      select: { code: true, name: true, isBaseCurrency: true },
-      orderBy: [{ isBaseCurrency: 'desc' }, { code: 'asc' }],
+      select: { code: true, name: true },
+      orderBy: { code: 'asc' },
     });
-    res.json({ success: true, data: { categories: CATEGORIES, statuses: STATUSES, currencies } });
+    // Add isBaseCurrency flag for UI (INR is base for Indian exporters)
+    const currenciesWithBase = currencies.map(c => ({
+      ...c,
+      isBaseCurrency: c.code === 'INR'
+    }));
+    res.json({ success: true, data: { categories: CATEGORIES, statuses: STATUSES, currencies: currenciesWithBase } });
   } catch (error) {
     next(error);
   }

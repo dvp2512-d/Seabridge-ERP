@@ -115,17 +115,15 @@ const DEPENDENTS: Record<string, (id: string) => Promise<DependentCount[]>> = {
   },
 
   currency: async (id) => {
-    const [quotations, invoices, buyers, rates] = await Promise.all([
+    const [quotations, invoices, buyers] = await Promise.all([
       prisma.quotation.count({ where: { currencyId: id } }),
       prisma.invoice.count({ where: { currencyId: id } }),
       prisma.buyer.count({ where: { currencyId: id } }),
-      prisma.exchangeRate.count({ where: { currencyId: id } }),
     ]);
     return [
       { label: 'quotations', count: quotations },
       { label: 'invoices', count: invoices },
       { label: 'buyers', count: buyers },
-      { label: 'exchange rates', count: rates },
     ];
   },
 
@@ -170,13 +168,13 @@ export function describeDependents(counts: DependentCount[]): string {
  * reference counting.
  */
 export async function assertCanDeactivate(type: string, id: string): Promise<void> {
-  // Every converted total is expressed in the base currency, so switching it off
+  // Every converted total is expressed in the base currency (INR), so switching it off
   // would break the dashboard and every summary at once.
   if (type === 'currency') {
     const currency = await prisma.currency.findUnique({ where: { id } });
-    if (currency?.isBaseCurrency) {
+    if (currency?.code === 'INR') {
       throw new AppError(
-        `${currency.code} is the base currency. Every converted total depends on it, so it cannot be deactivated. Make another currency the base first.`,
+        `${currency.code} is the base currency. Every converted total depends on it, so it cannot be deactivated.`,
         400
       );
     }

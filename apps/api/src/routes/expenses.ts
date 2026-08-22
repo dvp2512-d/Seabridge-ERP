@@ -170,14 +170,9 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
     // most expenses are domestic.
     let currencyCode = data.currency?.toUpperCase();
     if (!currencyCode) {
-      const base = await prisma.currency.findFirst({ where: { isBaseCurrency: true } });
-      currencyCode = base?.code;
-      if (!currencyCode) {
-        throw new AppError(
-          'No base currency is configured, so the expense currency cannot be defaulted. Set one under Master Data or state the currency explicitly.',
-          400
-        );
-      }
+      // INR is the base currency for Indian exporters
+      const base = await prisma.currency.findFirst({ where: { code: 'INR', isActive: true } });
+      currencyCode = base?.code ?? 'INR';
     }
 
     // An unknown currency would make the expense unconvertible and quietly
