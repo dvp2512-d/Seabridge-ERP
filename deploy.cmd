@@ -4,12 +4,13 @@ setlocal EnableDelayedExpansion
 REM ===========================================================================
 REM  SeaBridge Founder OS - single-file deployment
 REM
-REM  The only requirement is Docker Desktop. Node.js, npm and Prisma are NOT
-REM  needed - every build, migration and seed step runs inside a container.
+REM  The only requirement is Docker Desktop and Git. Node.js, npm and Prisma
+REM  are NOT needed - every build, migration and seed step runs in a container.
 REM
-REM    deploy.cmd              deploy or update (safe to re-run)
+REM    deploy.cmd              deploy or update (pulls latest code first)
 REM    deploy.cmd reset        wipe the database and redeploy from scratch
 REM    deploy.cmd noseed       deploy without inserting starter data
+REM    deploy.cmd nopull       deploy without pulling from GitHub
 REM    deploy.cmd stop         stop the stack, keep all data
 REM    deploy.cmd logs         follow container logs
 REM    deploy.cmd status       show what is running
@@ -21,6 +22,7 @@ cd /d "%~dp0"
 set "TMPOUT=%TEMP%\seabridge_deploy_%RANDOM%.log"
 set "DO_SEED=1"
 set "DO_RESET=0"
+set "DO_PULL=1"
 set "ACTION=deploy"
 
 REM ------------------------------------------------------------- arguments
@@ -34,6 +36,8 @@ if "!ARG:~0,1!"=="/" set "ARG=!ARG:~1!"
 if /i "!ARG!"=="reset"  set "DO_RESET=1"      & goto nextarg
 if /i "!ARG!"=="noseed" set "DO_SEED=0"       & goto nextarg
 if /i "!ARG!"=="no-seed" set "DO_SEED=0"      & goto nextarg
+if /i "!ARG!"=="nopull" set "DO_PULL=0"       & goto nextarg
+if /i "!ARG!"=="no-pull" set "DO_PULL=0"      & goto nextarg
 if /i "!ARG!"=="stop"   set "ACTION=stop"     & goto nextarg
 if /i "!ARG!"=="down"   set "ACTION=stop"     & goto nextarg
 if /i "!ARG!"=="logs"   set "ACTION=logs"     & goto nextarg
@@ -87,6 +91,34 @@ if errorlevel 1 (
   exit /b 1
 )
 
+REM ------------------------------------------------------------- git pull
+echo.
+echo [0/8] Pulling latest code from GitHub
+if "%DO_PULL%"=="0" (
+  echo       skipped git pull ^(nopull^)
+  goto gitdone
+)
+where git >nul 2>&1
+if errorlevel 1 (
+  echo       [!] Git not found - skipping pull. Make sure code is up to date.
+) else (
+  git pull origin main >"%TMPOUT%" 2>&1
+  if errorlevel 1 (
+    echo       [!] Git pull failed - continuing with local code
+    type "%TMPOUT%"
+  ) else (
+    findstr /c:"Already up to date" "%TMPOUT%" >nul 2>&1
+    if not errorlevel 1 (
+      echo       [OK] Already up to date
+    ) else (
+      echo       [OK] Pulled latest changes from GitHub
+      type "%TMPOUT%"
+    )
+  )
+  del "%TMPOUT%" >nul 2>&1
+)
+:gitdone
+
 REM ------------------------------------------------------------- side actions
 if /i "%ACTION%"=="stop" (
   echo.
@@ -125,7 +157,7 @@ echo ================================================
 
 REM ------------------------------------------------------------- 1. files
 echo.
-echo [1/7] Checking project files
+echo [1/8] Checking project files
 for %%F in (docker-compose.yml .env.example) do (
   if not exist "%%F" (
     echo       ERROR: "%%F" not found.
@@ -141,7 +173,7 @@ echo       [OK] project files present
 
 REM ------------------------------------------------------------- 2. .env
 echo.
-echo [2/7] Preparing configuration (.env)
+echo [2/8] Preparing configuration (.env)
 
 :createenv
 if exist ".env" (
@@ -196,7 +228,7 @@ echo       Database password: !DBPASS!
 
 REM ------------------------------------------------------------- 3. reset
 echo.
-echo [3/7] Checking existing data
+echo [3/8] Checking existing data
 if "%DO_RESET%"=="1" (
   echo       WARNING: this will PERMANENTLY DELETE the database and all its data.
   set /p "CONFIRM=      Type DELETE to confirm: "
@@ -214,7 +246,7 @@ if "%DO_RESET%"=="1" (
 
 REM ------------------------------------------------------------- 4. build
 echo.
-echo [4/7] Building application images
+echo [4/8] Building application images
 echo       First run downloads base images - this can take 5-10 minutes.
 docker compose build
 if errorlevel 1 (
@@ -229,7 +261,7 @@ echo       [OK] images built
 
 REM ------------------------------------------------------------- 5. database
 echo.
-echo [5/7] Starting the database
+echo [5/8] Starting the database
 docker compose up -d postgres
 if errorlevel 1 (
   echo ERROR: could not start PostgreSQL.
@@ -277,7 +309,7 @@ echo       [OK] database credentials verified
 
 REM ------------------------------------------------------------- 6. schema
 echo.
-echo [6/7] Applying the database schema
+echo [6/8] Applying the database schema
 
 docker compose run --rm --no-deps -T api sh -c "cd /app/packages/database && npx prisma migrate deploy" >"%TMPOUT%" 2>&1
 if not errorlevel 1 (
@@ -337,7 +369,7 @@ del "%TMPOUT%" >nul 2>&1
 
 REM ------------------------------------------------------------- 7. start
 echo.
-echo [7/7] Starting the application
+echo [7/8] Starting the application
 docker compose up -d
 if errorlevel 1 (
   echo ERROR: could not start the application containers.
@@ -399,15 +431,16 @@ echo.
 echo SeaBridge Founder OS - deployment
 echo.
 echo Usage:
-echo   deploy.cmd              deploy or update (safe to re-run)
+echo   deploy.cmd              deploy or update (pulls latest code first)
 echo   deploy.cmd reset        wipe the database and redeploy from scratch
 echo   deploy.cmd noseed       deploy without inserting starter data
+echo   deploy.cmd nopull       deploy without pulling from GitHub
 echo   deploy.cmd stop         stop the stack, keep all data
 echo   deploy.cmd logs         follow container logs
 echo   deploy.cmd status       show what is running
 echo   deploy.cmd fixenv       regenerate .env file (fixes format issues)
 echo   deploy.cmd help         this message
 echo.
-echo Requires only Docker Desktop. Node.js is not needed.
+echo Requires only Docker Desktop and Git. Node.js is not needed.
 echo.
 exit /b 0
