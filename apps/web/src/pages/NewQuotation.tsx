@@ -53,6 +53,8 @@ export default function NewQuotation() {
   const [buyerId, setBuyerId] = useState('');
   const [currencyId, setCurrencyId] = useState('');
   const [incotermId, setIncotermId] = useState('');
+  const [portOfLoadingId, setPortOfLoadingId] = useState('');
+  const [portOfDischargeId, setPortOfDischargeId] = useState('');
   const [validUntil, setValidUntil] = useState(() => {
     const date = new Date();
     date.setDate(date.getDate() + 30);
@@ -184,6 +186,8 @@ export default function NewQuotation() {
       buyerId,
       currencyId,
       incotermId,
+      portOfLoadingId: portOfLoadingId || undefined,
+      portOfDischargeId: portOfDischargeId || undefined,
       validUntil,
       paymentTerms,
       deliveryTerms,
@@ -270,6 +274,26 @@ export default function NewQuotation() {
                     label: `${i.code} - ${i.name}`,
                   }))}
                   placeholder="Select Incoterm"
+                />
+                <SelectField
+                  label="Port of Loading"
+                  value={portOfLoadingId}
+                  onChange={(e) => setPortOfLoadingId(e.target.value)}
+                  options={(dropdowns?.data?.data?.ports || []).map((p: any) => ({
+                    value: p.id,
+                    label: `${p.name} (${p.code})`,
+                  }))}
+                  placeholder="Select Port of Loading"
+                />
+                <SelectField
+                  label="Port of Discharge"
+                  value={portOfDischargeId}
+                  onChange={(e) => setPortOfDischargeId(e.target.value)}
+                  options={(dropdowns?.data?.data?.ports || []).map((p: any) => ({
+                    value: p.id,
+                    label: `${p.name} (${p.code})`,
+                  }))}
+                  placeholder="Select Port of Discharge"
                 />
                 <FormField
                   label="Valid Until"

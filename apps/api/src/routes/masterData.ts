@@ -289,12 +289,13 @@ router.put('/product-categories/:id', can('MASTER_MANAGE'), async (req, res, nex
 
 router.get('/dropdowns', can('MASTER_VIEW'), async (req, res, next) => {
   try {
-    const [countries, currencies, incoterms, categories, users] = await Promise.all([
+    const [countries, currencies, incoterms, categories, users, ports] = await Promise.all([
       prisma.country.findMany({ where: { isActive: true }, select: { id: true, name: true, code: true }, orderBy: { name: 'asc' } }),
       prisma.currency.findMany({ where: { isActive: true }, select: { id: true, code: true, symbol: true }, orderBy: { code: 'asc' } }),
       prisma.incoterm.findMany({ where: { isActive: true }, select: { id: true, code: true, name: true }, orderBy: { code: 'asc' } }),
       prisma.productCategory.findMany({ where: { isActive: true }, select: { id: true, name: true }, orderBy: { name: 'asc' } }),
       prisma.user.findMany({ where: { status: 'ACTIVE' }, select: { id: true, firstName: true, lastName: true, role: true }, orderBy: { firstName: 'asc' } }),
+      prisma.port.findMany({ where: { isActive: true }, select: { id: true, name: true, code: true, type: true, country: { select: { name: true } } }, orderBy: { name: 'asc' } }),
     ]);
 
     res.json({
@@ -305,6 +306,7 @@ router.get('/dropdowns', can('MASTER_VIEW'), async (req, res, next) => {
         incoterms,
         productCategories: categories,
         users,
+        ports,
         buyerStatuses: ['LEAD', 'PROSPECT', 'ACTIVE', 'INACTIVE', 'CHURNED'],
         inquiryStages: ['NEW', 'REQUIREMENT_GATHERED', 'PRICING_IN_PROGRESS', 'QUOTATION_SENT', 'NEGOTIATION', 'WON', 'LOST', 'ON_HOLD'],
         inquiryPriorities: ['LOW', 'MEDIUM', 'HIGH', 'URGENT'],

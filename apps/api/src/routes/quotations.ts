@@ -80,6 +80,8 @@ router.get('/:id', can('SALES_VIEW'), async (req, res, next) => {
         inquiry: { select: { id: true, inquiryNumber: true } },
         currency: true,
         incoterm: true,
+        portOfLoading: true,
+        portOfDischarge: true,
         items: { include: { product: true } },
         costs: true,
         // Needed so the UI can tell whether this quotation is already an order.
@@ -102,6 +104,8 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
       buyerId: z.string().min(1),
       currencyId: z.string().min(1),
       incotermId: z.string().min(1),
+      portOfLoadingId: z.string().optional(),
+      portOfDischargeId: z.string().optional(),
       validUntil: z.string().transform(s => new Date(s)),
       deliveryTerms: z.string().optional(),
       paymentTerms: z.string().optional(),
