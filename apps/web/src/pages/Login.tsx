@@ -49,7 +49,7 @@ export default function Login() {
       {/* Left side - Brand */}
       <div className="hidden lg:flex lg:w-1/2 bg-navy-900 items-center justify-center p-12">
         <div className="max-w-md text-center">
-          <Ship className="w-20 h-20 text-gold-500 mx-auto mb-8" />
+          <img src="/logo.png" alt="SeaBridge" className="w-24 h-24 mx-auto mb-8 object-contain" />
           <h1 className="text-4xl font-bold text-white mb-4">
             SeaBridge Founder OS
           </h1>
@@ -79,7 +79,7 @@ export default function Login() {
         <div className="w-full max-w-md">
           {/* Mobile logo */}
           <div className="lg:hidden text-center mb-8">
-            <Ship className="w-12 h-12 text-navy-900 mx-auto mb-2" />
+            <img src="/logo-blue.png" alt="SeaBridge" className="w-16 h-16 mx-auto mb-2 object-contain" />
             <h1 className="text-2xl font-bold text-navy-900">SeaBridge</h1>
           </div>
 
