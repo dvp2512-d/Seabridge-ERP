@@ -141,8 +141,9 @@ export default function NewQuotation() {
     const itemsCost = items.reduce((sum, item) => sum + item.totalCost, 0);
     const additionalCostsTotal = additionalCosts.reduce((sum, cost) => sum + cost.amount, 0);
     const totalCost = itemsCost + additionalCostsTotal;
-    const totalMargin = itemsSubtotal - totalCost;
-    const marginPercent = itemsSubtotal > 0 ? (totalMargin / itemsSubtotal) * 100 : 0;
+    // Margin is calculated from line items only - additional costs (CHA, transport) don't reduce margin
+    const totalMargin = itemsSubtotal - itemsCost;
+    const marginPercent = itemsCost > 0 ? (totalMargin / itemsCost) * 100 : 0;
 
     return {
       itemsSubtotal,
@@ -151,7 +152,8 @@ export default function NewQuotation() {
       totalCost,
       totalMargin,
       marginPercent,
-      grandTotal: itemsSubtotal,
+      // Grand total includes additional costs (billed to buyer)
+      grandTotal: itemsSubtotal + additionalCostsTotal,
     };
   }, [items, additionalCosts]);
 

@@ -119,8 +119,9 @@ export default function QuotationDetail() {
   const itemsCost = quotation.items?.reduce((sum: number, item: any) => sum + (item.totalCost || 0), 0) || 0;
   const additionalCosts = quotation.costs?.reduce((sum: number, cost: any) => sum + (cost.amount || 0), 0) || 0;
   const totalCost = itemsCost + additionalCosts;
-  const margin = itemsTotal - totalCost;
-  const marginPercent = itemsTotal > 0 ? (margin / itemsTotal) * 100 : 0;
+  // Margin is from line items only - additional costs don't reduce margin
+  const margin = itemsTotal - itemsCost;
+  const marginPercent = itemsCost > 0 ? (margin / itemsCost) * 100 : 0;
 
   return (
     <div className="space-y-6">
