@@ -17,7 +17,6 @@ import {
   X,
   ChevronDown,
   Building2,
-  Ship,
   ClipboardList,
   Anchor,
   Database,
