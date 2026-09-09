@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma, Prisma, InquiryStage } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
-import { generateCode, calculateMarginPercent } from '../utils/helpers';
+import { generateCode } from '../utils/helpers';
 import { generateQuotationPDF } from '../services/pdfService';
 import { buildRateMap } from '../services/exchangeRateService';
 import { emitEvent } from '../services/eventService';
