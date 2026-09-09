@@ -36,6 +36,7 @@ export async function createOrderFromQuotation(
     where: { id: quotationId },
     include: {
       items: true,
+      costs: true,
       currency: true,
     },
   });
@@ -58,6 +59,30 @@ export async function createOrderFromQuotation(
     );
   }
 
+  /**
+   * Calculate all-inclusive unit price for each item.
+   * 
+   * The unit price in orders/invoices should include a proportional share of
+   * additional costs (freight, CHA, insurance, etc.) so the buyer sees the
+   * final price per unit.
+   * 
+   * Formula: Inclusive Unit Price = Quotation Unit Price + (Additional Costs / Total Quantity)
+   */
+  const totalAdditionalCosts = quotation.costs?.reduce(
+    (sum, cost) => sum + Number(cost.amount),
+    0
+  ) || 0;
+
+  const totalQuantity = quotation.items.reduce(
+    (sum, item) => sum + Number(item.quantity),
+    0
+  );
+
+  // Additional cost per unit, distributed equally across all units
+  const additionalCostPerUnit = totalQuantity > 0 
+    ? totalAdditionalCosts / totalQuantity 
+    : 0;
+
   const orderNumber = await generateCode('ORDER', 'ORD');
 
   return prisma.$transaction(async (tx) => {
@@ -77,14 +102,20 @@ export async function createOrderFromQuotation(
         deliveryTerms: quotation.deliveryTerms,
         notes: options.notes,
         items: {
-          create: quotation.items.map((item) => ({
-            productId: item.productId,
-            quantity: item.quantity,
-            unit: item.unit,
-            unitPrice: item.unitPrice,
-            totalPrice: item.totalPrice,
-            notes: item.specifications,
-          })),
+          create: quotation.items.map((item) => {
+            // All-inclusive unit price = original unit price + share of additional costs
+            const inclusiveUnitPrice = Number(item.unitPrice) + additionalCostPerUnit;
+            const inclusiveTotalPrice = inclusiveUnitPrice * Number(item.quantity);
+            
+            return {
+              productId: item.productId,
+              quantity: item.quantity,
+              unit: item.unit,
+              unitPrice: Math.round(inclusiveUnitPrice * 100) / 100,
+              totalPrice: Math.round(inclusiveTotalPrice * 100) / 100,
+              notes: item.specifications,
+            };
+          }),
         },
         documents: {
           create: DEFAULT_DOCUMENT_CHECKLIST.map((documentType) => ({
