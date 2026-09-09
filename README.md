@@ -1,92 +1,147 @@
-# SeaBridge Founder OS
+# SeaBridge ERP
 
 **Master Enterprise Edition V1.0**
 
-A complete business management system for SeaBridge Exports — managing buyers, inquiries, quotations, orders, shipments, and finances in one connected platform.
+A complete business management system for Indian export trading companies — managing buyers, inquiries, quotations, orders, shipments, and finances in one connected platform. Built specifically for exporters with CBIC exchange rates, multi-currency support, and port-based logistics.
+
+---
+
+## 📋 Table of Contents
+
+- [Features](#-features)
+- [Tech Stack](#-tech-stack)
+- [Quick Start](#-quick-start)
+- [Project Structure](#-project-structure)
+- [Default Login](#-default-login)
+- [Core Modules](#-core-modules)
+- [Business Flow](#-business-flow)
+- [API Reference](#-api-reference)
+- [User Roles](#-user-roles)
+- [Implementation Status](#-implementation-status)
+- [Brand Colors](#-brand-colors)
+
+---
 
 ## 🎯 Features
 
-- **360° Buyer View** - Complete customer history and relationship management
-- **Sales Pipeline** - Inquiry to order workflow with follow-up tracking
-- **Automatic Costing** - Pull pricing from suppliers, CHA, and transporters
-- **PDF Quotations & Invoices** - Professional branded documents
-- **Export Operations** - Order, procurement, documentation, and shipment tracking
-- **Finance Module** - Invoices, receivables, payables, and profitability
-- **Founder Dashboard** - Real-time KPIs and business analytics
-- **Role-Based Access** - Founder, Sales, Operations, Finance roles
+### CRM & Sales
+- **360° Buyer View** — Complete customer history, contacts, and communication log
+- **Sales Pipeline** — Inquiry → Quotation → Order workflow with stage tracking
+- **Follow-up Management** — Scheduled reminders and task tracking
+- **Buyer Communications** — Email, phone, and meeting history
+
+### Quotations & Pricing
+- **Auto Costing** — Pull pricing from supplier rates, CHA charges, and transport rates
+- **Multi-currency** — Quote in USD, EUR, GBP, or any currency with live CBIC rates
+- **Margin Analysis** — Real-time margin and grand total calculations
+- **Port Selection** — Port of Loading and Port of Discharge on quotations
+- **PDF Generation** — Professional branded quotation documents
+
+### Export Operations
+- **Order Management** — Full lifecycle from order creation to shipment
+- **Procurement Tracking** — Supplier purchase orders and delivery tracking
+- **Document Checklist** — BL, Certificate of Origin, packing list, LC, etc.
+- **Shipment Tracking** — Container details, vessel, ETD/ETA
+
+### Finance
+- **Invoice Management** — Create, send, and track invoices with PDF
+- **Payment Recording** — Partial payments, forex gain tracking
+- **Receivables Report** — Multi-currency receivables converted to base currency
+- **Expenses & Income** — Full P&L visibility
+- **Exchange Rates** — CBIC notification-based rates with market comparison
+
+### Administration
+- **Audit Log** — Full system activity log with filtering (who did what, when)
+- **Record Deletion** — Founder-only permanent deletion with cascade preview
+- **Role-Based Access** — Founder, Admin, Sales, Operations, Finance roles
+- **Webhook Automation** — Event-driven integrations
+- **Master Data** — Countries, ports, currencies, Incoterms, product categories
+
+---
 
 ## 🏗️ Tech Stack
 
-- **Frontend**: React, TypeScript, Tailwind CSS, React Query, Zustand
-- **Backend**: Node.js, Express, Prisma ORM
-- **Database**: PostgreSQL
-- **PDF**: PDFKit
-- **Deployment**: Docker
+### Backend
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| Node.js | 18+ | Runtime |
+| Express | 4.18 | API framework |
+| Prisma | Latest | ORM & migrations |
+| PostgreSQL | 15 | Database |
+| Zod | 3.22 | Request validation |
+| PDFKit | 0.14 | PDF generation |
+| bcryptjs | 2.4 | Password hashing |
+| JWT | Latest | Authentication |
+| Helmet | 7.1 | Security headers |
+| express-rate-limit | 7.1 | Rate limiting |
 
-> A Redis container is included in `docker-compose.yml` and `REDIS_URL` is passed
-> to the API, but **no application code uses Redis yet**. It is reserved for
-> future caching/sessions. You can safely comment the `redis` service out if you
-> want one less container running.
+### Frontend
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| React | 18.2 | UI framework |
+| TypeScript | 5.x | Type safety |
+| Vite | Latest | Build tool |
+| Tailwind CSS | 3.4 | Styling |
+| React Router | 6.22 | Navigation |
+| TanStack Query | 5.17 | Server state |
+| Zustand | 4.5 | Client state |
+| React Hook Form | 7.49 | Forms |
+| Recharts | 2.10 | Charts & graphs |
+| Lucide React | 0.316 | Icons |
+| react-hot-toast | 2.4 | Notifications |
+
+### Infrastructure
+| Technology | Purpose |
+|------------|---------|
+| Docker | Containerization |
+| Docker Compose | Multi-container orchestration |
+| Redis | Reserved for caching (not yet active) |
+| nginx | Reverse proxy (web container) |
+
+---
 
 ## 🚀 Quick Start
 
-### Option A — one command (recommended)
+### Option A — One Command (Recommended)
 
-The only thing you need installed is **Docker Desktop**. Node.js, npm and Prisma
-are *not* required on the host — every build, migration and seed step runs inside
-a container.
+The only requirement is **Docker Desktop**. Node.js, npm, and Prisma are **not** needed on the host — every build, migration, and seed step runs inside a container.
 
-From a terminal in the project folder (or just double-click the file):
-
-```
+```cmd
 deploy.cmd
 ```
 
-The script will:
+The script automatically:
+1. Pulls latest code from GitHub
+2. Checks Docker is installed and running
+3. Creates `.env` with secure random credentials if it doesn't exist
+4. Builds API and web Docker images
+5. Starts PostgreSQL, waits for health check, verifies credentials
+6. Applies database migrations and seeds starter data
+7. Starts all containers and waits for API health check
 
-1. Check Docker is installed and running
-2. Create `.env` from the template, generating a strong random database password
-   and JWT secret if the file doesn't exist yet
-3. Build the API and web images
-4. Start PostgreSQL, wait until it accepts connections, then verify the password
-5. Apply the database migrations (falling back to `db push` if the schema was
-   created that way) and seed the starter data
-6. Start the API and web containers and wait for the health check
+Then open **http://localhost:3000**
 
-Then open **http://localhost:3000**.
-
-Other commands:
+#### Deploy Commands
 
 | Command | What it does |
-|---|---|
-| `deploy.cmd` | Deploy or update. Safe to re-run. |
-| `deploy.cmd reset` | Wipe the database and start clean (asks you to type `DELETE`) |
+|---------|-------------|
+| `deploy.cmd` | Deploy or update (pulls latest code first) |
+| `deploy.cmd reset` | Wipe database and start clean (type `DELETE` to confirm) |
 | `deploy.cmd noseed` | Deploy without inserting starter data |
+| `deploy.cmd nopull` | Deploy without pulling from GitHub |
 | `deploy.cmd stop` | Stop the stack, keep all data |
 | `deploy.cmd logs` | Follow container logs |
 | `deploy.cmd status` | Show what's running |
-| `deploy.cmd help` | List the options |
+| `deploy.cmd fixenv` | Regenerate `.env` file |
+| `deploy.cmd help` | List all options |
 
-After deploying, confirm it actually works:
+> **Linux / macOS:** Use the manual setup steps below. `deploy.cmd` is Windows only.
 
-```
-powershell -ExecutionPolicy Bypass -File scripts\smoke-test.ps1
-```
+---
 
-This logs in and drives the whole flow — buyer → product → quotation → order →
-invoice → payment — plus PDF generation and the auth checks. It creates test
-records, so run it against a fresh database.
+### Option B — Manual Setup (Development)
 
-> **Linux / macOS:** there is no shell equivalent of `deploy.cmd` yet. Use the
-> manual steps in Option B, or run the same sequence by hand:
-> `docker compose up -d postgres`, then
-> `docker compose run --rm --no-deps api sh -c "cd /app/packages/database && npx prisma migrate deploy && npx ts-node prisma/seed.ts"`,
-> then `docker compose up -d`.
-
-### Option B — manual setup (for development)
-
-Use this if you want to run the dev servers with hot reload. This path **does**
-require Node.js 18+ on the host.
+Use this for hot-reload dev servers. Requires Node.js 18+ on the host.
 
 #### Prerequisites
 - Docker Desktop (for PostgreSQL)
@@ -94,231 +149,376 @@ require Node.js 18+ on the host.
 
 #### Steps
 
-1. **Install dependencies** (run from the repo root — this is an npm workspace)
+**1. Install dependencies**
 ```bash
 npm install
 ```
 
-2. **Create your environment file**
+**2. Create environment file**
 ```bash
 cp .env.example .env          # macOS/Linux
 copy .env.example .env        # Windows CMD
-Copy-Item .env.example .env   # Windows PowerShell
 ```
 
-Then open `.env` and set at least these two — Docker Compose reads them and will
-refuse to start with a clear message if they are missing:
+Set these required variables in `.env`:
 
-| Variable | Why it matters |
-|---|---|
-| `POSTGRES_PASSWORD` | Your database password. Must match the one inside `DATABASE_URL`. |
-| `JWT_SECRET` | Signs login tokens. Anyone who knows it can log in as any user. Use a long random string. |
+| Variable | Description |
+|----------|-------------|
+| `POSTGRES_PASSWORD` | Database password (must match `DATABASE_URL`) |
+| `JWT_SECRET` | Token signing secret (min 32 chars, keep secret) |
 
-> `.env` is gitignored and must never be committed. `.env.example` is the
-> template that *is* committed — keep it free of real values.
+> `.env` is gitignored and must never be committed.
 
-> Leave `VITE_API_URL` empty for local development. The Vite dev server proxies
-> `/api` to the API on port 4000, which avoids CORS entirely. Only set it if the
-> frontend must call an API on a different host — and include the `/api` suffix.
-
-3. **Start the database services**
+**3. Start database**
 ```bash
 docker compose up -d postgres redis
 ```
 
-4. **Generate the Prisma client and build the shared database package**
+**4. Build database package**
 ```bash
 npm run db:generate
 npm run build -w packages/database
 ```
 
-> The build step is required. `apps/api` imports `@seabridge/database`, whose
-> entry point is `packages/database/dist/index.js`, so the API cannot start
-> until that package has been compiled at least once.
-
-5. **Create the schema and seed starting data**
-
-For a brand-new empty database:
+**5. Apply schema and seed data**
 ```bash
-npm run db:deploy   # applies packages/database/prisma/migrations
+npm run db:deploy
 npm run db:seed
 ```
 
-> **If `db:deploy` fails with `P3005: The database schema is not empty`**, the
-> database was created with `db:push` rather than migrations. Either use
-> `npm run db:push` from then on, or reset it (this **destroys all data**):
-> ```bash
-> docker compose down -v postgres   # deletes the database volume
-> docker compose up -d postgres
-> npm run db:deploy
-> npm run db:seed
-> ```
-> Use `db:deploy` consistently if you want a reproducible schema history.
-> Use `db:push` only for throwaway local databases.
-
-6. **Start the dev servers**
+**6. Start dev servers**
 ```bash
 npm run dev
 ```
 
 - Frontend: http://localhost:3000
 - API: http://localhost:4000
-- API health check: http://localhost:4000/health
+- Health check: http://localhost:4000/health
 
-7. **Log in, then immediately change the passwords** — see [Default Login](#-default-login).
+---
 
-### Verifying the project
+### Verification
 
-These checks run entirely offline — no server or database required:
+Run these checks without a server:
 
 ```bash
-npm run typecheck        # TypeScript for api + web, zero errors expected
-npm run verify:contract  # every frontend API call maps to a real backend route
-npm run verify:pdf       # generates quotation/invoice PDFs from mock data
-npm run verify:logic     # currency, date and margin calculations
-npm run verify           # all of the above
+npm run typecheck        # TypeScript — zero errors expected
+npm run verify:contract  # Every frontend API call maps to a real backend route
+npm run verify:pdf       # Generates quotation/invoice PDFs from mock data
+npm run verify:logic     # Currency, date and margin calculations
+npm run verify           # All of the above
 npm run db:validate      # Prisma schema validity
 ```
 
-### Production build
-
-Run the steps in this order — the API will serve errors if it starts before the
-schema exists.
-
-```bash
-# 1. Make sure .env holds a strong POSTGRES_PASSWORD and JWT_SECRET
-# 2. Start only the database first
-docker compose up -d postgres
-
-# 3. Apply the schema and seed (uses DATABASE_URL from .env, host port 5432)
-npm run db:deploy
-npm run db:seed
-
-# 4. Build and start the API + web containers
-docker compose up -d --build
-```
-
-- Web: http://localhost:3000
-- API: http://localhost:4000
-
-Then:
-
-- Log in and change both seeded passwords immediately.
-- Confirm `JWT_SECRET` in `.env` is a long random value. Generate one with:
-  ```bash
-  node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
-  ```
-- `.env` is read automatically by Docker Compose. Secrets are **not** stored in
-  `docker-compose.yml` — it only references `${VARIABLE}` names.
-
-To stop everything: `docker compose down` (add `-v` to also delete the database
-volume, which erases all data).
+---
 
 ## 📁 Project Structure
 
 ```
 seabridge-ERP/
 ├── apps/
-│   ├── api/          # Express backend
+│   ├── api/                    # Express backend
 │   │   ├── src/
-│   │   │   ├── routes/       # API routes
-│   │   │   ├── middleware/   # Auth, error handling
-│   │   │   ├── services/     # PDF generation, etc.
-│   │   │   └── utils/        # Helpers
+│   │   │   ├── routes/         # 22 API route files
+│   │   │   │   ├── auth.ts
+│   │   │   │   ├── buyers.ts
+│   │   │   │   ├── quotations.ts
+│   │   │   │   ├── orders.ts
+│   │   │   │   ├── invoices.ts
+│   │   │   │   ├── exchangeRates.ts
+│   │   │   │   ├── audit.ts
+│   │   │   │   ├── recordDeletion.ts
+│   │   │   │   └── ... (16 more)
+│   │   │   ├── middleware/
+│   │   │   │   ├── auth.ts     # JWT authentication
+│   │   │   │   ├── auditLog.ts # Automatic change tracking
+│   │   │   │   └── errorHandler.ts
+│   │   │   ├── services/
+│   │   │   │   ├── pdfService.ts         # Quotation/Invoice PDFs
+│   │   │   │   ├── exchangeRateService.ts # Currency conversion
+│   │   │   │   ├── deactivationService.ts # Soft delete logic
+│   │   │   │   └── eventService.ts       # Webhook dispatcher
+│   │   │   └── utils/
 │   │   └── Dockerfile
-│   └── web/          # React frontend
+│   └── web/                    # React frontend
 │       ├── src/
-│       │   ├── components/   # Reusable components
-│       │   ├── pages/        # Route pages
-│       │   ├── store/        # Zustand state
-│       │   └── lib/          # API client, utils
+│       │   ├── components/
+│       │   │   ├── Layout.tsx              # Sidebar navigation
+│       │   │   ├── DeleteRecordButton.tsx  # Permanent delete (Founder)
+│       │   │   ├── modals/
+│       │   │   └── ui/                     # Reusable UI components
+│       │   ├── pages/          # 26 page components
+│       │   │   ├── Dashboard.tsx
+│       │   │   ├── AuditLog.tsx
+│       │   │   ├── QuotationDetail.tsx
+│       │   │   └── ... (23 more)
+│       │   ├── store/          # Zustand state
+│       │   ├── hooks/          # Custom hooks
+│       │   └── lib/
+│       │       ├── api.ts      # All API client methods
+│       │       ├── utils.ts    # Helpers
+│       │       └── permissions.ts
 │       └── Dockerfile
 ├── packages/
-│   └── database/     # Prisma schema & migrations
+│   └── database/
+│       └── prisma/
+│           ├── schema.prisma   # 44 database models
+│           ├── migrations/
+│           └── seed.ts
+├── scripts/                    # Verification scripts
 ├── docker-compose.yml
+├── docker-compose.dev.yml
+├── deploy.cmd                  # Windows deployment script
+├── deploy.ps1                  # PowerShell deployment script
 └── package.json
 ```
 
+---
+
 ## 🔐 Default Login
 
-The seed creates **two** accounts, both with the password `admin123`:
+The seed creates two accounts with password `Admin@123` (or shown during first seed):
 
 | Email | Role | Purpose |
-|---|---|---|
-| `founder@seabridge.com` | FOUNDER | Full access |
+|-------|------|---------|
+| `founder@seabridge.com` | FOUNDER | Full access including permanent deletion |
 | `hiren@seabridge.com` | SALES | Example sales user |
 
-**Change both passwords the first time you log in.** These credentials are in the
-public source code, so anyone who can reach your instance can log in until you do.
+> **Change both passwords immediately after first login.**
+> Settings → Profile → Change Password
 
-To change a password: log in → **Settings → Profile → Change Password**.
-
-There is no user-management screen yet, so to add or remove staff accounts you
-currently need the API (`POST /api/users`, requires a FOUNDER or ADMIN token) or
-edit `packages/database/prisma/seed.ts` before seeding.
-
-## 🎨 Brand Colors
-
-- **Navy**: #1e3a5f
-- **Gold**: #c9a227
+---
 
 ## 📊 Core Modules
 
-| Module | Description |
-|--------|-------------|
-| Dashboard | KPIs, alerts, pending tasks |
-| CRM/Buyers | Buyer database with 360° view |
-| Sales | Inquiries, pipeline, follow-ups |
-| Quotations | Costing, pricing, PDF export |
-| Orders | Export order management |
-| Operations | Procurement, documents, shipments |
-| Finance | Invoices, payments, receivables |
-| Master Data | Countries, currencies, Incoterms, categories, ports |
-| Settings | Profile, company defaults, document templates |
+### 1. Dashboard
+- Real-time KPIs: revenue, orders, receivables, overdue invoices
+- Sales funnel chart
+- Recent activity feed
+- Pending tasks and alerts
+- Multi-currency totals in base currency (INR)
 
-## ✅ Implementation Status
+### 2. CRM — Buyers
+- Buyer profile with GSTIN, IEC code, shipping address
+- Contact management (multiple contacts per buyer)
+- Communication history (calls, emails, meetings)
+- Full inquiry and order history
 
-Fully working end to end:
+### 3. Sales — Inquiries
+- Pipeline stages: New → Requirements → Pricing → Quoted → Negotiation → Won/Lost
+- Product-level inquiry items with target price
+- Follow-up scheduling and reminders
+- Direct quotation creation from inquiry
 
-- Buyers, Products, Suppliers (with per-product pricing), CHA agents, Transporters
-- Inquiries with pipeline stages and follow-ups
-- Quotations with automatic supplier-price costing, margin calculation and PDF
-- Quotation → Order conversion (transactional)
-- Orders with procurement, document checklist and shipments
-- Invoices with payments, balances, overdue tracking and PDF
-- Founder dashboard, role-based access, master data
+### 4. Quotations
+- Line items with supplier pricing, margin, and unit price
+- Additional costs (CHA, transport, freight)
+- Port of Loading and Port of Discharge selection
+- Correct margin calculation: `margin = subtotal - itemsCost`
+- Correct grand total: `grandTotal = subtotal + additionalCosts`
+- Status workflow: Draft → Sent → Accepted/Rejected/Revised
+- One-click conversion to Export Order
+- PDF download
 
-Present but **not finished** — do not depend on these yet:
+### 5. Orders
+- Full lifecycle: Confirmed → Processing → Ready → Shipped → Delivered
+- Procurement management (supplier POs)
+- Document checklist with status tracking
+- Shipment details (vessel, container, BL, ETD/ETA)
+- Invoice creation from order
 
-| Area | State |
-|---|---|
-| Automation rules | Stored by the API, but no visual builder and rules never fire |
-| Webhooks | Can be created and test-pinged, but business events do not trigger them |
-| API keys | Settings tab shows sample data only; not wired to real keys |
-| Expenses | Database table exists; no API routes or screen, so profitability excludes costs entered here |
-| Tasks | Shown on the dashboard; no screen to create or complete them |
-| User management | API works; no UI |
-| Audit log | Table exists; nothing writes to it yet |
-| Redis | Container runs; no code uses it |
+### 6. Invoices
+- Create from order or standalone
+- Payment recording with date and reference
+- Partial payment tracking
+- Overdue detection and alerts
+- Forex gain calculation on payments
+- Multi-currency receivables report (converted to INR)
+- PDF download
+
+### 7. Exchange Rates
+- CBIC notification-based rate entry
+- Import and Export rates separately
+- Market rate comparison (advisory, from open.er-api.com)
+- Difference percentage with warning for >5% variance
+- Rate history per currency
+- Coverage check — which currencies lack rates
+
+### 8. Finance
+- **Expenses** — Record and categorize business expenses
+- **Income** — Other income with forex tracking
+- **Receivables Report** — All outstanding invoices in base currency
+
+### 9. Audit Log *(Admin/Founder only)*
+- Full activity history — every create, update, delete
+- Filter by entity type, action, user, date range
+- Statistics: today's activity, weekly, total
+- Detailed entry view with change diff (JSON)
+
+### 10. Master Data
+- Countries (with currency assignment)
+- Ports (with code and type)
+- Currencies (with exchange rates)
+- Incoterms
+- Product Categories
+
+### 11. Settings
+- Company profile (name, address, GST, IEC, bank details)
+- User management (invite, roles, deactivate)
+- Number sequences (quotation, order, invoice prefixes)
+- Webhook configuration
+
+---
 
 ## 🔄 Business Flow
 
 ```
-Buyer → Inquiry → Quotation → Order → Shipment → Invoice → Payment → Profitability
+Buyer
+  └── Inquiry (requirements, target price)
+        └── Quotation (costing, margins, PDF)
+              └── Export Order (confirmed)
+                    ├── Procurement (supplier POs)
+                    ├── Documents (BL, CoO, packing list)
+                    └── Shipment
+                          └── Invoice
+                                └── Payment → Profitability
 ```
 
 All data flows automatically — enter once, use everywhere.
 
+---
+
+## 🌐 API Reference
+
+### Base URL
+```
+http://localhost:4000/api
+```
+
+### Authentication
+All endpoints (except `/api/auth/login`) require:
+```
+Authorization: Bearer <JWT_TOKEN>
+```
+
+### Endpoints
+
+| Module | Prefix | Key Operations |
+|--------|--------|----------------|
+| Auth | `/auth` | login, logout, me |
+| Buyers | `/buyers` | CRUD, contacts, communications |
+| Products | `/products` | CRUD, categories |
+| Suppliers | `/suppliers` | CRUD, pricing |
+| CHA | `/cha` | CRUD, rates |
+| Transporters | `/transporters` | CRUD, rates |
+| Inquiries | `/inquiries` | CRUD, items, follow-ups, stage updates |
+| Quotations | `/quotations` | CRUD, PDF, status updates, convert to order |
+| Orders | `/orders` | CRUD, shipments, documents, procurement |
+| Invoices | `/invoices` | CRUD, payments, PDF, receivables report |
+| Exchange Rates | `/exchange-rates` | current, history, notification entry, market check |
+| Dashboard | `/dashboard` | main, sales, operations, finance |
+| Expenses | `/expenses` | CRUD, status |
+| Income | `/income` | CRUD, forex gain |
+| Tasks | `/tasks` | CRUD, complete, reopen |
+| Users | `/users` | CRUD, deactivate, reactivate |
+| Master Data | `/master` | countries, currencies, ports, incoterms, dropdowns |
+| Settings | `/settings` | company profile, number sequences |
+| Audit | `/audit` | list, entity history, stats, options |
+| Records | `/records` | preview delete, permanent delete (Founder only) |
+| Lifecycle | `/lifecycle` | deactivate, reactivate master data |
+| Automation | `/automation` | webhooks, rules |
+
+### Health Check
+```
+GET /health
+→ { status: "ok", timestamp: "..." }
+```
+
+---
+
 ## 🛡️ User Roles
 
-| Role | Access |
-|------|--------|
-| Founder | Full system access |
-| Admin | Full system access |
-| Sales | Buyers, inquiries, quotations |
-| Operations | Orders, shipments, documents |
-| Finance | Invoices, payments, reports |
+| Role | Permissions |
+|------|-------------|
+| **FOUNDER** | Full access + permanent record deletion + audit log |
+| **ADMIN** | Full access + audit log (no permanent deletion) |
+| **SALES** | Buyers, inquiries, quotations |
+| **OPERATIONS** | Orders, shipments, documents, procurement |
+| **FINANCE** | Invoices, payments, expenses, income, exchange rates |
+
+---
+
+## ✅ Implementation Status
+
+### Fully Working ✅
+| Feature | Notes |
+|---------|-------|
+| Authentication (JWT) | Login, logout, sessions, password change |
+| Role-based access control | 5 roles, permission guards on all routes |
+| Buyers & Contacts | CRUD, communication log, full history |
+| Products & Categories | CRUD with HSN code |
+| Suppliers & Pricing | Per-product price lists |
+| CHA Agents & Rates | Port-based rate management |
+| Transporters & Rates | Distance/route-based rates |
+| Inquiries & Follow-ups | Full pipeline, stage tracking |
+| Quotations | Costing, margin, ports, PDF, status workflow |
+| Order Management | Full lifecycle, procurement, documents, shipments |
+| Invoices & Payments | Multi-currency, PDF, receivables |
+| Exchange Rates | CBIC rates, market comparison, history |
+| Dashboard | KPIs, charts, multi-currency totals |
+| Expenses & Income | CRUD with categorization |
+| Tasks | CRUD, complete, reopen |
+| Users | CRUD, roles, deactivate/reactivate |
+| Master Data | Countries, ports, currencies, Incoterms |
+| Audit Log | Full activity tracking with UI viewer |
+| Record Deletion | Founder-only permanent delete with cascade preview |
+| Webhooks | Create, test, SSRF-protected |
+| PDF Generation | Quotation and Invoice PDFs |
+| Deployment | Single `deploy.cmd` script (Windows) |
+
+### Partial / Not Yet Complete ⚠️
+| Feature | Status |
+|---------|--------|
+| Automation Rules | Stored in DB, no visual builder, rules don't fire yet |
+| Email Notifications | `EmailQueue` model exists, SMTP not configured |
+| API Keys | Settings UI shows mock data, not wired to real keys |
+| Redis | Container runs, no application code uses it yet |
+| Tally Export | Not implemented |
+| GST e-Invoice | Not implemented |
+| Mobile App | Web-only |
+
+---
+
+## 🎨 Brand Colors
+
+| Color | Hex | Usage |
+|-------|-----|-------|
+| Navy | `#1e3a5f` | Primary, backgrounds, headings |
+| Gold | `#c9a227` | Accents, CTAs, highlights |
+
+---
+
+## 🗄️ Database
+
+**44 Prisma models** across these domains:
+
+| Domain | Models |
+|--------|--------|
+| Auth | User, Session, ApiKey |
+| Master | Country, Port, Currency, Incoterm, ProductCategory |
+| Products | Product, Supplier, SupplierPrice |
+| Logistics | CHA, CHARate, Transporter, TransportRate |
+| CRM | Buyer, BuyerContact, Communication |
+| Sales | Inquiry, InquiryItem, FollowUp |
+| Quotations | Quotation, QuotationItem, QuotationCost |
+| Orders | ExportOrder, OrderItem, Procurement, Document, Shipment |
+| Finance | Invoice, Payment, Expense, Income |
+| System | CompanyProfile, Employee, Task, AuditLog, SystemSetting |
+| Sequences | NumberSequence |
+| Automation | Webhook, WebhookLog, Template, AutomationRule, EmailQueue |
+
+---
 
 ## 📝 License
 
-Proprietary - SeaBridge Exports © 2024
+Proprietary — SeaBridge Exports © 2026. All rights reserved.
