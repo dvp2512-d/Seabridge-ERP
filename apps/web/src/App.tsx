@@ -26,6 +26,7 @@ import Income from '@/pages/Income';
 import Tasks from '@/pages/Tasks';
 import Users from '@/pages/Users';
 import ExchangeRates from '@/pages/ExchangeRates';
+import AuditLog from '@/pages/AuditLog';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore();
@@ -72,6 +73,7 @@ function App() {
                 <Route path="/exchange-rates" element={<ExchangeRates />} />
                 <Route path="/master-data" element={<MasterData />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/audit-log" element={<AuditLog />} />
               </Routes>
             </Layout>
           </ProtectedRoute>

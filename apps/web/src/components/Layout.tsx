@@ -25,6 +25,7 @@ import {
   CheckSquare,
   UserCog,
   TrendingUp,
+  History,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -57,6 +58,7 @@ const navigation: {
   { name: 'Exchange Rates', href: '/exchange-rates', icon: TrendingUp, permission: 'MASTER_VIEW' },
   { name: 'Users', href: '/users', icon: UserCog, permission: 'USER_MANAGE' },
   { name: 'Master Data', href: '/master-data', icon: Database, permission: 'MASTER_MANAGE' },
+  { name: 'Audit Log', href: '/audit-log', icon: History, permission: 'SETTINGS_MANAGE' },
 ];
 
 export default function Layout({ children }: LayoutProps) {

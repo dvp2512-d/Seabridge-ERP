@@ -383,3 +383,34 @@ export const usersApi = {
   resetPassword: (id: string, password: string) =>
     api.post(`/users/${id}/reset-password`, { password }),
 };
+
+// ============================================
+// AUDIT LOG API
+// ============================================
+
+export const auditApi = {
+  /** List all audit log entries with filtering */
+  list: (params?: any) => api.get('/audit', { params }),
+  /** Get audit history for a specific entity */
+  forEntity: (entityType: string, entityId: string) =>
+    api.get(`/audit/entity/${entityType}/${entityId}`),
+  /** Get audit statistics */
+  stats: () => api.get('/audit/stats'),
+  /** Get filter options */
+  options: () => api.get('/audit/options'),
+};
+
+// ============================================
+// RECORD DELETION API (Founder Only)
+// ============================================
+
+export const recordsApi = {
+  /** Preview what will be deleted */
+  preview: (resource: string, id: string) =>
+    api.get(`/records/${resource}/${id}/preview`),
+  /** Permanently delete a record */
+  delete: (resource: string, id: string) =>
+    api.delete(`/records/${resource}/${id}`, { data: { confirmDelete: 'DELETE' } }),
+  /** Get list of deletable resource types */
+  types: () => api.get('/records/types'),
+};
