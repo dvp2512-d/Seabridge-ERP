@@ -25,23 +25,6 @@ services:
     networks:
       - seabridge-network
 
-  # Redis for caching and sessions
-  redis:
-    image: redis:7-alpine
-    container_name: seabridge-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - seabridge-network
-
   # Backend API
   api:
     build:
@@ -52,7 +35,6 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-seabridge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-seabridge_erp}
-      REDIS_URL: redis://redis:6379
       # Anyone who knows this value can forge a login token for any user.
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is not set - copy .env.example to .env first}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
@@ -65,11 +47,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      # Redis is started for future use but no code depends on it, so the API is
-      # not blocked on its health. Add a service_healthy condition here if you
-      # later introduce caching or sessions.
-      redis:
-        condition: service_started
     networks:
       - seabridge-network
 
@@ -94,7 +71,6 @@ services:
 
 volumes:
   postgres_data:
-  redis_data:
 
 networks:
   seabridge-network:

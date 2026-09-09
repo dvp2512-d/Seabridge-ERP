@@ -277,25 +277,6 @@ export const automationApi = {
 };
 
 // ============================================
-// LIFECYCLE API (deactivation, reactivation, deletion)
-// ============================================
-
-export const lifecycleApi = {
-  preview: (resource: string, id: string) =>
-    api.get(`/lifecycle/${resource}/${id}/preview`),
-  previewDelete: (resource: string, id: string) =>
-    api.get(`/lifecycle/${resource}/${id}/preview-delete`),
-  deactivate: (resource: string, id: string) =>
-    api.post(`/lifecycle/${resource}/${id}/deactivate`),
-  reactivate: (resource: string, id: string) =>
-    api.post(`/lifecycle/${resource}/${id}/reactivate`),
-  deleteRecord: (resource: string, id: string) =>
-    api.delete(`/lifecycle/${resource}/${id}`),
-  reactivateUser: (id: string) =>
-    api.post(`/users/${id}/reactivate`),
-};
-
-// ============================================
 // EXCHANGE RATES API
 // ============================================
 
