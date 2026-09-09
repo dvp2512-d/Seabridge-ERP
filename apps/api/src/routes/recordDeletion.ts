@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { prisma } from '@seabridge/database';
+import { prisma, Prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { NotFoundError, AppError } from '../middleware/errorHandler';
 
@@ -203,8 +203,7 @@ router.delete('/:resource/:id', can('RECORD_DELETE'), async (req, res, next) => 
           action: 'PERMANENT_DELETE',
           entityType: config.model.toUpperCase(),
           entityId: id,
-          oldValues: record,
-          newValues: null,
+          oldValues: record as Prisma.InputJsonValue,
           ipAddress: req.ip || null,
         },
       });
