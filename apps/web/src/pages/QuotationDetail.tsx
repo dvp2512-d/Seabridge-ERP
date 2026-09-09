@@ -117,6 +117,7 @@ export default function QuotationDetail() {
 
   // Calculate totals - using stored values from quotation
   const itemsCost = quotation.items?.reduce((sum: number, item: any) => sum + (item.totalCost || 0), 0) || 0;
+  const itemsTotal = quotation.items?.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0) || 0;
   const totalQuantity = quotation.items?.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0) || 0;
   const additionalCosts = quotation.costs?.reduce((sum: number, cost: any) => sum + (cost.amount || 0), 0) || 0;
   
