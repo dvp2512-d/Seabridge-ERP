@@ -5,6 +5,12 @@ import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
 import { generateInvoicePDF } from '../services/pdfService';
+import {
+  buildRateMap,
+  findRate,
+  toBaseCurrency,
+} from '../services/exchangeRateService';
+import { emitEvent } from '../services/eventService';
 
 const router: Router = Router();
 
@@ -25,7 +31,7 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
       ];
     }
 
-    const [invoices, total, statusGroups, amountTotals, overdueCount] = await Promise.all([
+    const [invoices, total, statusGroups, overdueCount] = await Promise.all([
       prisma.invoice.findMany({
         where,
         include: {
@@ -39,16 +45,14 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
       }),
       prisma.invoice.count({ where }),
       // Summary figures must cover the whole filtered set, not just this page,
-      // otherwise the dashboard cards understate receivables.
+      // otherwise the dashboard cards understate receivables. Grouped by currency
+      // as well so the money can be converted before being totalled - invoices
+      // in different currencies cannot simply be added.
       prisma.invoice.groupBy({
-        by: ['status'],
+        by: ['status', 'currencyId'],
         where,
         _count: { _all: true },
-        _sum: { balanceAmount: true, paidAmount: true },
-      }),
-      prisma.invoice.aggregate({
-        where,
-        _sum: { totalAmount: true, paidAmount: true, balanceAmount: true },
+        _sum: { balanceAmount: true, paidAmount: true, totalAmount: true },
       }),
       prisma.invoice.count({
         where: {
@@ -59,25 +63,48 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
       }),
     ]);
 
+    // Fold the currency dimension away, converting as we go. Records whose
+    // currency has no notified rate are counted so the UI can say the totals are
+    // incomplete instead of showing a smaller number as if it were the whole set.
+    const { base, rates } = await buildRateMap(new Date());
+
     const countByStatus: Record<string, number> = {};
     let outstanding = 0;
+    let invoiced = 0;
+    let collected = 0;
+    let unconverted = 0;
+
     for (const group of statusGroups) {
-      countByStatus[group.status] = group._count._all;
+      countByStatus[group.status] = (countByStatus[group.status] ?? 0) + group._count._all;
+
+      const rate = rates.get(group.currencyId);
+      if (rate === undefined) {
+        unconverted += group._count._all;
+        continue;
+      }
+
+      invoiced += Number(group._sum.totalAmount ?? 0) * rate;
+      collected += Number(group._sum.paidAmount ?? 0) * rate;
       if (!['PAID', 'CANCELLED'].includes(group.status)) {
-        outstanding += Number(group._sum.balanceAmount ?? 0);
+        outstanding += Number(group._sum.balanceAmount ?? 0) * rate;
       }
     }
+
+    const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
 
     res.json({
       success: true,
       data: invoices,
       pagination: { page: Number(page), limit: Number(limit), total },
       summary: {
+        // Every money figure here is in this currency, not the invoice's own.
+        baseCurrency: base,
+        unconvertedRecords: unconverted,
         countByStatus,
         overdueCount,
-        totalInvoiced: Number(amountTotals._sum.totalAmount ?? 0),
-        totalCollected: Number(amountTotals._sum.paidAmount ?? 0),
-        totalOutstanding: outstanding,
+        totalInvoiced: round2(invoiced),
+        totalCollected: round2(collected),
+        totalOutstanding: round2(outstanding),
       },
     });
   } catch (error) {
@@ -146,6 +173,29 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
     const subtotal = Number(order.totalValue);
     const taxAmount = validation.data.taxAmount || 0;
     const totalAmount = subtotal + taxAmount;
+    const invoiceDate = validation.data.invoiceDate || new Date();
+
+    /**
+     * Stamp the notified rate in force on the invoice date.
+     *
+     * Recorded on the invoice rather than looked up at print time so reprinting
+     * later gives the same rupee value, even after a new notification supersedes
+     * the rate. A missing rate is not fatal here - the invoice is still valid,
+     * it simply cannot show a rupee valuation until the rate is entered.
+     */
+    let exchangeRate = 1;
+    let exchangeRateRef: string | null = null;
+    let exchangeRateDate: Date | null = null;
+
+    const base = await prisma.currency.findFirst({ where: { isBaseCurrency: true } });
+    if (base && currency.id !== base.id) {
+      const resolved = await findRate(currency.id, invoiceDate, 'EXPORT');
+      if (resolved) {
+        exchangeRate = resolved.rate;
+        exchangeRateRef = resolved.notificationRef;
+        exchangeRateDate = resolved.effectiveFrom;
+      }
+    }
 
     const invoice = await prisma.invoice.create({
       data: {
@@ -154,12 +204,15 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
         buyerId: order.buyerId,
         currencyId: currency.id,
         type: validation.data.type || 'EXPORT',
-        invoiceDate: validation.data.invoiceDate || new Date(),
+        invoiceDate,
         dueDate: validation.data.dueDate,
         subtotal,
         taxAmount,
         totalAmount,
         balanceAmount: totalAmount,
+        exchangeRate,
+        exchangeRateRef,
+        exchangeRateDate,
         notes: validation.data.notes,
         termsConditions: validation.data.termsConditions,
       },
@@ -170,6 +223,7 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
       },
     });
 
+    emitEvent('invoice.created', invoice);
     res.status(201).json({ success: true, data: invoice });
   } catch (error) {
     next(error);
@@ -246,6 +300,29 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
     const newBalanceAmount = Math.max(0, Number(invoice.totalAmount) - newPaidAmount);
     const newStatus = newBalanceAmount <= 0.01 ? 'PAID' : 'PARTIALLY_PAID';
 
+    /**
+     * Convert the payment into the base currency for the buyer's running revenue
+     * total. Resolved before the transaction so a rate lookup cannot hold a
+     * database transaction open.
+     *
+     * A payment in a currency with no notified rate still records correctly; it
+     * simply does not move the revenue figure, which is better than corrupting it
+     * with an unconverted amount.
+     */
+    let revenueInBase = 0;
+    try {
+      const converted = await toBaseCurrency(
+        validation.data.amount,
+        invoice.currencyId,
+        validation.data.paymentDate ?? new Date()
+      );
+      revenueInBase = converted.amount;
+    } catch {
+      console.warn(
+        `[payment] no exchange rate for ${invoice.currencyId} on the payment date; buyer revenue not incremented`
+      );
+    }
+
     // Payment, invoice rollup and buyer revenue must all move together.
     const payment = await prisma.$transaction(async (tx) => {
       const created = await tx.payment.create({
@@ -265,9 +342,13 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
         },
       });
 
+      // Buyer revenue accumulates across many payments, which may be in
+      // different currencies, so it is converted into the base currency first.
+      // Incrementing with the raw amount made "top buyers by revenue" a ranking
+      // of mixed units.
       await tx.buyer.update({
         where: { id: invoice.buyerId },
-        data: { totalRevenue: { increment: validation.data.amount } },
+        data: { totalRevenue: { increment: revenueInBase } },
       });
 
       return created;

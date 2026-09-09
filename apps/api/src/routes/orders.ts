@@ -2,9 +2,11 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
-import { ValidationError, NotFoundError } from '../middleware/errorHandler';
+import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
 import { createOrderFromQuotation } from '../services/orderService';
+import { buildRateMapByCode } from '../services/exchangeRateService';
+import { emitEvent } from '../services/eventService';
 
 const router: Router = Router();
 
@@ -25,7 +27,7 @@ router.get('/', can('OPERATIONS_VIEW'), async (req, res, next) => {
       ];
     }
 
-    const [orders, total, statusGroups, valueTotals, overdueCount] = await Promise.all([
+    const [orders, total, statusGroups, overdueCount] = await Promise.all([
       prisma.exportOrder.findMany({
         where,
         include: {
@@ -39,13 +41,14 @@ router.get('/', can('OPERATIONS_VIEW'), async (req, res, next) => {
       }),
       prisma.exportOrder.count({ where }),
       // Pipeline counts across the whole filtered set, not just this page.
+      // Grouped by currency as well, because order values in different
+      // currencies cannot be added - they are converted before totalling.
       prisma.exportOrder.groupBy({
-        by: ['status'],
+        by: ['status', 'currency'],
         where,
         _count: { _all: true },
         _sum: { totalValue: true },
       }),
-      prisma.exportOrder.aggregate({ where, _sum: { totalValue: true } }),
       prisma.exportOrder.count({
         where: {
           ...where,
@@ -55,9 +58,24 @@ router.get('/', can('OPERATIONS_VIEW'), async (req, res, next) => {
       }),
     ]);
 
+    // Fold the currency dimension away, converting into the base currency.
+    // Orders whose currency has no notified rate are counted rather than added,
+    // so the total is never quietly incomplete.
+    const { base, rates } = await buildRateMapByCode(new Date());
+
     const countByStatus: Record<string, number> = {};
+    let totalValue = 0;
+    let unconverted = 0;
+
     for (const group of statusGroups) {
-      countByStatus[group.status] = group._count._all;
+      countByStatus[group.status] = (countByStatus[group.status] ?? 0) + group._count._all;
+
+      const rate = rates.get(group.currency);
+      if (rate === undefined) {
+        unconverted += group._count._all;
+        continue;
+      }
+      totalValue += Number(group._sum.totalValue ?? 0) * rate;
     }
 
     res.json({
@@ -65,9 +83,12 @@ router.get('/', can('OPERATIONS_VIEW'), async (req, res, next) => {
       data: orders,
       pagination: { page: Number(page), limit: Number(limit), total },
       summary: {
+        // totalValue is in this currency, not each order's own.
+        baseCurrency: base,
+        unconvertedRecords: unconverted,
         countByStatus,
         overdueCount,
-        totalValue: Number(valueTotals._sum.totalValue ?? 0),
+        totalValue: Math.round((totalValue + Number.EPSILON) * 100) / 100,
       },
     });
   } catch (error) {
@@ -122,6 +143,7 @@ router.post('/', can('OPERATIONS_MANAGE'), async (req, res, next) => {
       notes: validation.data.notes,
     });
 
+    emitEvent('order.created', order);
     res.status(201).json({ success: true, data: order });
   } catch (error) {
     next(error);

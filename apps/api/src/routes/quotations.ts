@@ -5,6 +5,8 @@ import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode, calculateMarginPercent } from '../utils/helpers';
 import { generateQuotationPDF } from '../services/pdfService';
+import { buildRateMap } from '../services/exchangeRateService';
+import { emitEvent } from '../services/eventService';
 import { createOrderFromQuotation } from '../services/orderService';
 
 const router: Router = Router();
@@ -26,7 +28,7 @@ router.get('/', can('SALES_VIEW'), async (req, res, next) => {
       ];
     }
 
-    const [quotations, total, statusGroups, valueTotals] = await Promise.all([
+    const [quotations, total, statusGroups] = await Promise.all([
       prisma.quotation.findMany({
         where,
         include: {
@@ -41,19 +43,32 @@ router.get('/', can('SALES_VIEW'), async (req, res, next) => {
       }),
       prisma.quotation.count({ where }),
       // Status counts for the whole filtered set so the summary cards are correct
-      // even when the list is paginated.
+      // even when the list is paginated. Grouped by currency too, since quotation
+      // totals in different currencies cannot be added directly.
       prisma.quotation.groupBy({
-        by: ['status'],
+        by: ['status', 'currencyId'],
         where,
         _count: { _all: true },
         _sum: { grandTotal: true },
       }),
-      prisma.quotation.aggregate({ where, _sum: { grandTotal: true } }),
     ]);
 
+    // Fold the currency dimension away, converting into the base currency.
+    const { base, rates } = await buildRateMap(new Date());
+
     const countByStatus: Record<string, number> = {};
+    let totalValue = 0;
+    let unconverted = 0;
+
     for (const group of statusGroups) {
-      countByStatus[group.status] = group._count._all;
+      countByStatus[group.status] = (countByStatus[group.status] ?? 0) + group._count._all;
+
+      const rate = rates.get(group.currencyId);
+      if (rate === undefined) {
+        unconverted += group._count._all;
+        continue;
+      }
+      totalValue += Number(group._sum.grandTotal ?? 0) * rate;
     }
 
     res.json({
@@ -61,8 +76,11 @@ router.get('/', can('SALES_VIEW'), async (req, res, next) => {
       data: quotations,
       pagination: { page: Number(page), limit: Number(limit), total },
       summary: {
+        // totalValue is in this currency, not each quotation's own.
+        baseCurrency: base,
+        unconvertedRecords: unconverted,
         countByStatus,
-        totalValue: Number(valueTotals._sum.grandTotal ?? 0),
+        totalValue: Math.round((totalValue + Number.EPSILON) * 100) / 100,
       },
     });
   } catch (error) {
@@ -135,7 +153,7 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
 
     // Calculate totals
     let subtotal = 0;
-    let totalCost = 0;
+    let itemsCost = 0;
     const processedItems = items.map(item => {
       const itemTotalCost = item.unitCost * item.quantity;
       const itemTotalPrice = item.unitPrice * item.quantity;
@@ -143,7 +161,7 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
       const marginPercent = calculateMarginPercent(itemTotalCost, itemTotalPrice);
 
       subtotal += itemTotalPrice;
-      totalCost += itemTotalCost;
+      itemsCost += itemTotalCost;
 
       return {
         ...item,
@@ -154,18 +172,15 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
       };
     });
 
-    // Add other costs
     const additionalCosts = costs?.reduce((sum, c) => sum + c.amount, 0) || 0;
-    totalCost += additionalCosts;
 
-    // Calculate margin based on goods cost only (not including freight/additional costs)
-    // This matches business expectation: margin = selling price - procurement cost
-    const goodsCost = totalCost - additionalCosts;
-    const totalMargin = subtotal - goodsCost;
-    const marginPercent = goodsCost > 0 ? Math.round((totalMargin / goodsCost) * 10000) / 100 : 0;
-
-    // grandTotal = subtotal + additional costs (freight, insurance, etc.)
+    // Additional costs (CHA, transport, insurance...) are recorded under total
+    // cost and billed on to the buyer, but they do NOT earn margin. Margin comes
+    // from the line items only, so adding a shipment cost never reduces it.
+    const totalCost = itemsCost + additionalCosts;
+    const totalMargin = subtotal - itemsCost;
     const grandTotal = subtotal + additionalCosts;
+    const marginPercent = calculateMarginPercent(itemsCost, subtotal);
 
     const quotation = await prisma.quotation.create({
       data: {
@@ -196,6 +211,7 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
       });
     }
 
+    emitEvent('quotation.created', quotation);
     res.status(201).json({ success: true, data: quotation });
   } catch (error) {
     next(error);
