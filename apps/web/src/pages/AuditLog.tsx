@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { auditApi } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
-import { SelectField, FormField } from '@/components/ui/FormFields';
+import { SelectField } from '@/components/ui/FormFields';
 import Modal from '@/components/ui/Modal';
 import {
   History,
