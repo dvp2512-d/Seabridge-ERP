@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { invoicesApi, getApiErrorMessage } from '@/lib/api';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
+import DeleteRecordButton from '@/components/DeleteRecordButton';
 import { formatCurrency, formatDate, downloadFile, isPastDue, cn } from '@/lib/utils';
 import {
   ArrowLeft,
@@ -135,6 +136,12 @@ export default function InvoiceDetail() {
           </div>
         </div>
         <div className="flex gap-2">
+          <DeleteRecordButton
+            resourceType="invoice"
+            recordId={id!}
+            recordName={`Invoice ${invoice.invoiceNumber}`}
+            redirectTo="/invoices"
+          />
           <button onClick={handleDownloadPdf} className="btn btn-secondary">
             <Download className="w-4 h-4 mr-2" />
             Download PDF

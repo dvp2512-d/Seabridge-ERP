@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { ordersApi, chaApi, transportersApi, suppliersApi, masterApi } from '@/lib/api';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
+import DeleteRecordButton from '@/components/DeleteRecordButton';
 import { formatCurrency, formatDate, getStatusColor, isPastDue, cn } from '@/lib/utils';
 import {
   ArrowLeft,
@@ -129,6 +130,12 @@ export default function OrderDetail() {
           </div>
         </div>
         <div className="flex gap-2">
+          <DeleteRecordButton
+            resourceType="order"
+            recordId={id!}
+            recordName={`Order ${order.orderNumber}`}
+            redirectTo="/orders"
+          />
           <button onClick={() => setShowStatusModal(true)} className="btn btn-secondary">
             <Edit className="w-4 h-4 mr-2" />
             Update Status

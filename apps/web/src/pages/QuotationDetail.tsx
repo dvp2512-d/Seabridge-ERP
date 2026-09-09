@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { quotationsApi } from '@/lib/api';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
+import DeleteRecordButton from '@/components/DeleteRecordButton';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
 import {
   ArrowLeft,
@@ -145,6 +146,12 @@ export default function QuotationDetail() {
           </div>
         </div>
         <div className="flex gap-2">
+          <DeleteRecordButton
+            resourceType="quotation"
+            recordId={id!}
+            recordName={`Quotation ${quotation.quotationNumber}`}
+            redirectTo="/quotations"
+          />
           <button onClick={handleDownloadPdf} className="btn btn-secondary">
             <Download className="w-4 h-4 mr-2" />
             Download PDF

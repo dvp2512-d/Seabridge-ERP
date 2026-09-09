@@ -1,4 +1,14 @@
-// Comprehensive Inquiry Detail Pageimport { useState } from 'react';import { useParams, Link } from 'react-router-dom';import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';import toast from 'react-hot-toast';import { inquiriesApi, productsApi } from '@/lib/api';import Modal from '@/components/ui/Modal';import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';import { formatCurrency, formatDate, getStatusColor, getPriorityColor, cn } from '@/lib/utils';import {
+// Comprehensive Inquiry Detail Page
+import { useState } from 'react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import toast from 'react-hot-toast';
+import { inquiriesApi, productsApi } from '@/lib/api';
+import Modal from '@/components/ui/Modal';
+import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
+import DeleteRecordButton from '@/components/DeleteRecordButton';
+import { formatCurrency, formatDate, getStatusColor, getPriorityColor, cn } from '@/lib/utils';
+import {
   ArrowLeft,
   Edit2,
   Plus,
@@ -90,6 +100,12 @@ export default function InquiryDetail() {
           </div>
         </div>
         <div className="flex gap-2">
+          <DeleteRecordButton
+            resourceType="inquiry"
+            recordId={id!}
+            recordName={`Inquiry ${inquiry.inquiryNumber}`}
+            redirectTo="/inquiries"
+          />
           <button onClick={() => setShowEditModal(true)} className="btn btn-secondary">
             <Edit2 className="w-4 h-4 mr-2" />
             Edit
