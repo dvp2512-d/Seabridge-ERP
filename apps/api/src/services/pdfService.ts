@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import { calculateInclusiveUnitPrices } from './inclusivePricing';
 
 // SeaBridge brand colors
 const COLORS = {
@@ -84,10 +85,16 @@ function ensureSpace(doc: Doc, yPos: number, needed = 20): number {
   return PAGE.continuationTop;
 }
 
-/** Prisma returns Decimal objects; normalise before formatting. */
-function money(value: unknown, symbol: string): string {
+/**
+ * Prisma returns Decimal objects; normalise before formatting.
+ *
+ * `decimals` exists because an inclusive unit price may carry more than two
+ * decimals. Printing such a price rounded to two would make the row fail the
+ * buyer's own multiplication, so it is shown at the precision it was computed at.
+ */
+function money(value: unknown, symbol: string, decimals = 2): string {
   const n = Number(value ?? 0);
-  return `${symbol}${(Number.isFinite(n) ? n : 0).toFixed(2)}`;
+  return `${symbol}${(Number.isFinite(n) ? n : 0).toFixed(decimals)}`;
 }
 
 function drawItemsHeader(doc: Doc, yPos: number, columns: [string, number][]): number {
@@ -106,6 +113,37 @@ function drawItemsHeader(doc: Doc, yPos: number, columns: [string, number][]): n
 export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
   const { doc, done } = createDocument();
   const symbol = quotation.currency?.symbol || '$';
+
+  // Additional costs are billed to the buyer but belong to the quotation as a
+  // whole, and this table has a single total column with no charges line. So the
+  // charges are folded into the unit prices, which keeps Qty x Unit Price =
+  // Amount on every row and makes the column sum to the grand total.
+  //
+  // Uses the same helper as the order conversion, so what the buyer is quoted per
+  // unit is exactly what the order and its invoices will carry.
+  const additionalCostsTotal = (quotation.costs ?? []).reduce(
+    (sum: number, cost: any) => sum + Number(cost.amount ?? 0),
+    0
+  );
+  const quotationItems: any[] = quotation.items ?? [];
+  const pricing = calculateInclusiveUnitPrices(
+    quotationItems.map((item: any) => ({
+      quantity: Number(item.quantity ?? 0),
+      unitPrice: Number(item.unitPrice ?? 0),
+    })),
+    additionalCostsTotal
+  );
+  // pricing.lines is built by mapping the items in order, so indexes line up.
+  const items = quotationItems.map((item: any, index: number) => ({
+    ...item,
+    printUnitPrice: pricing.lines[index]?.unitPrice ?? Number(item.unitPrice ?? 0),
+    printAmount: pricing.lines[index]?.amount ?? Number(item.totalPrice ?? 0),
+    printDecimals: pricing.lines[index]?.decimals ?? 2,
+  }));
+  const goodsSubtotal = quotationItems.reduce(
+    (sum: number, item: any) => sum + Number(item.totalPrice ?? 0),
+    0
+  );
 
   try {
     // Header
@@ -169,7 +207,6 @@ export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
       ['Total', 450],
     ]);
 
-    const items = quotation.items ?? [];
     items.forEach((item: any, index: number) => {
       const startedNewPage = yPos + 20 > PAGE.contentBottom;
       yPos = ensureSpace(doc, yPos, 20);
@@ -192,8 +229,8 @@ export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
         .text(item.product?.name || '', 55, yPos, { width: 190 })
         .text(String(item.quantity ?? ''), 250, yPos)
         .text(item.unit || 'KG', 300, yPos)
-        .text(money(item.unitPrice, symbol), 350, yPos)
-        .text(money(item.totalPrice, symbol), 450, yPos, {
+        .text(money(item.printUnitPrice, symbol, item.printDecimals), 350, yPos)
+        .text(money(item.printAmount, symbol), 450, yPos, {
           align: 'right',
           width: 100,
         });
@@ -219,13 +256,21 @@ export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
     doc.fillColor(COLORS.gray).fontSize(10).text('Subtotal:', 350, yPos);
     doc
       .fillColor('#000')
-      .text(money(quotation.subtotal, symbol), 450, yPos, { align: 'right', width: 100 });
+      .text(money(goodsSubtotal, symbol), 450, yPos, { align: 'right', width: 100 });
+
+    if (additionalCostsTotal > 0) {
+      yPos += 18;
+      doc.fillColor(COLORS.gray).fontSize(10).text('Additional Charges:', 350, yPos);
+      doc
+        .fillColor('#000')
+        .text(money(additionalCostsTotal, symbol), 450, yPos, { align: 'right', width: 100 });
+    }
 
     yPos += 20;
     doc.fillColor(COLORS.navy).fontSize(11).text('Grand Total:', 350, yPos);
     doc
       .fillColor(COLORS.navy)
-      .text(money(quotation.grandTotal, symbol), 450, yPos, { align: 'right', width: 100 });
+      .text(money(pricing.total, symbol), 450, yPos, { align: 'right', width: 100 });
 
     // Terms
     yPos = ensureSpace(doc, yPos + 40, 60);

@@ -1,6 +1,7 @@
 import { prisma } from '@seabridge/database';
 import { AppError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
+import { calculateInclusiveUnitPrices } from './inclusivePricing';
 
 /**
  * Default export documentation checklist created with every new order.
@@ -39,6 +40,7 @@ export async function createOrderFromQuotation(
     where: { id: quotationId },
     include: {
       items: true,
+      costs: true,
       currency: true,
     },
   });
@@ -63,6 +65,41 @@ export async function createOrderFromQuotation(
 
   const orderNumber = await generateCode('ORDER', 'ORD');
 
+  /**
+   * Fold the quotation's additional costs into the unit prices.
+   *
+   * The quotation keeps the goods price and the cost rows separate, which is what
+   * makes margin measurable per line. An order cannot: it carries a single
+   * totalValue, and a commercial invoice built from it must show lines that sum
+   * to that total or customs will query the discrepancy. So the order stores the
+   * all-inclusive figure - goods price plus the costs spread per unit - and the
+   * quotation keeps the breakdown.
+   *
+   * Costs are spread evenly per unit rather than by line value. They are
+   * overwhelmingly freight and handling, which follow weight and volume rather
+   * than what the goods are worth; loading them by value inflates an expensive
+   * line and under-recovers on a cheap one.
+   */
+  const additionalCosts = quotation.costs.reduce((sum, c) => sum + Number(c.amount), 0);
+  const pricing = calculateInclusiveUnitPrices(
+    quotation.items.map((item) => ({
+      quantity: Number(item.quantity),
+      unitPrice: Number(item.unitPrice),
+    })),
+    additionalCosts
+  );
+
+  // Where a per-unit cost cannot be expressed exactly - spreading 137.77 across
+  // 25,000 units, say - the order total ends a few paise from the quotation's.
+  // That is logged rather than refused: blocking a legitimate order over a
+  // rounding difference would be worse than the difference itself.
+  if (!pricing.reconciled) {
+    console.warn(
+      `[order] ${quotation.quotationNumber}: additional costs leave a rounding remainder of ` +
+        `${pricing.remainder}; order total is ${pricing.total}`
+    );
+  }
+
   return prisma.$transaction(async (tx) => {
     const order = await tx.exportOrder.create({
       data: {
@@ -77,19 +114,23 @@ export async function createOrderFromQuotation(
         // before any shipment record exists.
         portOfLoadingId: options.portOfLoadingId ?? quotation.portOfLoadingId ?? null,
         portOfDischargeId: options.portOfDischargeId ?? quotation.portOfDischargeId ?? null,
-        totalValue: quotation.grandTotal,
+        // Equals the sum of the line amounts below, which is the quotation's
+        // grandTotal once rounding has reconciled.
+        totalValue: pricing.total,
         // Carry the quotation's currency across instead of defaulting to USD.
         currency: quotation.currency.code,
         paymentTerms: quotation.paymentTerms,
         deliveryTerms: quotation.deliveryTerms,
         notes: options.notes,
         items: {
-          create: quotation.items.map((item) => ({
+          // pricing.lines is built by mapping quotation.items in order, so the
+          // indexes line up.
+          create: quotation.items.map((item, index) => ({
             productId: item.productId,
             quantity: item.quantity,
             unit: item.unit,
-            unitPrice: item.unitPrice,
-            totalPrice: item.totalPrice,
+            unitPrice: pricing.lines[index].unitPrice,
+            totalPrice: pricing.lines[index].amount,
             notes: item.specifications,
           })),
         },

@@ -73,7 +73,6 @@ export default function NewQuotation() {
   // Items and costs
   const [items, setItems] = useState<QuotationItem[]>([]);
   const [additionalCosts, setAdditionalCosts] = useState<AdditionalCost[]>([]);
-  const [marginPercent, setMarginPercent] = useState<number>(15); // Default 15% margin
   const [showItemModal, setShowItemModal] = useState(false);
   const [showCostModal, setShowCostModal] = useState(false);
   const [editingItem, setEditingItem] = useState<QuotationItem | null>(null);
@@ -136,38 +135,40 @@ export default function NewQuotation() {
     if (preferred) setCurrencyId(preferred.id);
   }, [dropdowns, currencyId]);
 
-  // Calculate totals with new formula:
-  // 1. Subtotal (Cost) = sum of (unitCost × quantity)
-  // 2. Margin = Subtotal × marginPercent%
-  // 3. Grand Total = Subtotal + Margin + Additional Costs
-  // 4. Buyer Unit Price = Grand Total ÷ Total Quantity
+  // Quotation totals. Each line already carries its own selling price, derived
+  // from its own margin in the item modal, so the rollup only has to add up.
+  //
+  //   itemsSubtotal = sum of line totalPrice     the goods, as quoted
+  //   itemsCost     = sum of line totalCost      what the goods cost us
+  //   totalCost     = itemsCost + additionalCosts
+  //   totalMargin   = itemsSubtotal - itemsCost  margin from line items only
+  //   grandTotal    = itemsSubtotal + additionalCosts
+  //
+  // Additional costs sit under total cost and are billed on to the buyer, but
+  // they do not earn margin. Margin comes from the line items only, so adding
+  // a shipment cost never reduces it.
   const totals = useMemo(() => {
+    const itemsSubtotal = items.reduce((sum, item) => sum + item.totalPrice, 0);
     const itemsCost = items.reduce((sum, item) => sum + item.totalCost, 0);
     const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
     const additionalCostsTotal = additionalCosts.reduce((sum, cost) => sum + cost.amount, 0);
-    
-    // Calculate margin on cost
-    const totalMargin = itemsCost * (marginPercent / 100);
-    const subtotalWithMargin = itemsCost + totalMargin;
-    
-    // Grand total = cost + margin + additional costs
-    const grandTotal = subtotalWithMargin + additionalCostsTotal;
-    
-    // Buyer unit price (all-inclusive)
-    const buyerUnitPrice = totalQuantity > 0 ? grandTotal / totalQuantity : 0;
+
+    const totalCost = itemsCost + additionalCostsTotal;
+    const totalMargin = itemsSubtotal - itemsCost;
+    // Gross margin: measured against revenue, matching price = cost / (1 - margin).
+    const marginPercent = itemsSubtotal > 0 ? (totalMargin / itemsSubtotal) * 100 : 0;
 
     return {
+      itemsSubtotal,
       itemsCost,
       totalQuantity,
       additionalCostsTotal,
-      totalCost: itemsCost + additionalCostsTotal,
+      totalCost,
       totalMargin,
       marginPercent,
-      subtotalWithMargin,
-      grandTotal,
-      buyerUnitPrice,
+      grandTotal: itemsSubtotal + additionalCostsTotal,
     };
-  }, [items, additionalCosts, marginPercent]);
+  }, [items, additionalCosts]);
 
   // Create quotation
   const mutation = useMutation({
@@ -207,12 +208,12 @@ export default function NewQuotation() {
       deliveryTerms,
       notes,
       termsConditions,
-      marginPercent, // Send margin % to backend
       items: items.map(item => ({
         productId: item.productId,
         quantity: item.quantity,
         unit: item.unit,
         unitCost: item.unitCost,
+        unitPrice: item.unitPrice,
         specifications: item.specifications,
       })),
       costs: additionalCosts.map(cost => ({
@@ -497,44 +498,14 @@ export default function NewQuotation() {
               </h2>
             </div>
             <div className="card-body space-y-4">
-              {/* Margin % Input */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <label className="block text-sm font-medium text-blue-900 mb-2">
-                  <Percent className="w-4 h-4 inline mr-1" />
-                  Margin Percentage
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    value={marginPercent}
-                    onChange={(e) => setMarginPercent(Number(e.target.value) || 0)}
-                    min="0"
-                    max="100"
-                    step="0.5"
-                    className="input w-24 text-center font-bold text-lg"
-                  />
-                  <span className="text-blue-900 font-medium">%</span>
-                </div>
-              </div>
-
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Supplier Cost (Subtotal)</span>
-                  <span className="font-medium">{formatCurrency(totals.itemsCost, selectedCurrency?.code)}</span>
+                  <span className="text-gray-500">Items Subtotal</span>
+                  <span className="font-medium">{formatCurrency(totals.itemsSubtotal, selectedCurrency?.code)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Margin ({marginPercent}%)</span>
-                  <span className={cn(
-                    'font-bold',
-                    marginPercent >= 15 ? 'text-green-600' :
-                    marginPercent >= 10 ? 'text-yellow-600' : 'text-red-600'
-                  )}>
-                    {formatCurrency(totals.totalMargin, selectedCurrency?.code)}
-                  </span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500">Subtotal with Margin</span>
-                  <span className="font-medium">{formatCurrency(totals.subtotalWithMargin, selectedCurrency?.code)}</span>
+                  <span className="text-gray-500">Items Cost</span>
+                  <span>{formatCurrency(totals.itemsCost, selectedCurrency?.code)}</span>
                 </div>
                 {totals.additionalCostsTotal > 0 && (
                   <div className="flex justify-between text-sm">
@@ -542,23 +513,29 @@ export default function NewQuotation() {
                     <span>{formatCurrency(totals.additionalCostsTotal, selectedCurrency?.code)}</span>
                   </div>
                 )}
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-500">Total Cost</span>
+                  <span className="font-medium">{formatCurrency(totals.totalCost, selectedCurrency?.code)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Margin</span>
+                  <span className={cn(
+                    'font-bold',
+                    totals.marginPercent >= 15 ? 'text-green-600' :
+                    totals.marginPercent >= 10 ? 'text-yellow-600' : 'text-red-600'
+                  )}>
+                    {formatCurrency(totals.totalMargin, selectedCurrency?.code)} ({totals.marginPercent.toFixed(1)}%)
+                  </span>
+                </div>
                 <hr />
                 <div className="flex justify-between text-lg">
                   <span className="font-semibold">Grand Total</span>
                   <span className="font-bold text-navy-900">{formatCurrency(totals.grandTotal, selectedCurrency?.code)}</span>
                 </div>
-                {totals.totalQuantity > 0 && (
-                  <div className="flex justify-between text-sm bg-green-50 p-2 rounded">
-                    <span className="text-green-700 font-medium">Buyer Unit Price</span>
-                    <span className="font-bold text-green-700">
-                      {formatCurrency(totals.buyerUnitPrice, selectedCurrency?.code)} / unit
-                    </span>
-                  </div>
-                )}
               </div>
 
               {/* Margin Alert */}
-              {items.length > 0 && marginPercent < 10 && (
+              {items.length > 0 && totals.marginPercent < 10 && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
                   <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
                   <div className="text-sm text-red-700">

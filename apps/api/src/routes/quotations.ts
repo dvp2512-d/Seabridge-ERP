@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma, Prisma, InquiryStage } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
-import { generateCode } from '../utils/helpers';
+import { generateCode, calculateMarginPercent } from '../utils/helpers';
 import { generateQuotationPDF } from '../services/pdfService';
 import { buildRateMap } from '../services/exchangeRateService';
 import { emitEvent } from '../services/eventService';
@@ -129,13 +129,15 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
       paymentTerms: z.string().optional(),
       notes: z.string().optional(),
       termsConditions: z.string().optional(),
-      // Margin percentage to apply on cost
-      marginPercent: z.number().finite().min(0).optional(),
       items: z.array(z.object({
         productId: z.string().min(1),
         quantity: z.number().finite().positive(),
         unit: z.string().optional(),
         unitCost: z.number().finite().min(0),
+        // Selling price per unit, derived on the client from the item's own
+        // margin: price = cost / (1 - margin). Each line carries its own price,
+        // so a cheap line and an expensive line are never priced alike.
+        unitPrice: z.number().finite().positive(),
         specifications: z.string().optional(),
       })).min(1),
       costs: z.array(z.object({
@@ -149,77 +151,61 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
-    const { items, costs, marginPercent: inputMarginPercent, ...data } = validation.data;
+    const { items, costs, ...data } = validation.data;
     const quotationNumber = await generateCode('QUOTATION', 'QT');
 
     /**
-     * New Calculation Flow:
-     * 1. Subtotal (Cost) = sum of (unitCost × quantity) for all items
-     * 2. Margin = Subtotal × marginPercent%
-     * 3. Subtotal with Margin = Subtotal + Margin
-     * 4. Grand Total = Subtotal with Margin + Additional Costs
-     * 5. Buyer Unit Price = Grand Total ÷ Total Quantity
+     * Quotation totals.
+     *
+     * Each line carries its own selling price, derived from its own margin, so
+     * the margin on a line always reflects that line's cost.
+     *
+     *   subtotal    = sum of (unitPrice x quantity)     the goods, as quoted
+     *   itemsCost   = sum of (unitCost  x quantity)     what the goods cost us
+     *   totalCost   = itemsCost + additionalCosts       what the job costs us
+     *   totalMargin = subtotal - itemsCost              margin from line items only
+     *   grandTotal  = subtotal + additionalCosts        what the buyer pays
+     *
+     * Additional costs (CHA, transport, insurance...) are recorded under total
+     * cost and billed on to the buyer, but they do NOT earn margin. Margin comes
+     * from the line items only, so adding a shipment cost never reduces it.
      */
-
-    // Step 1: Calculate subtotal (total cost)
+    let subtotal = 0;
     let itemsCost = 0;
-    let totalQuantity = 0;
-    const itemsWithCost = items.map(item => {
+    const processedItems = items.map(item => {
       const itemTotalCost = item.unitCost * item.quantity;
+      const itemTotalPrice = item.unitPrice * item.quantity;
+      const margin = itemTotalPrice - itemTotalCost;
+      const marginPercent = calculateMarginPercent(itemTotalCost, itemTotalPrice);
+
+      subtotal += itemTotalPrice;
       itemsCost += itemTotalCost;
-      totalQuantity += item.quantity;
-      return { ...item, itemTotalCost };
-    });
-
-    // Step 2 & 3: Calculate margin and subtotal with margin
-    const marginPercent = inputMarginPercent || 0;
-    const totalMargin = itemsCost * (marginPercent / 100);
-    const subtotalWithMargin = itemsCost + totalMargin;
-
-    // Step 4: Add additional costs to get grand total
-    const additionalCosts = costs?.reduce((sum, c) => sum + c.amount, 0) || 0;
-    const grandTotal = subtotalWithMargin + additionalCosts;
-
-    // Step 5: Calculate buyer unit price (all-inclusive)
-    const buyerUnitPrice = totalQuantity > 0 ? grandTotal / totalQuantity : 0;
-
-    // Process items with calculated unit price
-    const processedItems = itemsWithCost.map(item => {
-      // Each item gets the all-inclusive unit price
-      const unitPrice = buyerUnitPrice;
-      const totalPrice = unitPrice * item.quantity;
-      const itemMargin = totalPrice - item.itemTotalCost;
-      const itemMarginPercent = item.itemTotalCost > 0 
-        ? (itemMargin / item.itemTotalCost) * 100 
-        : 0;
 
       return {
-        productId: item.productId,
-        quantity: item.quantity,
-        unit: item.unit,
-        unitCost: item.unitCost,
-        unitPrice: Math.round(unitPrice * 100) / 100,
-        totalCost: item.itemTotalCost,
-        totalPrice: Math.round(totalPrice * 100) / 100,
-        margin: Math.round(itemMargin * 100) / 100,
-        marginPercent: Math.round(itemMarginPercent * 100) / 100,
-        specifications: item.specifications,
+        ...item,
+        totalCost: itemTotalCost,
+        totalPrice: itemTotalPrice,
+        margin,
+        marginPercent,
       };
     });
 
-    // For storage: subtotal = selling price total (grandTotal - additionalCosts for line items)
-    const subtotal = subtotalWithMargin;
+    const additionalCosts = costs?.reduce((sum, c) => sum + c.amount, 0) || 0;
+
     const totalCost = itemsCost + additionalCosts;
+    const totalMargin = subtotal - itemsCost;
+    const grandTotal = subtotal + additionalCosts;
+    const marginPercent = calculateMarginPercent(itemsCost, subtotal);
 
     const quotation = await prisma.quotation.create({
       data: {
         ...data,
         quotationNumber,
-        subtotal: Math.round(subtotal * 100) / 100,
-        totalCost: Math.round(totalCost * 100) / 100,
-        totalMargin: Math.round(totalMargin * 100) / 100,
-        marginPercent: Math.round(marginPercent * 100) / 100,
-        grandTotal: Math.round(grandTotal * 100) / 100,
+        subtotal,
+        totalCost,
+        totalMargin,
+        marginPercent,
+        grandTotal,
         items: { create: processedItems },
         costs: costs ? { create: costs } : undefined,
       },

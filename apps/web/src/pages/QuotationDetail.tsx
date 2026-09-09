@@ -115,20 +115,22 @@ export default function QuotationDetail() {
   // relation as an array so take the first entry if it exists.
   const linkedOrder = quotation.orders?.[0] ?? null;
 
-  // Calculate totals - using stored values from quotation
-  const itemsCost = quotation.items?.reduce((sum: number, item: any) => sum + (item.totalCost || 0), 0) || 0;
-  const itemsTotal = quotation.items?.reduce((sum: number, item: any) => sum + (item.totalPrice || 0), 0) || 0;
-  const totalQuantity = quotation.items?.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0) || 0;
-  const additionalCosts = quotation.costs?.reduce((sum: number, cost: any) => sum + (cost.amount || 0), 0) || 0;
-  
-  // Use stored values from quotation
-  const marginPercent = Number(quotation.marginPercent || 0);
-  const totalMargin = Number(quotation.totalMargin || 0);
-  const grandTotal = Number(quotation.grandTotal || 0);
-  const subtotalWithMargin = itemsCost + totalMargin;
-  
-  // Buyer unit price = Grand Total / Total Quantity
-  const buyerUnitPrice = totalQuantity > 0 ? grandTotal / totalQuantity : 0;
+  // Quotation totals, recomputed from the line items so the screen agrees with
+  // what is stored. Prisma serialises Decimal columns as strings, so every one
+  // is coerced with Number() before it is added - without that, `sum + value`
+  // concatenates and a two-item quotation reads as a wildly inflated figure.
+  //
+  // Additional costs are billed on to the buyer but they do not earn margin;
+  // margin is from the line items only.
+  const itemsTotal = quotation.items?.reduce((sum: number, item: any) => sum + Number(item.totalPrice || 0), 0) || 0;
+  const itemsCost = quotation.items?.reduce((sum: number, item: any) => sum + Number(item.totalCost || 0), 0) || 0;
+  const additionalCosts = quotation.costs?.reduce((sum: number, cost: any) => sum + Number(cost.amount || 0), 0) || 0;
+
+  const totalCost = itemsCost + additionalCosts;
+  const totalMargin = itemsTotal - itemsCost;
+  // Gross margin: measured against revenue, matching price = cost / (1 - margin).
+  const marginPercent = itemsTotal > 0 ? (totalMargin / itemsTotal) * 100 : 0;
+  const grandTotal = itemsTotal + additionalCosts;
 
   return (
     <div className="space-y-6">
@@ -267,8 +269,9 @@ export default function QuotationDetail() {
                   </thead>
                   <tbody>
                     {quotation.items?.map((item: any, idx: number) => {
-                      const itemMargin = item.totalPrice - item.totalCost;
-                      const itemMarginPct = item.totalPrice > 0 ? (itemMargin / item.totalPrice) * 100 : 0;
+                      const itemPrice = Number(item.totalPrice || 0);
+                      const itemMargin = itemPrice - Number(item.totalCost || 0);
+                      const itemMarginPct = itemPrice > 0 ? (itemMargin / itemPrice) * 100 : 0;
                       return (
                         <tr key={idx}>
                           <td>
@@ -373,14 +376,13 @@ export default function QuotationDetail() {
         <div className="space-y-6">
           {/* Costing Summary */}
           <CostingSummaryCard
+            itemsTotal={itemsTotal}
             itemsCost={itemsCost}
-            totalQuantity={totalQuantity}
             additionalCosts={additionalCosts}
+            totalCost={totalCost}
             marginPercent={marginPercent}
             totalMargin={totalMargin}
-            subtotalWithMargin={subtotalWithMargin}
             grandTotal={grandTotal}
-            buyerUnitPrice={buyerUnitPrice}
             currency={currency}
           />
 
@@ -417,24 +419,22 @@ export default function QuotationDetail() {
 
 // Costing Summary Card Component
 function CostingSummaryCard({
+  itemsTotal,
   itemsCost,
-  totalQuantity,
   additionalCosts,
+  totalCost,
   marginPercent,
   totalMargin,
-  subtotalWithMargin,
   grandTotal,
-  buyerUnitPrice,
   currency,
 }: {
+  itemsTotal: number;
   itemsCost: number;
-  totalQuantity: number;
   additionalCosts: number;
+  totalCost: number;
   marginPercent: number;
   totalMargin: number;
-  subtotalWithMargin: number;
   grandTotal: number;
-  buyerUnitPrice: number;
   currency: string;
 }) {
   return (
@@ -447,8 +447,22 @@ function CostingSummaryCard({
       </div>
       <div className="card-body space-y-3">
         <div className="flex justify-between text-sm">
-          <span className="text-gray-500">Supplier Cost (Subtotal)</span>
-          <span className="font-semibold">{formatCurrency(itemsCost, currency)}</span>
+          <span className="text-gray-500">Items Subtotal</span>
+          <span className="font-semibold">{formatCurrency(itemsTotal, currency)}</span>
+        </div>
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-500">Items Cost</span>
+          <span>{formatCurrency(itemsCost, currency)}</span>
+        </div>
+        {additionalCosts > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-500">Additional Costs</span>
+            <span>{formatCurrency(additionalCosts, currency)}</span>
+          </div>
+        )}
+        <div className="flex justify-between text-sm">
+          <span className="text-gray-500">Total Cost</span>
+          <span className="font-medium">{formatCurrency(totalCost, currency)}</span>
         </div>
         <div className="flex justify-between text-sm">
           <span className="text-gray-500">Margin ({marginPercent.toFixed(1)}%)</span>
@@ -460,29 +474,11 @@ function CostingSummaryCard({
             {formatCurrency(totalMargin, currency)}
           </span>
         </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-gray-500">Subtotal with Margin</span>
-          <span className="font-medium">{formatCurrency(subtotalWithMargin, currency)}</span>
-        </div>
-        {additionalCosts > 0 && (
-          <div className="flex justify-between text-sm">
-            <span className="text-gray-500">Additional Costs</span>
-            <span>{formatCurrency(additionalCosts, currency)}</span>
-          </div>
-        )}
         <hr />
         <div className="flex justify-between text-lg">
           <span className="font-semibold">Grand Total</span>
           <span className="font-bold text-navy-900">{formatCurrency(grandTotal, currency)}</span>
         </div>
-        {totalQuantity > 0 && (
-          <div className="flex justify-between text-sm bg-green-50 p-2 rounded">
-            <span className="text-green-700 font-medium">Buyer Unit Price</span>
-            <span className="font-bold text-green-700">
-              {formatCurrency(buyerUnitPrice, currency)} / unit
-            </span>
-          </div>
-        )}
 
         {/* Margin Indicator Bar */}
         <div className="mt-4">
