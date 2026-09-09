@@ -201,11 +201,11 @@ router.delete('/:resource/:id', can('RECORD_DELETE'), async (req, res, next) => 
         data: {
           userId: (req as any).user.id,
           action: 'PERMANENT_DELETE',
-          entityType: config.model,
+          entityType: config.model.toUpperCase(),
           entityId: id,
-          description: `Permanently deleted ${config.label} ${record.quotationNumber || record.orderNumber || record.invoiceNumber || record.name || id}`,
-          changes: { deletedRecord: record },
-          ipAddress: req.ip || 'unknown',
+          oldValues: record,
+          newValues: null,
+          ipAddress: req.ip || null,
         },
       });
     });
