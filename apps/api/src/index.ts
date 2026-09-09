@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import { prisma } from '@seabridge/database';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
@@ -32,6 +33,23 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 4000;
 
+// Rate limiting - protect against brute force and API abuse
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // 20 attempts per window for auth endpoints
+  message: { success: false, message: 'Too many attempts. Please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 500, // 500 requests per window for general API
+  message: { success: false, message: 'Too many requests. Please try again shortly.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Middleware
 app.use(helmet());
 app.use(cors({
@@ -47,7 +65,11 @@ app.get('/health', (req, res) => {
 });
 
 // API Routes
-app.use('/api/auth', authRouter);
+// Auth routes have stricter rate limiting to prevent brute force attacks
+app.use('/api/auth', authLimiter, authRouter);
+
+// All other API routes use general rate limiting
+app.use('/api', apiLimiter);
 app.use('/api/users', userRouter);
 app.use('/api/buyers', buyerRouter);
 app.use('/api/products', productRouter);

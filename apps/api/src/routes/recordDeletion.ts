@@ -71,7 +71,7 @@ const DELETABLE_RESOURCES: Record<string, {
  * Preview what will be deleted.
  * Shows the record and all related records that will be cascade-deleted.
  */
-router.get('/:resource/:id/preview', can('FOUNDER'), async (req, res, next) => {
+router.get('/:resource/:id/preview', can('RECORD_DELETE'), async (req, res, next) => {
   try {
     const { resource, id } = req.params;
     
@@ -143,7 +143,7 @@ router.get('/:resource/:id/preview', can('FOUNDER'), async (req, res, next) => {
  * Permanently delete a record and all related data.
  * FOUNDER ONLY - this action cannot be undone.
  */
-router.delete('/:resource/:id', can('FOUNDER'), async (req, res, next) => {
+router.delete('/:resource/:id', can('RECORD_DELETE'), async (req, res, next) => {
   try {
     const { resource, id } = req.params;
     const { confirmDelete } = req.body;
@@ -222,7 +222,7 @@ router.delete('/:resource/:id', can('FOUNDER'), async (req, res, next) => {
 /**
  * List deletable resource types for UI dropdown.
  */
-router.get('/types', can('FOUNDER'), async (_req, res, next) => {
+router.get('/types', can('RECORD_DELETE'), async (_req, res, next) => {
   try {
     const types = Object.entries(DELETABLE_RESOURCES).map(([key, value]) => ({
       value: key,

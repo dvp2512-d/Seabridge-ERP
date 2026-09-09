@@ -58,4 +58,6 @@ WORKDIR /app/apps/api
 
 EXPOSE 4000
 
-CMD ["node", "dist/index.js"]
+# Run database migrations before starting the server.
+# This ensures the schema is up-to-date on every deployment.
+CMD ["sh", "-c", "cd /app/packages/database && npx prisma migrate deploy && cd /app/apps/api && node dist/index.js"]

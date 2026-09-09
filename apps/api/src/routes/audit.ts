@@ -64,7 +64,7 @@ router.get('/', can('SETTINGS_MANAGE'), async (req, res, next) => {
         where,
         include: {
           user: {
-            select: { id: true, name: true, email: true },
+            select: { id: true, firstName: true, lastName: true, email: true },
           },
         },
         orderBy: { createdAt: 'desc' },
@@ -106,7 +106,7 @@ router.get('/entity/:entityType/:entityId', can('SETTINGS_MANAGE'), async (req, 
       },
       include: {
         user: {
-          select: { id: true, name: true, email: true },
+          select: { id: true, firstName: true, lastName: true, email: true },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -181,9 +181,9 @@ router.get('/options', can('SETTINGS_MANAGE'), async (req, res, next) => {
         orderBy: { action: 'asc' },
       }),
       prisma.user.findMany({
-        select: { id: true, name: true },
-        where: { isActive: true },
-        orderBy: { name: 'asc' },
+        select: { id: true, firstName: true, lastName: true },
+        where: { status: 'ACTIVE' },
+        orderBy: { firstName: 'asc' },
       }),
     ]);
 
