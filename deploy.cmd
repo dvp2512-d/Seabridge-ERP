@@ -208,7 +208,6 @@ echo POSTGRES_USER=seabridge
 echo POSTGRES_PASSWORD=!DBPASS!
 echo POSTGRES_DB=seabridge_erp
 echo DATABASE_URL=postgresql://seabridge:!DBPASS!@postgres:5432/seabridge_erp
-echo REDIS_URL=redis://redis:6379
 echo JWT_SECRET=!JWTSEC!
 echo JWT_EXPIRES_IN=7d
 echo PORT=4000
