@@ -122,7 +122,8 @@ export default function QuotationDetail() {
   const totalCost = itemsCost + additionalCosts;
   // Margin is from line items only - additional costs don't reduce margin
   const margin = itemsTotal - itemsCost;
-  const marginPercent = itemsCost > 0 ? (margin / itemsCost) * 100 : 0;
+  // Margin percent is on selling price (gross margin), not on cost
+  const marginPercent = itemsTotal > 0 ? (margin / itemsTotal) * 100 : 0;
 
   return (
     <div className="space-y-6">

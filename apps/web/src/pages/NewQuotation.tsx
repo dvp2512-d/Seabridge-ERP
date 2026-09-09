@@ -143,7 +143,8 @@ export default function NewQuotation() {
     const totalCost = itemsCost + additionalCostsTotal;
     // Margin is calculated from line items only - additional costs (CHA, transport) don't reduce margin
     const totalMargin = itemsSubtotal - itemsCost;
-    const marginPercent = itemsCost > 0 ? (totalMargin / itemsCost) * 100 : 0;
+    // Margin percent is on selling price (gross margin), not on cost
+    const marginPercent = itemsSubtotal > 0 ? (totalMargin / itemsSubtotal) * 100 : 0;
 
     return {
       itemsSubtotal,
