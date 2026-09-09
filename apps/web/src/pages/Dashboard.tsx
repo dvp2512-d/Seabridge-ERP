@@ -6,6 +6,7 @@ import { dashboardApi } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { can } from '@/lib/permissions';
 import { formatCurrency, formatDate, getStatusColor, cn } from '@/lib/utils';
+import NetPositionPanel from '@/components/ui/NetPositionPanel';
 import {
   TrendingUp,
   Users,
@@ -178,6 +179,13 @@ export default function Dashboard() {
           alert={kpis.overdueReceivables > 0}
         />
       </div>
+
+      {/* Remaining Balance - Total income less expenses paid */}
+      {dashboard?.netPosition && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <NetPositionPanel net={dashboard.netPosition} />
+        </div>
+      )}
 
       {/* Secondary KPIs */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
