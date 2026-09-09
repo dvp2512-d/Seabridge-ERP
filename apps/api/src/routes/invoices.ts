@@ -184,16 +184,13 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
      * it simply cannot show a rupee valuation until the rate is entered.
      */
     let exchangeRate = 1;
-    let exchangeRateRef: string | null = null;
-    let exchangeRateDate: Date | null = null;
 
-    const base = await prisma.currency.findFirst({ where: { isBaseCurrency: true } });
-    if (base && currency.id !== base.id) {
+    // Check if this currency is NOT the base currency (INR)
+    const baseCurrency = await prisma.currency.findFirst({ where: { code: 'INR' } });
+    if (baseCurrency && currency.id !== baseCurrency.id) {
       const resolved = await findRate(currency.id, invoiceDate, 'EXPORT');
       if (resolved) {
         exchangeRate = resolved.rate;
-        exchangeRateRef = resolved.notificationRef;
-        exchangeRateDate = resolved.effectiveFrom;
       }
     }
 
@@ -211,8 +208,6 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
         totalAmount,
         balanceAmount: totalAmount,
         exchangeRate,
-        exchangeRateRef,
-        exchangeRateDate,
         notes: validation.data.notes,
         termsConditions: validation.data.termsConditions,
       },
