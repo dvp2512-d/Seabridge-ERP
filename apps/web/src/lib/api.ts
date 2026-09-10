@@ -78,6 +78,10 @@ export const authApi = {
     api.post('/auth/register', data),
   
   me: () => api.get('/auth/me'),
+
+  /** Update your own display details. Role and email are not editable here. */
+  updateMe: (data: { firstName?: string; lastName?: string; phone?: string | null }) =>
+    api.patch('/auth/me', data),
   
   changePassword: (currentPassword: string, newPassword: string) =>
     api.post('/auth/change-password', { currentPassword, newPassword }),
@@ -205,7 +209,16 @@ export const quotationsApi = {
   updateStatus: (id: string, status: string, notes?: string) => 
     api.patch(`/quotations/${id}/status`, { status, notes }),
   convertToOrder: (id: string, data: any) => api.post(`/quotations/${id}/convert-to-order`, data),
-  downloadPdf: (id: string) => api.get(`/quotations/${id}/pdf`, { responseType: 'blob' }),
+  /**
+   * Amounts are stored in INR; `currency` and `rate` decide how the buyer's copy
+   * reads and are recorded on the quotation. Omit them to reuse whatever it was
+   * last generated with.
+   */
+  downloadPdf: (id: string, currency?: string, rate?: number) =>
+    api.get(`/quotations/${id}/pdf`, {
+      responseType: 'blob',
+      params: currency ? { currency, rate } : undefined,
+    }),
 };
 
 // ============================================
@@ -233,7 +246,12 @@ export const invoicesApi = {
   create: (data: any) => api.post('/invoices', data),
   update: (id: string, data: any) => api.put(`/invoices/${id}`, data),
   addPayment: (id: string, data: any) => api.post(`/invoices/${id}/payments`, data),
-  downloadPdf: (id: string) => api.get(`/invoices/${id}/pdf`, { responseType: 'blob' }),
+  /** See quotationsApi.downloadPdf. */
+  downloadPdf: (id: string, currency?: string, rate?: number) =>
+    api.get(`/invoices/${id}/pdf`, {
+      responseType: 'blob',
+      params: currency ? { currency, rate } : undefined,
+    }),
   getReceivables: () => api.get('/invoices/reports/receivables'),
 };
 
@@ -279,24 +297,12 @@ export const automationApi = {
 // ============================================
 // EXCHANGE RATES API
 // ============================================
-
+// There is no stored exchange rate. Every amount is INR; a currency and rate are
+// chosen when a quotation or invoice PDF is generated and recorded on that
+// document. This is the advisory market lookup that suggests a rate in that
+// dialog, so a transposed digit is obvious before the document goes out.
 export const exchangeRatesApi = {
-  list: (params?: any) => api.get('/exchange-rates', { params }),
-  get: (id: string) => api.get(`/exchange-rates/${id}`),
-  create: (data: any) => api.post('/exchange-rates', data),
-  update: (id: string, data: any) => api.put(`/exchange-rates/${id}`, data),
-  delete: (id: string) => api.delete(`/exchange-rates/${id}`),
-  remove: (id: string) => api.delete(`/exchange-rates/${id}`),
-  getLatest: (from: string, to: string) =>
-    api.get('/exchange-rates/latest', { params: { from, to } }),
-  current: (params?: any) => api.get('/exchange-rates/current', { params }),
-  history: (currencyId: string) => api.get(`/exchange-rates/history/${currencyId}`),
-  createNotification: (data: any) => api.post('/exchange-rates/notification', data),
-  meta: () => api.get('/exchange-rates/meta'),
-  /** Advisory market rates for spotting a transposed digit */
   marketCheck: () => api.get('/exchange-rates/market-check'),
-  /** Which currencies cannot currently be converted */
-  coverage: (date?: string) => api.get('/exchange-rates/coverage', { params: { date } }),
 };
 
 // ============================================
@@ -311,8 +317,8 @@ export const expensesApi = {
   delete: (id: string) => api.delete(`/expenses/${id}`),
   remove: (id: string) => api.delete(`/expenses/${id}`),
   setStatus: (id: string, status: string) =>
-    api.patch(`/expenses/${id}/status`, { status }),
-  meta: () => api.get('/expenses/meta'),
+    api.put(`/expenses/${id}/status`, { status }),
+  options: () => api.get('/expenses/meta/options'),
 };
 
 // ============================================
@@ -328,9 +334,8 @@ export const incomeApi = {
   remove: (id: string) => api.delete(`/income/${id}`),
   setStatus: (id: string, status: string) =>
     api.patch(`/income/${id}/status`, { status }),
-  options: () => api.get('/income/options'),
+  options: () => api.get('/income/meta/options'),
   forexGain: (invoiceId: string) => api.get(`/income/forex-gain/${invoiceId}`),
-  meta: () => api.get('/income/meta'),
 };
 
 // ============================================
@@ -344,25 +349,35 @@ export const tasksApi = {
   update: (id: string, data: any) => api.put(`/tasks/${id}`, data),
   delete: (id: string) => api.delete(`/tasks/${id}`),
   remove: (id: string) => api.delete(`/tasks/${id}`),
-  complete: (id: string) => api.post(`/tasks/${id}/complete`),
-  reopen: (id: string) => api.post(`/tasks/${id}/reopen`),
+  options: () => api.get('/tasks/meta/options'),
 };
 
 // ============================================
 // USERS API
 // ============================================
 
+// ============================================
+// SETTINGS API
+// ============================================
+// The company profile is a single row: GET returns it (or null when it has not
+// been set up), PUT upserts it. These values are printed on outgoing documents.
+export const settingsApi = {
+  getCompany: () => api.get('/settings/company'),
+  updateCompany: (data: any) => api.put('/settings/company', data),
+};
+
 export const usersApi = {
   list: (params?: any) => api.get('/users', { params }),
   get: (id: string) => api.get(`/users/${id}`),
   create: (data: any) => api.post('/auth/register', data),
   update: (id: string, data: any) => api.put(`/users/${id}`, data),
-  delete: (id: string) => api.delete(`/users/${id}`),
-  remove: (id: string) => api.delete(`/users/${id}`),
-  deactivate: (id: string) => api.post(`/users/${id}/deactivate`),
+  /**
+   * Deactivates the user (soft delete - the row is kept and status set to
+   * INACTIVE, because users are referenced by orders, payments and audit
+   * entries). Rejected for your own account and for the last active founder.
+   */
+  deactivate: (id: string) => api.delete(`/users/${id}`),
   reactivate: (id: string) => api.post(`/users/${id}/reactivate`),
-  resetPassword: (id: string, password: string) =>
-    api.post(`/users/${id}/reset-password`, { password }),
 };
 
 // ============================================

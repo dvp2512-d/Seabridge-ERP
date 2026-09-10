@@ -2,12 +2,11 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { expensesApi, masterApi } from '@/lib/api';
+import { expensesApi } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { can } from '@/lib/permissions';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
-import UnconvertedNotice from '@/components/ui/UnconvertedNotice';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { refreshAggregates } from '@/lib/queryKeys';
@@ -35,9 +34,8 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 /**
- * Expenses are recorded in whatever currency they were paid in, so each row
- * shows its own currency while the summary cards are converted into the base
- * currency. Mixing those two would make the numbers impossible to reconcile.
+ * Every amount is in rupees, so the rows and the summary cards are the same unit
+ * and simply add up.
  */
 export default function Expenses() {
   const queryClient = useQueryClient();
@@ -56,20 +54,29 @@ export default function Expenses() {
   // Held while the confirmation is open, so the row is only removed once the
   // backend confirms the delete succeeded.
   const [pendingDelete, setPendingDelete] = useState<any>(null);
+  const [page, setPage] = useState(1);
 
-  const debouncedSearch = useDebouncedCallback((value: string) => setSearch(value), 350);
+  const debouncedSearch = useDebouncedCallback((value: string) => {
+    setSearch(value);
+    setPage(1);
+  }, 350);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['expenses', search, category, status],
+    queryKey: ['expenses', search, category, status, page],
     queryFn: () =>
       expensesApi
-        .list({ search: search || undefined, category: category || undefined, status: status || undefined })
+        .list({
+          search: search || undefined,
+          category: category || undefined,
+          status: status || undefined,
+          page,
+        })
         .then((r: any) => r.data),
   });
 
   const expenses = data?.data ?? [];
+  const pagination = data?.pagination;
   const summary = data?.summary;
-  const baseCode = summary?.baseCurrency?.code;
 
   const setStatusMutation = useMutation({
     mutationFn: ({ id, next }: { id: string; next: string }) => expensesApi.setStatus(id, next),
@@ -95,14 +102,11 @@ export default function Expenses() {
 
   return (
     <div className="space-y-6">
-      <UnconvertedNotice count={summary?.unconvertedRecords ?? 0} baseCode={baseCode} />
-
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-navy-900">Expenses</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Freight, CHA, packaging and other costs. Totals are shown in{' '}
-            {baseCode ?? 'the base currency'}.
+            Freight, CHA, packaging and other costs, in rupees.
           </p>
         </div>
         {canManage && (
@@ -122,12 +126,12 @@ export default function Expenses() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <SummaryCard
           label="Total Spend"
-          value={formatCurrency(summary?.totalSpend ?? 0, baseCode)}
+          value={formatCurrency(summary?.totalSpend ?? 0)}
           hint="Excludes rejected"
         />
         <SummaryCard
           label="Awaiting Approval"
-          value={formatCurrency(summary?.pendingApproval ?? 0, baseCode)}
+          value={formatCurrency(summary?.pendingApproval ?? 0)}
           hint={`${summary?.countByStatus?.PENDING ?? 0} pending`}
           emphasis={(summary?.countByStatus?.PENDING ?? 0) > 0}
         />
@@ -158,14 +162,14 @@ export default function Expenses() {
           <SelectField
             label="Category"
             value={category}
-            onChange={(e) => setCategory(e.target.value)}
+            onChange={(e) => { setCategory(e.target.value); setPage(1); }}
             placeholder="All categories"
             options={Object.entries(CATEGORY_LABELS).map(([value, label]) => ({ value, label }))}
           />
           <SelectField
             label="Status"
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            onChange={(e) => { setStatus(e.target.value); setPage(1); }}
             placeholder="All statuses"
             options={['PENDING', 'APPROVED', 'PAID', 'REJECTED'].map((s) => ({
               value: s,
@@ -209,8 +213,7 @@ export default function Expenses() {
                     </td>
                     <td className="text-sm text-gray-500">{e.vendorName || '-'}</td>
                     <td className="text-right font-medium">
-                      {/* Each row shows the currency it was actually paid in */}
-                      {formatCurrency(e.amount, e.currency)}
+                      {formatCurrency(e.amount)}
                     </td>
                     <td>
                       <span
@@ -244,6 +247,24 @@ export default function Expenses() {
           )}
         </div>
       </div>
+
+      {/* Pagination. The summary cards above cover every matching expense, so
+          without this the table silently disagreed with the totals. */}
+      {pagination && pagination.total > pagination.limit && (
+        <div className="flex items-center justify-between">
+          <div className="text-sm text-gray-500">
+            Page {pagination.page} of {Math.ceil(pagination.total / pagination.limit)} • {pagination.total} expenses
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="btn btn-secondary">
+              Previous
+            </button>
+            <button onClick={() => setPage(p => p + 1)} disabled={page * pagination.limit >= pagination.total} className="btn btn-secondary">
+              Next
+            </button>
+          </div>
+        </div>
+      )}
 
       {showForm && (
         <ExpenseFormModal
@@ -387,18 +408,11 @@ function ExpenseFormModal({
 }) {
   const isEdit = !!expense;
 
-  const { data: currenciesData } = useQuery({
-    queryKey: ['currencies'],
-    queryFn: () => masterApi.getCurrencies(),
-  });
-  const currencies = currenciesData?.data?.data ?? [];
 
   const [form, setForm] = useState({
     category: expense?.category ?? 'FREIGHT',
     description: expense?.description ?? '',
     amount: expense?.amount ? String(expense.amount) : '',
-    // Default to the company's own currency, since most expenses are domestic
-    currency: expense?.currency ?? '',
     expenseDate: expense?.expenseDate
       ? new Date(expense.expenseDate).toISOString().slice(0, 10)
       : new Date().toISOString().slice(0, 10),
@@ -441,14 +455,10 @@ function ExpenseFormModal({
       invoiceRef: form.invoiceRef || undefined,
       notes: form.notes || undefined,
     };
-    // Currency cannot change after creation - it would invalidate the recorded
     // figure, so it is only sent when creating.
-    if (!isEdit && form.currency) payload.currency = form.currency;
 
     save.mutate(payload);
   };
-
-  const baseCurrency = currencies.find((c: any) => c.isBaseCurrency);
 
   return (
     <Modal isOpen onClose={onClose} title={isEdit ? 'Edit Expense' : 'Record Expense'} size="lg">
@@ -478,7 +488,7 @@ function ExpenseFormModal({
             />
           </div>
           <FormField
-            label="Amount"
+            label="Amount (₹)"
             required
             type="number"
             step="0.01"
@@ -486,26 +496,6 @@ function ExpenseFormModal({
             value={form.amount}
             onChange={(e) => setForm({ ...form, amount: e.target.value })}
           />
-          {isEdit ? (
-            <FormField
-              label="Currency"
-              value={form.currency}
-              disabled
-              hint="Currency cannot change after recording"
-            />
-          ) : (
-            <SelectField
-              label="Currency"
-              value={form.currency}
-              onChange={(e) => setForm({ ...form, currency: e.target.value })}
-              placeholder={baseCurrency ? `${baseCurrency.code} (default)` : 'Base currency'}
-              options={currencies.map((c: any) => ({
-                value: c.code,
-                label: `${c.code} - ${c.name}`,
-              }))}
-              hint="Leave blank to use the company's own currency"
-            />
-          )}
           <FormField
             label="Vendor"
             value={form.vendorName}

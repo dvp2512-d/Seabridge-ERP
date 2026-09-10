@@ -5,7 +5,7 @@ import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
 import { createOrderFromQuotation } from '../services/orderService';
-import { buildRateMapByCode } from '../services/exchangeRateService';
+import { getBaseCurrency } from '../services/exchangeRateService';
 import { emitEvent } from '../services/eventService';
 
 const router: Router = Router();
@@ -40,11 +40,10 @@ router.get('/', can('OPERATIONS_VIEW'), async (req, res, next) => {
         take: Number(limit),
       }),
       prisma.exportOrder.count({ where }),
-      // Pipeline counts across the whole filtered set, not just this page.
-      // Grouped by currency as well, because order values in different
-      // currencies cannot be added - they are converted before totalling.
+      // Pipeline counts and value across the whole filtered set, not just this
+      // page. Every amount is INR, so this is a plain aggregate.
       prisma.exportOrder.groupBy({
-        by: ['status', 'currency'],
+        by: ['status'],
         where,
         _count: { _all: true },
         _sum: { totalValue: true },
@@ -58,24 +57,12 @@ router.get('/', can('OPERATIONS_VIEW'), async (req, res, next) => {
       }),
     ]);
 
-    // Fold the currency dimension away, converting into the base currency.
-    // Orders whose currency has no notified rate are counted rather than added,
-    // so the total is never quietly incomplete.
-    const { base, rates } = await buildRateMapByCode(new Date());
-
     const countByStatus: Record<string, number> = {};
     let totalValue = 0;
-    let unconverted = 0;
 
     for (const group of statusGroups) {
-      countByStatus[group.status] = (countByStatus[group.status] ?? 0) + group._count._all;
-
-      const rate = rates.get(group.currency);
-      if (rate === undefined) {
-        unconverted += group._count._all;
-        continue;
-      }
-      totalValue += Number(group._sum.totalValue ?? 0) * rate;
+      countByStatus[group.status] = group._count._all;
+      totalValue += Number(group._sum.totalValue ?? 0);
     }
 
     res.json({
@@ -83,9 +70,7 @@ router.get('/', can('OPERATIONS_VIEW'), async (req, res, next) => {
       data: orders,
       pagination: { page: Number(page), limit: Number(limit), total },
       summary: {
-        // totalValue is in this currency, not each order's own.
-        baseCurrency: base,
-        unconvertedRecords: unconverted,
+        baseCurrency: await getBaseCurrency(),
         countByStatus,
         overdueCount,
         totalValue: Math.round((totalValue + Number.EPSILON) * 100) / 100,

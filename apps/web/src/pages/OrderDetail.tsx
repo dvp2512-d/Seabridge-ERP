@@ -34,6 +34,11 @@ import {
 
 const ORDER_STAGES = ['CONFIRMED', 'IN_PRODUCTION', 'READY_TO_SHIP', 'SHIPPED', 'DELIVERED'];
 
+// CANCELLED is a real OrderStatus but not a step in the progress tracker, so it
+// belongs in the status dropdown only. Without it, opening the status modal on a
+// cancelled order showed CONFIRMED and saving silently un-cancelled the order.
+const ORDER_STATUS_OPTIONS = [...ORDER_STAGES, 'CANCELLED'];
+
 const STAGE_ICONS: Record<string, any> = {
   CONFIRMED: CheckCircle,
   IN_PRODUCTION: Package,
@@ -838,7 +843,7 @@ function StatusUpdateModal({
           label="New Status"
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-          options={ORDER_STAGES.map(s => ({ value: s, label: s.replace(/_/g, ' ') }))}
+          options={ORDER_STATUS_OPTIONS.map(s => ({ value: s, label: s.replace(/_/g, ' ') }))}
         />
         <div className="flex justify-end gap-3 pt-4 border-t">
           <button onClick={onClose} className="btn btn-secondary">Cancel</button>

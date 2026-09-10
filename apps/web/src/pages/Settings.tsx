@@ -1,9 +1,9 @@
 // Settings Page - Complete System Configuration
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/authStore';
-import { authApi, automationApi } from '@/lib/api';
+import { authApi, automationApi, settingsApi } from '@/lib/api';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import { cn } from '@/lib/utils';
@@ -23,9 +23,42 @@ import {
   Eye,
   EyeOff,
   Mail,
+  AlertTriangle,
 } from 'lucide-react';
 
 type SettingsTab = 'profile' | 'company' | 'templates' | 'webhooks' | 'automations' | 'api';
+
+/**
+ * Every field accepted by the profileSchema on PUT /api/settings/company.
+ * Keeping this as one list means the form seeds and submits the same set, so a
+ * field can never be shown but silently dropped on save.
+ */
+const PROFILE_FIELDS = [
+  'legalName',
+  'tradeName',
+  'addressLine1',
+  'addressLine2',
+  'city',
+  'state',
+  'postalCode',
+  'country',
+  'originCountry',
+  'gstNumber',
+  'iecCode',
+  'phone',
+  'contactPerson',
+  'email',
+  'website',
+  'bankName',
+  'bankBranch',
+  'bankAccountNo',
+  'bankBeneficiary',
+  'bankSwiftCode',
+  'bankIfscCode',
+  'bankChargesNote',
+  'quotationTerms',
+  'invoiceDeclaration',
+] as const;
 
 export default function Settings() {
   const { user } = useAuthStore();
@@ -85,11 +118,31 @@ export default function Settings() {
 
 // Profile Settings
 function ProfileSettings({ user }: { user: any }) {
+  const { updateUser } = useAuthStore();
   const [formData, setFormData] = useState({
     firstName: user?.firstName || '',
     lastName: user?.lastName || '',
   });
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+
+  const save = useMutation({
+    mutationFn: () =>
+      authApi.updateMe({
+        firstName: formData.firstName.trim(),
+        lastName: formData.lastName.trim(),
+      }),
+    onSuccess: (res: any) => {
+      const updated = res.data?.data;
+      // Keep the sidebar/header name in step with what was just saved.
+      if (updated) updateUser({ firstName: updated.firstName, lastName: updated.lastName });
+      toast.success('Profile updated');
+    },
+    onError: (err: any) =>
+      toast.error(err.response?.data?.message || 'Could not update profile'),
+  });
+
+  const canSave =
+    formData.firstName.trim().length > 0 && formData.lastName.trim().length > 0;
 
   return (
     <div className="space-y-6">
@@ -127,7 +180,13 @@ function ProfileSettings({ user }: { user: any }) {
             <button onClick={() => setShowPasswordModal(true)} className="btn btn-secondary">
               Change Password
             </button>
-            <button className="btn btn-primary">Save Changes</button>
+            <button
+              onClick={() => save.mutate()}
+              className="btn btn-primary"
+              disabled={save.isPending || !canSave}
+            >
+              {save.isPending ? 'Saving...' : 'Save Changes'}
+            </button>
           </div>
         </div>
       </div>
@@ -197,68 +256,202 @@ function PasswordChangeModal({ onClose }: { onClose: () => void }) {
 }
 
 // Company Settings
+//
+// Backed by GET/PUT /api/settings/company (a single CompanyProfile row). These
+// values are what identify the exporter on quotations and invoices, so the form
+// mirrors the fields the API accepts rather than a decorative subset.
 function CompanySettings() {
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [loaded, setLoaded] = useState(false);
+
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ['company-profile'],
+    queryFn: () => settingsApi.getCompany().then((r: any) => r.data.data),
+  });
+
+  // Seed the form once the profile arrives. `data` is null until a profile has
+  // been saved for the first time, which is a valid empty-form state. Seeding is
+  // skipped on error so a failed load cannot be mistaken for "not set up" and
+  // then saved over the real record.
+  useEffect(() => {
+    if (isLoading || isError || loaded) return;
+    const profile = data ?? {};
+    const seeded: Record<string, string> = {};
+    for (const key of PROFILE_FIELDS) seeded[key] = profile[key] ?? '';
+    if (!seeded.country) seeded.country = 'India';
+    if (!seeded.originCountry) seeded.originCountry = 'India';
+    setForm(seeded);
+    setLoaded(true);
+  }, [data, isLoading, isError, loaded]);
+
+  const save = useMutation({
+    mutationFn: () => {
+      // Send null rather than '' for optional fields so the database holds
+      // "not set" instead of an empty string that would print as a blank line.
+      const payload: Record<string, any> = {};
+      for (const key of PROFILE_FIELDS) {
+        const value = (form[key] ?? '').trim();
+        payload[key] = value === '' ? null : value;
+      }
+      payload.legalName = (form.legalName ?? '').trim();
+      return settingsApi.updateCompany(payload);
+    },
+    onSuccess: () => {
+      toast.success('Company profile saved');
+      queryClient.invalidateQueries({ queryKey: ['company-profile'] });
+    },
+    onError: (err: any) => {
+      const errors = err.response?.data?.errors;
+      toast.error(errors?.[0]?.message || err.response?.data?.message || 'Could not save profile');
+    },
+  });
+
+  const set = (key: string) => (e: { target: { value: string } }) =>
+    setForm((prev) => ({ ...prev, [key]: e.target.value }));
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-40">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-navy-900" />
+      </div>
+    );
+  }
+
+  // Refuse to show an editable form we could not populate. Saving a blank form
+  // over an existing profile would silently wipe the company's own details.
+  if (isError) {
+    return (
+      <div className="card">
+        <div className="card-body flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-gray-700">
+            <strong className="text-red-800">Could not load the company profile.</strong>
+            <p className="mt-1">
+              {(error as any)?.response?.data?.message ||
+                'The server did not return the profile. Nothing has been changed.'}
+            </p>
+            <button onClick={() => refetch()} className="btn btn-secondary mt-3">
+              Try again
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const canSave = (form.legalName ?? '').trim().length > 0;
+
   return (
     <div className="space-y-6">
       <div className="card">
         <div className="card-header">
           <h2 className="font-semibold">Company Information</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Printed on quotations and invoices.
+          </p>
         </div>
         <div className="card-body">
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
-              <FormField label="Company Name" defaultValue="SeaBridge Exports" />
+              <FormField
+                label="Legal Name"
+                required
+                value={form.legalName ?? ''}
+                onChange={set('legalName')}
+                placeholder="As registered, e.g. SeaBridge Exports Pvt Ltd"
+              />
             </div>
-            <FormField label="Tax ID / GST" defaultValue="" placeholder="Enter tax ID" />
-            <FormField label="Registration No" defaultValue="" placeholder="Company registration" />
+            <FormField label="Trade Name" value={form.tradeName ?? ''} onChange={set('tradeName')} />
+            <FormField label="Contact Person" value={form.contactPerson ?? ''} onChange={set('contactPerson')} />
+            <FormField label="GST Number" value={form.gstNumber ?? ''} onChange={set('gstNumber')} />
+            <FormField label="IEC Code" value={form.iecCode ?? ''} onChange={set('iecCode')} />
             <div className="col-span-2">
-              <TextareaField label="Address" rows={2} defaultValue="" placeholder="Company address" />
+              <FormField label="Address Line 1" value={form.addressLine1 ?? ''} onChange={set('addressLine1')} />
             </div>
-            <FormField label="City" defaultValue="" />
-            <FormField label="Country" defaultValue="India" />
-            <FormField label="Phone" defaultValue="" />
-            <FormField label="Email" defaultValue="" />
             <div className="col-span-2">
-              <FormField label="Website" defaultValue="" />
+              <FormField label="Address Line 2" value={form.addressLine2 ?? ''} onChange={set('addressLine2')} />
             </div>
-          </div>
-          <div className="mt-6">
-            <button className="btn btn-primary">Save Changes</button>
+            <FormField label="City" value={form.city ?? ''} onChange={set('city')} />
+            <FormField label="State" value={form.state ?? ''} onChange={set('state')} />
+            <FormField label="Postal Code" value={form.postalCode ?? ''} onChange={set('postalCode')} />
+            <FormField label="Country" value={form.country ?? ''} onChange={set('country')} />
+            <FormField label="Phone" value={form.phone ?? ''} onChange={set('phone')} />
+            <FormField label="Email" type="email" value={form.email ?? ''} onChange={set('email')} />
+            <div className="col-span-2">
+              <FormField label="Website" value={form.website ?? ''} onChange={set('website')} />
+            </div>
+            <FormField
+              label="Country of Origin"
+              value={form.originCountry ?? ''}
+              onChange={set('originCountry')}
+              placeholder="Printed as the origin of goods"
+            />
           </div>
         </div>
       </div>
 
       <div className="card">
         <div className="card-header">
-          <h2 className="font-semibold">Default Settings</h2>
+          <h2 className="font-semibold">Bank Details</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Shown on invoices so buyers know where to remit payment.
+          </p>
         </div>
         <div className="card-body">
           <div className="grid grid-cols-2 gap-4">
-            <SelectField
-              label="Default Currency"
-              defaultValue="USD"
-              options={[
-                { value: 'USD', label: 'USD - US Dollar' },
-                { value: 'EUR', label: 'EUR - Euro' },
-                { value: 'INR', label: 'INR - Indian Rupee' },
-              ]}
-            />
-            <SelectField
-              label="Date Format"
-              defaultValue="DD MMM YYYY"
-              options={[
-                { value: 'DD MMM YYYY', label: 'DD MMM YYYY' },
-                { value: 'MM/DD/YYYY', label: 'MM/DD/YYYY' },
-                { value: 'YYYY-MM-DD', label: 'YYYY-MM-DD' },
-              ]}
-            />
-            <FormField label="Default Payment Terms" defaultValue="30 days" />
-            <FormField label="Quotation Validity (days)" type="number" defaultValue="30" />
-          </div>
-          <div className="mt-6">
-            <button className="btn btn-primary">Save Changes</button>
+            <FormField label="Bank Name" value={form.bankName ?? ''} onChange={set('bankName')} />
+            <FormField label="Branch" value={form.bankBranch ?? ''} onChange={set('bankBranch')} />
+            <FormField label="Account Number" value={form.bankAccountNo ?? ''} onChange={set('bankAccountNo')} />
+            <FormField label="Beneficiary Name" value={form.bankBeneficiary ?? ''} onChange={set('bankBeneficiary')} />
+            <FormField label="SWIFT Code" value={form.bankSwiftCode ?? ''} onChange={set('bankSwiftCode')} />
+            <FormField label="IFSC Code" value={form.bankIfscCode ?? ''} onChange={set('bankIfscCode')} />
+            <div className="col-span-2">
+              <TextareaField
+                label="Bank Charges Note"
+                rows={2}
+                value={form.bankChargesNote ?? ''}
+                onChange={set('bankChargesNote')}
+                placeholder="e.g. All bank charges outside India are on the buyer's account"
+              />
+            </div>
           </div>
         </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header">
+          <h2 className="font-semibold">Document Text</h2>
+        </div>
+        <div className="card-body">
+          <div className="space-y-4">
+            <TextareaField
+              label="Default Quotation Terms"
+              rows={3}
+              value={form.quotationTerms ?? ''}
+              onChange={set('quotationTerms')}
+            />
+            <TextareaField
+              label="Invoice Declaration"
+              rows={3}
+              value={form.invoiceDeclaration ?? ''}
+              onChange={set('invoiceDeclaration')}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button
+          className="btn btn-primary"
+          onClick={() => save.mutate()}
+          disabled={save.isPending || !canSave}
+        >
+          {save.isPending ? 'Saving...' : 'Save Changes'}
+        </button>
+        {!canSave && (
+          <span className="text-sm text-gray-500">Legal name is required.</span>
+        )}
       </div>
     </div>
   );
@@ -867,7 +1060,7 @@ function AutomationsSettings() {
                     <div className="font-medium">{automation.name}</div>
                     <div className="text-sm text-gray-500">
                       Trigger: <span className="font-mono">{automation.trigger}</span>
-                      {automation.runCount > 0 && ` • Ran ${automation.runCount} times`}
+                      {automation.runCount > 0 && ` â€¢ Ran ${automation.runCount} times`}
                     </div>
                   </div>
                 </div>
@@ -914,90 +1107,44 @@ function AutomationsSettings() {
 }
 
 // API Keys Settings
+/**
+ * API keys are not implemented.
+ *
+ * There is an ApiKey model in the schema but no routes behind it, so this tab
+ * previously showed a hardcoded fake key with invented dates and five buttons
+ * that did nothing. An honest empty state is better than a convincing mock-up
+ * someone might rely on.
+ */
 function ApiKeysSettings() {
-  const [showSecret, setShowSecret] = useState<string | null>(null);
-
-  // Placeholder API keys
-  const apiKeys = [
-    { id: '1', name: 'Production API', key: 'sb_prod_xxxxx...xxxxx', created: '2024-01-15', lastUsed: '2024-02-20' },
-  ];
-
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">API Keys</h2>
-          <p className="text-sm text-gray-500">Manage API keys for external integrations</p>
+      <div>
+        <h2 className="text-lg font-semibold">API Keys</h2>
+        <p className="text-sm text-gray-500">For external integrations</p>
+      </div>
+
+      <div className="card">
+        <div className="card-body text-center text-gray-500 py-10">
+          <Key className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+          <p className="font-medium text-gray-700">Not available yet</p>
+          <p className="text-sm mt-2 max-w-md mx-auto">
+            Issuing and revoking API keys has not been built. Until then, integrations
+            should authenticate with a normal user account over{' '}
+            <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">POST /api/auth/login</code>.
+          </p>
         </div>
-        <button className="btn btn-primary">
-          <Plus className="w-4 h-4 mr-2" /> Generate New Key
-        </button>
       </div>
 
       <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
         <div className="flex items-start gap-3">
           <Shield className="w-5 h-5 text-yellow-600 flex-shrink-0" />
           <div>
-            <h3 className="font-medium text-yellow-800">Security Notice</h3>
+            <h3 className="font-medium text-yellow-800">When this is built</h3>
             <p className="text-sm text-yellow-700 mt-1">
-              API keys provide full access to your account. Keep them secure and never share them publicly.
-              Rotate keys periodically for better security.
+              An API key will carry the full access of the account that created it. Keys will
+              need to be stored securely, scoped to the minimum required role, and rotated
+              periodically.
             </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="card">
-        {apiKeys.length === 0 ? (
-          <div className="p-8 text-center text-gray-500">
-            <Key className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-            <p>No API keys created</p>
-          </div>
-        ) : (
-          <div className="divide-y">
-            {apiKeys.map((apiKey) => (
-              <div key={apiKey.id} className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-medium">{apiKey.name}</div>
-                    <div className="text-sm font-mono text-gray-500 mt-1">
-                      {showSecret === apiKey.id ? 'sb_prod_12345...abcdef' : apiKey.key}
-                    </div>
-                    <div className="text-xs text-gray-400 mt-1">
-                      Created: {apiKey.created} • Last used: {apiKey.lastUsed}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setShowSecret(showSecret === apiKey.id ? null : apiKey.id)}
-                      className="p-2 text-gray-400 hover:text-gray-600"
-                    >
-                      {showSecret === apiKey.id ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                    <button className="p-2 text-gray-400 hover:text-gray-600">
-                      <Copy className="w-4 h-4" />
-                    </button>
-                    <button className="p-2 text-gray-400 hover:text-red-600">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* API Documentation Link */}
-      <div className="card">
-        <div className="card-body">
-          <h3 className="font-medium mb-2">API Documentation</h3>
-          <p className="text-sm text-gray-500 mb-3">
-            Learn how to integrate with SeaBridge ERP using our REST API.
-          </p>
-          <div className="flex gap-2">
-            <button className="btn btn-secondary text-sm">View API Docs</button>
-            <button className="btn btn-secondary text-sm">Download Postman Collection</button>
           </div>
         </div>
       </div>

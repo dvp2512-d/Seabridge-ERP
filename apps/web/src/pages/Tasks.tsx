@@ -32,9 +32,10 @@ export default function Tasks() {
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [showForm, setShowForm] = useState(false);
+  const [page, setPage] = useState(1);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['tasks', status, priority, assigneeId, overdueOnly],
+    queryKey: ['tasks', status, priority, assigneeId, overdueOnly, page],
     queryFn: () =>
       tasksApi
         .list({
@@ -42,6 +43,7 @@ export default function Tasks() {
           priority: priority || undefined,
           assigneeId: assigneeId || undefined,
           overdue: overdueOnly ? 'true' : undefined,
+          page,
         })
         .then((r: any) => r.data),
   });
@@ -56,6 +58,7 @@ export default function Tasks() {
   const users = usersData ?? [];
 
   const tasks = data?.data ?? [];
+  const pagination = data?.pagination;
   const summary = data?.summary;
 
   const update = useMutation({
@@ -118,7 +121,7 @@ export default function Tasks() {
           <SelectField
             label="Status"
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            onChange={(e) => { setStatus(e.target.value); setPage(1); }}
             placeholder="All statuses"
             options={['PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'].map((s) => ({
               value: s,
@@ -128,7 +131,7 @@ export default function Tasks() {
           <SelectField
             label="Priority"
             value={priority}
-            onChange={(e) => setPriority(e.target.value)}
+            onChange={(e) => { setPriority(e.target.value); setPage(1); }}
             placeholder="All priorities"
             options={['LOW', 'MEDIUM', 'HIGH', 'URGENT'].map((p) => ({ value: p, label: p }))}
           />
@@ -136,7 +139,7 @@ export default function Tasks() {
             <SelectField
               label="Assignee"
               value={assigneeId}
-              onChange={(e) => setAssigneeId(e.target.value)}
+              onChange={(e) => { setAssigneeId(e.target.value); setPage(1); }}
               placeholder="Anyone"
               options={users.map((u: any) => ({
                 value: u.id,
@@ -266,6 +269,23 @@ export default function Tasks() {
           )}
         </div>
       </div>
+
+      {/* Pagination - the API caps a page at 50 tasks. */}
+      {pagination && pagination.total > pagination.limit && (
+        <div className="flex items-center justify-between">
+          <div className="text-sm text-gray-500">
+            Page {pagination.page} of {Math.ceil(pagination.total / pagination.limit)} • {pagination.total} tasks
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="btn btn-secondary">
+              Previous
+            </button>
+            <button onClick={() => setPage(p => p + 1)} disabled={page * pagination.limit >= pagination.total} className="btn btn-secondary">
+              Next
+            </button>
+          </div>
+        </div>
+      )}
 
       {showForm && (
         <TaskFormModal

@@ -6,53 +6,26 @@ import {
   startOfMonth as monthStart,
   financialYearLabel,
 } from '../utils/period';
-import {
-  buildRateMap,
-  buildRateMapByCode,
-  sumConverted,
-} from '../services/exchangeRateService';
+import { getBaseCurrency } from '../services/exchangeRateService';
 
 /**
- * Collapse a Prisma groupBy that was split by currency back into one row per
- * key, with the money converted into the base currency.
+ * Reshape a Prisma groupBy into the { key, count, value } rows the charts read.
  *
- * Grouping by currency is what makes conversion possible at all, but the UI wants
- * one row per stage or status, so the currency dimension is folded away here.
- * Groups whose currency has no notified rate are counted rather than added, so a
- * chart never shows a total that quietly excludes some records.
+ * Kept as a named helper because the chart components depend on this exact shape:
+ * they previously read Prisma's raw `_count.id` / `_sum.x` wrappers and silently
+ * rendered zeros when the response shape changed.
+ *
+ * No currency handling here - every amount is INR.
  */
-function collapseByCurrency<T extends Record<string, any>>(
+function toChartRows<T extends Record<string, any>>(
   groups: T[],
   keyField: keyof T,
-  getValue: (group: T) => number,
-  rates: Map<string, number>
-): { key: string; count: number; value: number; unconvertedCount: number }[] {
-  const collapsed = new Map<
-    string,
-    { key: string; count: number; value: number; unconvertedCount: number }
-  >();
-
-  for (const group of groups) {
-    const key = String(group[keyField]);
-    const entry =
-      collapsed.get(key) ?? { key, count: 0, value: 0, unconvertedCount: 0 };
-
-    entry.count += group._count?.id ?? 0;
-
-    const currencyId = group.currencyId as string | null;
-    const rate = currencyId ? rates.get(currencyId) : undefined;
-    if (rate === undefined) {
-      entry.unconvertedCount += group._count?.id ?? 0;
-    } else {
-      entry.value += getValue(group) * rate;
-    }
-
-    collapsed.set(key, entry);
-  }
-
-  return [...collapsed.values()].map((e) => ({
-    ...e,
-    value: Math.round((e.value + Number.EPSILON) * 100) / 100,
+  getValue: (group: T) => number
+): { key: string; count: number; value: number }[] {
+  return groups.map((group) => ({
+    key: String(group[keyField]),
+    count: group._count?.id ?? group._count?._all ?? 0,
+    value: Math.round((getValue(group) + Number.EPSILON) * 100) / 100,
   }));
 }
 
@@ -159,59 +132,59 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
     ]);
 
     /**
-     * Money figures below are converted into the base currency before being
-     * summed. Previously these were Prisma _sum aggregates, which add the raw
-     * numbers regardless of currency - a USD 5,900 payment and a EUR 3,000
-     * payment came out as 8,900 of nothing.
+     * Every monetary column is INR, so these are plain aggregates done in SQL.
      *
-     * Prisma cannot convert inside an aggregate, so each figure is fetched with
-     * its currency and converted in application code. Rows whose currency has no
-     * notified rate are reported rather than silently dropped.
+     * This block previously fetched each row with its currency and converted in
+     * application code, because amounts were stored in mixed currencies and could
+     * not be added directly. Storing INR removes both the conversion and the
+     * possibility of a total that quietly excludes rows whose rate was missing.
      */
-    const { base, rates: ratesByCode } = await buildRateMapByCode(today);
-    const { rates: ratesById } = await buildRateMap(today);
-
     const [
-      monthlyPayments,
-      yearlyPayments,
-      receivableInvoices,
-      overdueInvoices,
-      pipelineInquiries,
+      monthlyPaymentTotal,
+      yearlyPaymentTotal,
+      receivableTotal,
+      overdueTotal,
+      pipelineTotal,
       /**
        * Other income, kept apart from Revenue on purpose.
        *
        * Drawback, RoDTEP, interest and forex gain are real receipts but they are
        * not export sales. Folding them into Revenue would flatter sales
        * performance and stop one period being comparable with another.
-       *
-       * Already stored in INR, so these are plain sums - no conversion needed,
-       * which is the point of converting on write.
        */
       incomeByStatus,
       incomeByCategory,
-      allPayments,
+      allPaymentTotal,
       allIncomeReceived,
       allExpenseGroups,
     ] = await Promise.all([
-      prisma.payment.findMany({
+      prisma.payment.aggregate({
         where: { paymentDate: { gte: startOfMonth } },
-        select: { amount: true, currency: true },
+        _sum: { amount: true },
       }),
-      prisma.payment.findMany({
+      prisma.payment.aggregate({
         where: { paymentDate: { gte: startOfYear } },
-        select: { amount: true, currency: true },
+        _sum: { amount: true },
       }),
-      prisma.invoice.findMany({
+      prisma.invoice.aggregate({
         where: { status: { in: ['SENT', 'PARTIALLY_PAID', 'OVERDUE'] } },
-        select: { balanceAmount: true, currencyId: true },
+        _sum: { balanceAmount: true },
       }),
-      prisma.invoice.findMany({
-        where: { status: 'OVERDUE' },
-        select: { balanceAmount: true, currencyId: true },
+      prisma.invoice.aggregate({
+        // Overdue is derived from the due date, not from the OVERDUE status:
+        // nothing in the system ever transitions an invoice into that status, so
+        // filtering on it reported zero while the alert banner and the aging
+        // chart - which both use the due date - correctly showed arrears.
+        where: {
+          status: { in: ['SENT', 'PARTIALLY_PAID', 'OVERDUE'] },
+          balanceAmount: { gt: 0 },
+          dueDate: { lt: new Date() },
+        },
+        _sum: { balanceAmount: true },
       }),
-      prisma.inquiry.findMany({
+      prisma.inquiry.aggregate({
         where: { stage: { notIn: ['WON', 'LOST'] } },
-        select: { expectedValue: true, currencyId: true },
+        _sum: { expectedValue: true },
       }),
       prisma.income.groupBy({
         by: ['status'],
@@ -236,55 +209,25 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
        * The KPI cards stay on the financial year, because revenue performance is
        * a period question.
        */
-      prisma.payment.findMany({ select: { amount: true, currency: true } }),
+      prisma.payment.aggregate({ _sum: { amount: true } }),
       prisma.income.aggregate({
         where: { status: 'RECEIVED' },
         _sum: { amountINR: true },
       }),
       prisma.expense.groupBy({
-        by: ['status', 'currency'],
+        by: ['status'],
         _count: { _all: true },
         _sum: { amount: true },
       }),
     ]);
 
-    const monthlyRevenue = sumConverted(
-      monthlyPayments.map((p) => ({ amount: Number(p.amount), currencyId: p.currency })),
-      ratesByCode
-    );
-    const yearlyRevenue = sumConverted(
-      yearlyPayments.map((p) => ({ amount: Number(p.amount), currencyId: p.currency })),
-      ratesByCode
-    );
-    const totalReceivables = sumConverted(
-      receivableInvoices.map((i) => ({
-        amount: Number(i.balanceAmount),
-        currencyId: i.currencyId,
-      })),
-      ratesById
-    );
-    const overdueReceivables = sumConverted(
-      overdueInvoices.map((i) => ({ amount: Number(i.balanceAmount), currencyId: i.currencyId })),
-      ratesById
-    );
-    // Inquiries may predate the currency column, so those without one cannot be
-    // converted and are counted as unconvertible instead of assumed.
-    const pipelineValue = sumConverted(
-      pipelineInquiries
-        .filter((i) => i.expectedValue !== null)
-        .map((i) => ({
-          amount: Number(i.expectedValue),
-          currencyId: i.currencyId ?? '__unknown__',
-        })),
-      ratesById
-    );
+    const base = await getBaseCurrency();
 
-    const unconverted =
-      monthlyRevenue.unconvertedCount +
-      yearlyRevenue.unconvertedCount +
-      totalReceivables.unconvertedCount +
-      overdueReceivables.unconvertedCount +
-      pipelineValue.unconvertedCount;
+    const monthlyRevenue = Number(monthlyPaymentTotal._sum.amount ?? 0);
+    const yearlyRevenue = Number(yearlyPaymentTotal._sum.amount ?? 0);
+    const totalReceivables = Number(receivableTotal._sum.balanceAmount ?? 0);
+    const overdueReceivables = Number(overdueTotal._sum.balanceAmount ?? 0);
+    const pipelineValue = Number(pipelineTotal._sum.expectedValue ?? 0);
 
     /**
      * Other income for the year to date, in rupees.
@@ -318,28 +261,18 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
      */
     let expensesPaid = 0;
     let expensesCommitted = 0;
-    let expensesUnconverted = 0;
 
     for (const group of allExpenseGroups) {
-      const rate = ratesByCode.get(group.currency);
-      if (rate === undefined) {
-        expensesUnconverted += group._count._all;
-        continue;
-      }
-      const amount = Number(group._sum.amount ?? 0) * rate;
+      const amount = Number(group._sum.amount ?? 0);
       if (group.status === 'PAID') expensesPaid += amount;
       // Approved but not yet paid: an obligation, not yet an outflow.
       if (group.status === 'APPROVED') expensesCommitted += amount;
     }
 
-    // Every payment ever, converted at today's rates for a single comparable figure.
-    const allTimeRevenue = sumConverted(
-      allPayments.map((p) => ({ amount: Number(p.amount), currencyId: p.currency })),
-      ratesByCode
-    );
+    const allTimeRevenue = Number(allPaymentTotal._sum.amount ?? 0);
 
     const otherIncomeAllTime = Number(allIncomeReceived._sum.amountINR ?? 0);
-    const totalIncome = round2(allTimeRevenue.total + otherIncomeAllTime);
+    const totalIncome = round2(allTimeRevenue + otherIncomeAllTime);
     const totalExpenses = round2(expensesPaid);
     const netBalance = round2(totalIncome - totalExpenses);
 
@@ -361,20 +294,19 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
           to: today,
           basis: 'Received and paid only, excluding pending',
         },
-        // Non-zero means some records could not be converted, so the totals are
-        // understated. The UI surfaces this rather than showing a clean number.
-        unconvertedRecords: unconverted,
+        // Every stored amount is already in this currency, so no record can fail
+        // to convert - the unconvertedRecords field this replaces is obsolete.
         kpis: {
-          monthlyRevenue: monthlyRevenue.total,
-          yearlyRevenue: yearlyRevenue.total,
+          monthlyRevenue: round2(monthlyRevenue),
+          yearlyRevenue: round2(yearlyRevenue),
           totalOrders,
           activeOrders,
           openInquiries,
           pendingQuotations,
           activeShipments,
-          totalReceivables: totalReceivables.total,
-          overdueReceivables: overdueReceivables.total,
-          pipelineValue: pipelineValue.total,
+          totalReceivables: round2(totalReceivables),
+          overdueReceivables: round2(overdueReceivables),
+          pipelineValue: round2(pipelineValue),
           totalBuyers,
           activeBuyers,
         },
@@ -409,7 +341,7 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
         netPosition: {
           currency: base.code,
           scope: 'All time',
-          exportRevenue: allTimeRevenue.total,
+          exportRevenue: round2(allTimeRevenue),
           otherIncome: round2(otherIncomeAllTime),
           totalIncome,
           totalExpenses,
@@ -418,9 +350,6 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
           // mistaken for the whole picture.
           expensesCommitted: round2(expensesCommitted),
           incomePending: round2(otherIncomePending),
-          // Non-zero means some records had no exchange rate and are excluded.
-          unconvertedExpenses: expensesUnconverted,
-          unconvertedPayments: allTimeRevenue.unconvertedCount,
         },
         pendingTasks,
         alerts: await getAlerts(),
@@ -440,18 +369,16 @@ router.get('/sales', can('DASHBOARD_SALES'), async (req, res, next) => {
       topBuyers,
       salesByMonth,
     ] = await Promise.all([
-      // Inquiries by stage. Grouped by currency as well, so the value can be
-      // converted before being totalled - a plain _sum here would add rupees to
-      // dollars.
+      // Inquiries by stage. Amounts are INR, so a plain _sum is correct.
       prisma.inquiry.groupBy({
-        by: ['stage', 'currencyId'],
+        by: ['stage'],
         _count: { id: true },
         _sum: { expectedValue: true },
       }),
       
-      // Quotations by status, likewise grouped by currency
+      // Quotations by status
       prisma.quotation.groupBy({
-        by: ['status', 'currencyId'],
+        by: ['status'],
         _count: { id: true },
         _sum: { grandTotal: true },
       }),
@@ -482,25 +409,16 @@ router.get('/sales', can('DASHBOARD_SALES'), async (req, res, next) => {
       `,
     ]);
 
-    // The two groupBy results above are split by currency, so collapse them back
-    // to one row per stage/status with the value converted into the base currency.
-    const { base: analyticsBase, rates: analyticsRates } = await buildRateMap(new Date());
-
     res.json({
       success: true,
       data: {
-        baseCurrency: analyticsBase,
-        inquiriesByStage: collapseByCurrency(
-          inquiriesByStage,
-          'stage',
-          (g: any) => Number(g._sum.expectedValue ?? 0),
-          analyticsRates
+        baseCurrency: await getBaseCurrency(),
+        // Shaped as { key, count, value } to match what the charts consume.
+        inquiriesByStage: toChartRows(inquiriesByStage, 'stage', (g) =>
+          Number(g._sum.expectedValue ?? 0)
         ),
-        quotationsByStatus: collapseByCurrency(
-          quotationsByStatus,
-          'status',
-          (g: any) => Number(g._sum.grandTotal ?? 0),
-          analyticsRates
+        quotationsByStatus: toChartRows(quotationsByStatus, 'status', (g) =>
+          Number(g._sum.grandTotal ?? 0)
         ),
         topBuyers,
         salesByMonth,
@@ -591,7 +509,10 @@ router.get('/finance', can('DASHBOARD_FINANCE'), async (req, res, next) => {
             ELSE '90+ days'
           END as aging,
           SUM(balance_amount) as total,
-          COUNT(*) as count
+          -- Cast to int: Postgres COUNT(*) is bigint, which Prisma returns as a
+          -- JS BigInt and res.json() cannot serialize (throws, 500ing the route
+          -- as soon as a single invoice is outstanding).
+          COUNT(*)::int as count
         FROM invoices
         WHERE status IN ('SENT', 'PARTIALLY_PAID', 'OVERDUE')
         GROUP BY aging

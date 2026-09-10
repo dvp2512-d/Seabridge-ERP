@@ -28,6 +28,13 @@ interface QuotationItem {
   supplierPrice: number;
   supplierId: string;
   supplierName: string;
+  /**
+   * Per-unit packaging/handling added on top of the supplier price.
+   * Persisted on the line because unitCost is supplierPrice + additionalCost:
+   * without it, reopening the calculator reset this to 0 and silently reduced
+   * the line's cost, shifting margin and grand total.
+   */
+  additionalCost: number;
   unitCost: number;
   margin: number;
   unitPrice: number;
@@ -51,7 +58,6 @@ export default function NewQuotation() {
 
   // Form state
   const [buyerId, setBuyerId] = useState('');
-  const [currencyId, setCurrencyId] = useState('');
   const [incotermId, setIncotermId] = useState('');
   const [portOfLoadingId, setPortOfLoadingId] = useState('');
   const [portOfDischargeId, setPortOfDischargeId] = useState('');
@@ -99,9 +105,6 @@ export default function NewQuotation() {
     if (inquiryData?.data?.data) {
       const inquiry = inquiryData.data.data;
       setBuyerId(inquiry.buyerId);
-      if (inquiry.buyer?.currencyId) {
-        setCurrencyId(inquiry.buyer.currencyId);
-      }
       // Convert inquiry items to quotation items (without pricing yet)
       if (inquiry.items?.length > 0) {
         setItems(inquiry.items.map((item: any) => ({
@@ -114,6 +117,7 @@ export default function NewQuotation() {
           supplierPrice: 0,
           supplierId: '',
           supplierName: '',
+          additionalCost: 0,
           unitCost: 0,
           margin: 20, // Default 20% margin
           unitPrice: 0,
@@ -124,16 +128,6 @@ export default function NewQuotation() {
       }
     }
   }, [inquiryData]);
-
-  // Default the currency to USD when the master data loads
-  useEffect(() => {
-    if (currencyId) return;
-    const currencies = dropdowns?.data?.data?.currencies ?? [];
-    if (currencies.length === 0) return;
-    const preferred =
-      currencies.find((c: any) => c.code === 'USD') ?? currencies[0];
-    if (preferred) setCurrencyId(preferred.id);
-  }, [dropdowns, currencyId]);
 
   // Quotation totals. Each line already carries its own selling price, derived
   // from its own margin in the item modal, so the rollup only has to add up.
@@ -187,19 +181,32 @@ export default function NewQuotation() {
       toast.error('Please select a buyer');
       return;
     }
-    if (!currencyId || !incotermId) {
-      toast.error('Please select currency and incoterm');
+    if (!incotermId) {
+      toast.error('Please select an incoterm');
       return;
     }
     if (items.length === 0) {
       toast.error('Please add at least one item');
       return;
     }
+    // Lines prefilled from an inquiry arrive with no pricing, and the API rejects
+    // a unitPrice of 0. Without this the user got a bare "Validation failed" from
+    // the server with no indication of which line was at fault.
+    const unpriced = items.filter((i) => !(i.unitPrice > 0));
+    if (unpriced.length > 0) {
+      toast.error(
+        unpriced.length === items.length
+          ? 'Set a supplier price and margin on each line before saving.'
+          : `${unpriced.length} line${unpriced.length > 1 ? 's have' : ' has'} no price yet: ${unpriced
+              .map((i) => i.productName || 'item')
+              .join(', ')}`
+      );
+      return;
+    }
 
     const data = {
       inquiryId: inquiryId || undefined,
       buyerId,
-      currencyId,
       incotermId,
       portOfLoadingId: portOfLoadingId || undefined,
       portOfDischargeId: portOfDischargeId || undefined,
@@ -220,14 +227,11 @@ export default function NewQuotation() {
         costType: cost.costType,
         description: cost.description,
         amount: cost.amount,
-        currency: cost.currency,
       })),
     };
 
     mutation.mutate(data);
   };
-
-  const selectedCurrency = dropdowns?.data?.data?.currencies?.find((c: any) => c.id === currencyId);
 
   return (
     <div className="space-y-6">
@@ -267,17 +271,6 @@ export default function NewQuotation() {
                   }))}
                   placeholder="Select Buyer"
                   className="col-span-2"
-                />
-                <SelectField
-                  label="Currency"
-                  required
-                  value={currencyId}
-                  onChange={(e) => setCurrencyId(e.target.value)}
-                  options={(dropdowns?.data?.data?.currencies || []).map((c: any) => ({
-                    value: c.id,
-                    label: `${c.code} (${c.symbol})`,
-                  }))}
-                  placeholder="Select Currency"
                 />
                 <SelectField
                   label="Incoterm"
@@ -370,7 +363,7 @@ export default function NewQuotation() {
                         )}
                       </td>
                       <td>{item.quantity} {item.unit}</td>
-                      <td>{formatCurrency(item.unitCost, selectedCurrency?.code)}</td>
+                      <td>{formatCurrency(item.unitCost)}</td>
                       <td>
                         <span className={cn(
                           'font-medium',
@@ -380,8 +373,8 @@ export default function NewQuotation() {
                           {item.margin.toFixed(1)}%
                         </span>
                       </td>
-                      <td className="font-medium">{formatCurrency(item.unitPrice, selectedCurrency?.code)}</td>
-                      <td className="font-medium">{formatCurrency(item.totalPrice, selectedCurrency?.code)}</td>
+                      <td className="font-medium">{formatCurrency(item.unitPrice)}</td>
+                      <td className="font-medium">{formatCurrency(item.totalPrice)}</td>
                       <td>
                         <div className="flex gap-1">
                           <button
@@ -501,21 +494,21 @@ export default function NewQuotation() {
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Items Subtotal</span>
-                  <span className="font-medium">{formatCurrency(totals.itemsSubtotal, selectedCurrency?.code)}</span>
+                  <span className="font-medium">{formatCurrency(totals.itemsSubtotal)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Items Cost</span>
-                  <span>{formatCurrency(totals.itemsCost, selectedCurrency?.code)}</span>
+                  <span>{formatCurrency(totals.itemsCost)}</span>
                 </div>
                 {totals.additionalCostsTotal > 0 && (
                   <div className="flex justify-between text-sm">
                     <span className="text-gray-500">Additional Costs</span>
-                    <span>{formatCurrency(totals.additionalCostsTotal, selectedCurrency?.code)}</span>
+                    <span>{formatCurrency(totals.additionalCostsTotal)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500">Total Cost</span>
-                  <span className="font-medium">{formatCurrency(totals.totalCost, selectedCurrency?.code)}</span>
+                  <span className="font-medium">{formatCurrency(totals.totalCost)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-500">Margin</span>
@@ -524,13 +517,13 @@ export default function NewQuotation() {
                     totals.marginPercent >= 15 ? 'text-green-600' :
                     totals.marginPercent >= 10 ? 'text-yellow-600' : 'text-red-600'
                   )}>
-                    {formatCurrency(totals.totalMargin, selectedCurrency?.code)} ({totals.marginPercent.toFixed(1)}%)
+                    {formatCurrency(totals.totalMargin)} ({totals.marginPercent.toFixed(1)}%)
                   </span>
                 </div>
                 <hr />
                 <div className="flex justify-between text-lg">
                   <span className="font-semibold">Grand Total</span>
-                  <span className="font-bold text-navy-900">{formatCurrency(totals.grandTotal, selectedCurrency?.code)}</span>
+                  <span className="font-bold text-navy-900">{formatCurrency(totals.grandTotal)}</span>
                 </div>
               </div>
 
@@ -562,7 +555,6 @@ export default function NewQuotation() {
       {showItemModal && (
         <ItemCostingModal
           item={editingItem}
-          currency={selectedCurrency}
           onClose={() => { setShowItemModal(false); setEditingItem(null); }}
           onSave={(item) => {
             if (editingItem) {
@@ -579,7 +571,6 @@ export default function NewQuotation() {
       {/* Add Cost Modal */}
       {showCostModal && (
         <AddCostModal
-          currency={selectedCurrency}
           onClose={() => setShowCostModal(false)}
           onSave={(cost) => {
             setAdditionalCosts([...additionalCosts, cost]);
@@ -596,12 +587,10 @@ export default function NewQuotation() {
 // Item Costing Modal - The core pricing engine
 function ItemCostingModal({ 
   item, 
-  currency, 
   onClose, 
   onSave 
 }: { 
   item: QuotationItem | null; 
-  currency: any;
   onClose: () => void; 
   onSave: (item: QuotationItem) => void;
 }) {
@@ -611,7 +600,7 @@ function ItemCostingModal({
     unit: item?.unit || 'KG',
     supplierId: item?.supplierId || '',
     supplierPrice: item?.supplierPrice?.toString() || '',
-    additionalCost: '0', // Packaging, handling, etc.
+    additionalCost: item?.additionalCost?.toString() || '0', // Packaging, handling, etc.
     margin: item?.margin?.toString() || '20',
     specifications: item?.specifications || '',
   });
@@ -711,6 +700,7 @@ function ItemCostingModal({
       supplierPrice: parseFloat(formData.supplierPrice) || 0,
       supplierId: formData.supplierId,
       supplierName: selectedSupplier?.name || '',
+      additionalCost: parseFloat(formData.additionalCost) || 0,
       unitCost: calculations.unitCost,
       margin: calculations.safeMargin,
       unitPrice: calculations.unitPrice,
@@ -834,16 +824,16 @@ function ItemCostingModal({
             <div>
               <label className="label">Unit Price</label>
               <div className="input bg-gray-100 font-bold text-green-700">
-                {formatCurrency(calculations.unitPrice, currency?.code)}
+                {formatCurrency(calculations.unitPrice)}
               </div>
               <p className="mt-1 text-sm text-gray-500">
-                Cost {formatCurrency(calculations.unitCost, currency?.code)}/unit
+                Cost {formatCurrency(calculations.unitCost)}/unit
               </p>
             </div>
             <div>
               <label className="label">Total Price</label>
               <div className="input bg-gray-100 font-bold text-green-700">
-                {formatCurrency(calculations.totalPrice, currency?.code)}
+                {formatCurrency(calculations.totalPrice)}
               </div>
             </div>
           </div>
@@ -854,19 +844,19 @@ function ItemCostingModal({
           <h3 className="font-semibold text-gray-900 mb-3">Calculation Summary</h3>
           <div className="grid grid-cols-2 gap-y-2 text-sm">
             <span className="text-gray-500">Unit Cost:</span>
-            <span className="text-right font-medium">{formatCurrency(calculations.unitCost, currency?.code)}</span>
+            <span className="text-right font-medium">{formatCurrency(calculations.unitCost)}</span>
             <span className="text-gray-500">Total Cost:</span>
-            <span className="text-right">{formatCurrency(calculations.totalCost, currency?.code)}</span>
+            <span className="text-right">{formatCurrency(calculations.totalCost)}</span>
             <span className="text-gray-500">Unit Price:</span>
-            <span className="text-right font-medium">{formatCurrency(calculations.unitPrice, currency?.code)}</span>
+            <span className="text-right font-medium">{formatCurrency(calculations.unitPrice)}</span>
             <span className="text-gray-500">Total Price:</span>
-            <span className="text-right font-bold">{formatCurrency(calculations.totalPrice, currency?.code)}</span>
+            <span className="text-right font-bold">{formatCurrency(calculations.totalPrice)}</span>
             <span className="text-gray-500">Profit:</span>
             <span className={cn(
               'text-right font-bold',
               calculations.profit >= 0 ? 'text-green-600' : 'text-red-600'
             )}>
-              {formatCurrency(calculations.profit, currency?.code)}
+              {formatCurrency(calculations.profit)}
             </span>
           </div>
         </div>
@@ -894,11 +884,9 @@ function ItemCostingModal({
 
 // Add Cost Modal (CHA, Transport, etc.)
 function AddCostModal({ 
-  currency, 
   onClose, 
   onSave 
 }: { 
-  currency: any; 
   onClose: () => void; 
   onSave: (cost: AdditionalCost) => void;
 }) {
@@ -930,7 +918,7 @@ function AddCostModal({
       costType: formData.costType,
       description: formData.description,
       amount: parseFloat(formData.amount),
-      currency: currency?.code || 'USD',
+      currency: 'INR',
     });
   };
 
@@ -998,7 +986,7 @@ function AddCostModal({
         />
 
         <FormField
-          label={`Amount (${currency?.code || 'USD'})`}
+          label="Amount (INR)"
           required
           type="number"
           step="0.01"

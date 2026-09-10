@@ -99,7 +99,7 @@ export default function Quotations() {
         </div>
         <div className="card p-4">
           <div className="text-sm text-gray-500 mb-1">Total Value</div>
-          <div className="text-2xl font-bold text-green-600">{formatCurrency(stats.totalValue)}</div>
+          <div className="text-2xl font-bold text-green-600">{formatCurrency(stats.totalValue, summary?.baseCurrency?.code)}</div>
         </div>
       </div>
 

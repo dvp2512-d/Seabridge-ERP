@@ -7,6 +7,7 @@ import { quotationsApi } from '@/lib/api';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import DeleteRecordButton from '@/components/DeleteRecordButton';
+import GenerateDocumentDialog from '@/components/modals/GenerateDocumentDialog';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
 import {
   ArrowLeft,
@@ -28,13 +29,11 @@ import {
   Phone,
   MapPin,
   Calendar,
-  FileCheck,
 } from 'lucide-react';
 
 const STATUS_CONFIG: Record<string, { color: string; bg: string; icon: any }> = {
   DRAFT: { color: 'text-gray-700', bg: 'bg-gray-100', icon: FileText },
   SENT: { color: 'text-blue-700', bg: 'bg-blue-100', icon: Send },
-  VIEWED: { color: 'text-purple-700', bg: 'bg-purple-100', icon: FileCheck },
   ACCEPTED: { color: 'text-green-700', bg: 'bg-green-100', icon: CheckCircle },
   REJECTED: { color: 'text-red-700', bg: 'bg-red-100', icon: XCircle },
   EXPIRED: { color: 'text-orange-700', bg: 'bg-orange-100', icon: Clock },
@@ -71,20 +70,43 @@ export default function QuotationDetail() {
     onError: () => toast.error('Failed to update status'),
   });
 
-  // Download PDF
-  const handleDownloadPdf = async () => {
+  // Generate the PDF in a chosen currency and rate. The dialog collects both,
+  // because amounts are stored in rupees and the buyer's copy is a conversion.
+  const [showPdfDialog, setShowPdfDialog] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const handleGeneratePdf = async (currency: string, rate: number) => {
+    setIsGenerating(true);
     try {
-      const response = await quotationsApi.downloadPdf(id!);
+      const response = await quotationsApi.downloadPdf(id!, currency, rate);
       const blob = new Blob([response.data], { type: 'application/pdf' });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `Quotation-${quotation?.quotationNumber}.pdf`;
+      a.download = `Quotation-${quotation?.quotationNumber}-${currency}.pdf`;
       a.click();
       window.URL.revokeObjectURL(url);
-      toast.success('PDF downloaded');
-    } catch {
-      toast.error('Failed to download PDF');
+      toast.success(`PDF generated in ${currency}`);
+      setShowPdfDialog(false);
+      // The chosen currency and rate are recorded on the quotation.
+      queryClient.invalidateQueries({ queryKey: ['quotation', id] });
+    } catch (error: any) {
+      // The server refuses a currency change on an issued quotation, and that
+      // message is the useful one.
+      let message = 'Failed to generate PDF';
+      const data = error?.response?.data;
+      if (data instanceof Blob) {
+        try {
+          message = JSON.parse(await data.text())?.message ?? message;
+        } catch {
+          /* keep the fallback */
+        }
+      } else if (data?.message) {
+        message = data.message;
+      }
+      toast.error(message);
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -160,9 +182,9 @@ export default function QuotationDetail() {
             recordName={`Quotation ${quotation.quotationNumber}`}
             redirectTo="/quotations"
           />
-          <button onClick={handleDownloadPdf} className="btn btn-secondary">
+          <button onClick={() => setShowPdfDialog(true)} className="btn btn-secondary">
             <Download className="w-4 h-4 mr-2" />
-            Download PDF
+            Generate PDF
           </button>
           {quotation.status === 'DRAFT' && (
             <button onClick={() => updateStatusMutation.mutate({ status: 'SENT' })} className="btn btn-primary">
@@ -411,6 +433,27 @@ export default function QuotationDetail() {
           onClose={() => setShowConvertModal(false)}
         />
       )}
+
+      {showPdfDialog && (
+        <GenerateDocumentDialog
+          title={`Generate PDF - ${quotation.quotationNumber}`}
+          documentTotalINR={Number(quotation.grandTotal ?? 0)}
+          initialCurrency={quotation.pdfCurrency}
+          initialRate={quotation.pdfExchangeRate ? Number(quotation.pdfExchangeRate) : null}
+          // Once sent, the buyer holds a copy at a stated price, so the currency
+          // and rate are fixed. Revising the quotation is the way to re-price.
+          lockedReason={
+            quotation.status !== 'DRAFT' && quotation.pdfCurrency
+              ? `This quotation was issued in ${quotation.pdfCurrency} at ${Number(
+                  quotation.pdfExchangeRate
+                ).toFixed(4)}. Revise it to price in another currency.`
+              : null
+          }
+          onClose={() => setShowPdfDialog(false)}
+          onGenerate={handleGeneratePdf}
+          isGenerating={isGenerating}
+        />
+      )}
     </div>
   );
 }
@@ -633,10 +676,12 @@ function StatusUpdateModal({
   const [status, setStatus] = useState(currentStatus);
   const [notes, setNotes] = useState('');
 
+  // Mirrors the QuotationStatus enum in schema.prisma and the z.enum on
+  // PATCH /quotations/:id/status. "Viewed by Buyer" used to be offered here but
+  // is not a valid status, so selecting it always failed.
   const statusOptions = [
     { value: 'DRAFT', label: 'Draft' },
     { value: 'SENT', label: 'Sent' },
-    { value: 'VIEWED', label: 'Viewed by Buyer' },
     { value: 'ACCEPTED', label: 'Accepted' },
     { value: 'REJECTED', label: 'Rejected' },
     { value: 'EXPIRED', label: 'Expired' },
@@ -729,7 +774,10 @@ function ConvertToOrderModal({
             <span className="text-green-700">Total Value:</span>
             <span className="font-medium">
               {formatCurrency(
-                quotation.items?.reduce((s: number, i: any) => s + (i.totalPrice || 0), 0) || 0,
+                // Number() is required: Prisma Decimal values arrive as JSON
+                // strings, so a bare `s + i.totalPrice` concatenates ("0"+"100"
+                // +"200" = "0100200") instead of adding. Same sum, correct type.
+                quotation.items?.reduce((s: number, i: any) => s + Number(i.totalPrice || 0), 0) || 0,
                 quotation.currency?.code
               )}
             </span>

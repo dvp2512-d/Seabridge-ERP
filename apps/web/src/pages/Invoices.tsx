@@ -43,18 +43,11 @@ export default function Invoices() {
     }),
   });
 
-  // Fetch receivables summary
-  const { data: receivablesData } = useQuery({
-    queryKey: ['receivables'],
-    queryFn: () => invoicesApi.getReceivables(),
-  });
-
   const invoices = data?.data?.data || [];
   const pagination = data?.data?.pagination;
   // Summary comes from the API so the figures cover every matching invoice,
   // not just the rows on the current page.
   const summary = data?.data?.summary;
-  const receivables = receivablesData?.data?.data;
 
   const handleSearch = useDebouncedCallback((value: string) => {
     setSearch(value);
@@ -62,14 +55,18 @@ export default function Invoices() {
   }, 300);
 
   const countByStatus: Record<string, number> = summary?.countByStatus ?? {};
+  // Summary money is already converted into the base currency by the API.
+  const baseCode = summary?.baseCurrency?.code;
   const stats = {
     draft: countByStatus.DRAFT ?? 0,
     sent: countByStatus.SENT ?? 0,
     partiallyPaid: countByStatus.PARTIALLY_PAID ?? 0,
     paid: countByStatus.PAID ?? 0,
     overdue: summary?.overdueCount ?? 0,
-    totalReceivable:
-      summary?.totalOutstanding ?? receivables?.totalOutstanding ?? 0,
+    // Only summary.totalOutstanding is currency-converted. The receivables
+    // report sums balances across currencies at face value, so it is not used
+    // as a fallback here.
+    totalReceivable: summary?.totalOutstanding ?? 0,
     totalPaid: summary?.totalCollected ?? 0,
   };
 
@@ -104,7 +101,7 @@ export default function Invoices() {
             <span className="text-sm font-medium">Total Receivable</span>
           </div>
           <div className="text-2xl font-bold text-gray-900">
-            {formatCurrency(stats.totalReceivable)}
+            {formatCurrency(stats.totalReceivable, baseCode)}
           </div>
           <div className="text-xs text-gray-500 mt-1">
             {stats.overdue} overdue
@@ -116,7 +113,7 @@ export default function Invoices() {
             <span className="text-sm font-medium">Total Collected</span>
           </div>
           <div className="text-2xl font-bold text-gray-900">
-            {formatCurrency(stats.totalPaid)}
+            {formatCurrency(stats.totalPaid, baseCode)}
           </div>
           <div className="text-xs text-gray-500 mt-1">
             {stats.paid} invoices paid

@@ -4,6 +4,7 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
+import { optionalEmail, optionalRating } from '../utils/validators';
 
 const router: Router = Router();
 
@@ -58,10 +59,12 @@ router.post('/', can('MASTER_MANAGE'), async (req, res, next) => {
     const schema = z.object({
       name: z.string().min(1),
       contactPerson: z.string().optional(),
-      email: z.string().email().optional(),
+      email: optionalEmail,
       phone: z.string().optional(),
       address: z.string().optional(),
       serviceType: z.enum(['ROAD', 'RAIL', 'SEA', 'AIR']).optional(),
+      // Accepted on create too; the form has a star picker.
+      rating: optionalRating,
       notes: z.string().optional(),
     });
 
@@ -86,11 +89,11 @@ router.put('/:id', can('MASTER_MANAGE'), async (req, res, next) => {
     const schema = z.object({
       name: z.string().min(1).optional(),
       contactPerson: z.string().optional(),
-      email: z.string().email().optional(),
+      email: optionalEmail,
       phone: z.string().optional(),
       address: z.string().optional(),
       serviceType: z.enum(['ROAD', 'RAIL', 'SEA', 'AIR']).optional(),
-      rating: z.number().min(0).max(5).optional(),
+      rating: optionalRating,
       notes: z.string().optional(),
       isActive: z.boolean().optional(),
     });

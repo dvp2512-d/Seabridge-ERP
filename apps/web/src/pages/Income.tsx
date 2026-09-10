@@ -50,22 +50,28 @@ export default function Income() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [pendingDelete, setPendingDelete] = useState<any>(null);
+  const [page, setPage] = useState(1);
 
-  const debouncedSearch = useDebouncedCallback((v: string) => setSearch(v), 350);
+  const debouncedSearch = useDebouncedCallback((v: string) => {
+    setSearch(v);
+    setPage(1);
+  }, 350);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['income', search, category, status],
+    queryKey: ['income', search, category, status, page],
     queryFn: () =>
       incomeApi
         .list({
           search: search || undefined,
           category: category || undefined,
           status: status || undefined,
+          page,
         })
         .then((r: any) => r.data),
   });
 
   const entries = data?.data ?? [];
+  const pagination = data?.pagination;
   const summary = data?.summary;
 
   const setStatusMutation = useMutation({
@@ -182,14 +188,14 @@ export default function Income() {
           <SelectField
             label="Category"
             value={category}
-            onChange={(e) => setCategory(e.target.value)}
+            onChange={(e) => { setCategory(e.target.value); setPage(1); }}
             placeholder="All categories"
             options={Object.entries(CATEGORY_LABELS).map(([value, label]) => ({ value, label }))}
           />
           <SelectField
             label="Status"
             value={status}
-            onChange={(e) => setStatus(e.target.value)}
+            onChange={(e) => { setStatus(e.target.value); setPage(1); }}
             placeholder="All statuses"
             options={[
               { value: 'PENDING', label: 'Pending' },
@@ -315,6 +321,24 @@ export default function Income() {
           )}
         </div>
       </div>
+
+      {/* Pagination. The summary cards cover every matching entry, so without
+          this the table silently disagreed with the totals. */}
+      {pagination && pagination.total > pagination.limit && (
+        <div className="flex items-center justify-between">
+          <div className="text-sm text-gray-500">
+            Page {pagination.page} of {Math.ceil(pagination.total / pagination.limit)} • {pagination.total} entries
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="btn btn-secondary">
+              Previous
+            </button>
+            <button onClick={() => setPage(p => p + 1)} disabled={page * pagination.limit >= pagination.total} className="btn btn-secondary">
+              Next
+            </button>
+          </div>
+        </div>
+      )}
 
       {showForm && (
         <IncomeFormModal

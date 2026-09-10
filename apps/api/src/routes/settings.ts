@@ -24,8 +24,19 @@ const profileSchema = z.object({
   city: z.string().optional().nullable(),
   state: z.string().optional().nullable(),
   postalCode: z.string().optional().nullable(),
-  country: z.string().optional(),
-  originCountry: z.string().optional(),
+  // NOT NULL with a default in the schema, so a cleared box must fall back to
+  // the default rather than write null. Normalised here so the type stays
+  // `string | undefined` and Prisma accepts it.
+  country: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((v) => (v === null || v === '' ? undefined : v)),
+  originCountry: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((v) => (v === null || v === '' ? undefined : v)),
   gstNumber: z.string().optional().nullable(),
   iecCode: z.string().optional().nullable(),
   phone: z.string().optional().nullable(),

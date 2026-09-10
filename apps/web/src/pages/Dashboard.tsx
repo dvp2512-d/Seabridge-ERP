@@ -1,5 +1,4 @@
 // Founder Dashboard - Complete Business Overview with Analytics
-import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { dashboardApi } from '@/lib/api';
@@ -31,7 +30,6 @@ import {
 
 export default function Dashboard() {
   const { user } = useAuthStore();
-  const [timeRange, setTimeRange] = useState<'week' | 'month' | 'quarter' | 'year'>('month');
 
   // Each dashboard endpoint is permission-gated on the API. Only request the
   // ones this role can actually read, otherwise the page fills with 403s.
@@ -78,6 +76,10 @@ export default function Dashboard() {
   }
 
   const kpis = dashboard?.kpis || {};
+  // Every money figure on this page is already converted into the base currency
+  // by the API, so it must be formatted as that currency rather than the USD
+  // default that formatCurrency falls back to.
+  const baseCode = dashboard?.baseCurrency?.code;
 
   return (
     <div className="space-y-6">
@@ -92,16 +94,11 @@ export default function Dashboard() {
           </p>
         </div>
         <div className="flex items-center gap-4">
-          <select 
-            value={timeRange}
-            onChange={(e) => setTimeRange(e.target.value as any)}
-            className="select py-1.5 text-sm"
-          >
-            <option value="week">This Week</option>
-            <option value="month">This Month</option>
-            <option value="quarter">This Quarter</option>
-            <option value="year">This Year</option>
-          </select>
+          {/* The API reports the period it actually used (Indian financial year).
+              Showing it is honest; the old selector was never sent to the server. */}
+          {dashboard?.period?.label && (
+            <span className="text-sm text-gray-500">{dashboard.period.label}</span>
+          )}
           <div className="text-sm text-gray-500">
             {formatDate(new Date(), 'dddd, DD MMMM YYYY')}
           </div>
@@ -145,17 +142,15 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
           title="Monthly Revenue"
-          value={formatCurrency(kpis.monthlyRevenue || 0)}
-          subtitle={`YTD: ${formatCurrency(kpis.yearlyRevenue || 0)}`}
+          value={formatCurrency(kpis.monthlyRevenue || 0, baseCode)}
+          subtitle={`YTD: ${formatCurrency(kpis.yearlyRevenue || 0, baseCode)}`}
           icon={TrendingUp}
           iconBg="bg-green-100"
           iconColor="text-green-600"
-          trend={12.5}
-          trendLabel="vs last month"
         />
         <KPICard
           title="Pipeline Value"
-          value={formatCurrency(kpis.pipelineValue || 0)}
+          value={formatCurrency(kpis.pipelineValue || 0, baseCode)}
           subtitle={`${kpis.openInquiries || 0} open inquiries`}
           icon={Target}
           iconBg="bg-blue-100"
@@ -171,8 +166,8 @@ export default function Dashboard() {
         />
         <KPICard
           title="Total Receivables"
-          value={formatCurrency(kpis.totalReceivables || 0)}
-          subtitle={kpis.overdueReceivables > 0 ? `${formatCurrency(kpis.overdueReceivables)} overdue` : 'All current'}
+          value={formatCurrency(kpis.totalReceivables || 0, baseCode)}
+          subtitle={kpis.overdueReceivables > 0 ? `${formatCurrency(kpis.overdueReceivables, baseCode)} overdue` : 'All current'}
           icon={DollarSign}
           iconBg={kpis.overdueReceivables > 0 ? "bg-red-100" : "bg-green-100"}
           iconColor={kpis.overdueReceivables > 0 ? "text-red-600" : "text-green-600"}
@@ -215,7 +210,7 @@ export default function Dashboard() {
             </Link>
           </div>
           <div className="card-body">
-            <PipelineChart data={sales?.inquiriesByStage || []} />
+            <PipelineChart data={sales?.inquiriesByStage || []} baseCode={sales?.baseCurrency?.code} />
           </div>
         </div>
 
@@ -293,7 +288,7 @@ export default function Dashboard() {
                     <div className="text-xs text-gray-500">{order.buyer?.companyName}</div>
                   </div>
                   <div className="text-right">
-                    <div className="font-medium text-sm">{formatCurrency(order.totalValue || order.grandTotal)}</div>
+                    <div className="font-medium text-sm">{formatCurrency(order.totalValue || order.grandTotal, order.currency)}</div>
                     <span className={`badge text-xs ${getStatusColor(order.status)}`}>
                       {order.status.replace(/_/g, ' ')}
                     </span>
@@ -356,7 +351,7 @@ export default function Dashboard() {
                     </td>
                     <td className="text-gray-500">{buyer.country?.name || '-'}</td>
                     <td className="text-right">{buyer.totalOrders}</td>
-                    <td className="text-right font-medium">{formatCurrency(buyer.totalRevenue)}</td>
+                    <td className="text-right font-medium">{formatCurrency(buyer.totalRevenue, sales?.baseCurrency?.code)}</td>
                   </tr>
                 ))}
                 {(!sales?.topBuyers || sales.topBuyers.length === 0) && (
@@ -498,7 +493,11 @@ function MiniKPICard({
 }
 
 // Pipeline Chart (Visual representation)
-function PipelineChart({ data }: { data: any[] }) {
+//
+// The API collapses its groupBy into one row per stage shaped
+// { key, count, value, unconvertedCount } - see collapseByCurrency in
+// routes/dashboard.ts. It does not return Prisma's raw _count/_sum wrappers.
+function PipelineChart({ data, baseCode }: { data: any[]; baseCode?: string }) {
   const stages = [
     { key: 'NEW', label: 'New', color: 'bg-blue-500' },
     { key: 'REQUIREMENT_GATHERED', label: 'Requirements', color: 'bg-indigo-500' },
@@ -509,14 +508,14 @@ function PipelineChart({ data }: { data: any[] }) {
     { key: 'LOST', label: 'Lost', color: 'bg-red-500' },
   ];
 
-  const totalValue = data.reduce((sum, d) => sum + (d._sum?.expectedValue || 0), 0);
+  const totalValue = data.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
 
   return (
     <div className="space-y-3">
       {stages.map(stage => {
-        const stageData = data.find(d => d.stage === stage.key);
-        const count = stageData?._count?.id || 0;
-        const value = stageData?._sum?.expectedValue || 0;
+        const stageData = data.find(d => d.key === stage.key);
+        const count = stageData?.count || 0;
+        const value = Number(stageData?.value) || 0;
         const percentage = totalValue > 0 ? (value / totalValue) * 100 : 0;
 
         if (count === 0 && !['NEW', 'WON', 'LOST'].includes(stage.key)) return null;
@@ -532,7 +531,7 @@ function PipelineChart({ data }: { data: any[] }) {
             </div>
             <div className="w-20 text-right">
               <div className="text-sm font-medium">{count}</div>
-              <div className="text-xs text-gray-400">{formatCurrency(value)}</div>
+              <div className="text-xs text-gray-400">{formatCurrency(value, baseCode)}</div>
             </div>
           </div>
         );
@@ -655,9 +654,10 @@ function ReceivablesAging({ data }: { data: any[] }) {
 }
 
 // Helper function to calculate conversion rate
+// Reads the { key, count } shape returned by collapseByCurrency in routes/dashboard.ts.
 function calculateConversionRate(inquiriesByStage: any[]): string {
-  const won = inquiriesByStage.find(s => s.stage === 'WON')?._count?.id || 0;
-  const lost = inquiriesByStage.find(s => s.stage === 'LOST')?._count?.id || 0;
+  const won = inquiriesByStage.find(s => s.key === 'WON')?.count || 0;
+  const lost = inquiriesByStage.find(s => s.key === 'LOST')?.count || 0;
   const total = won + lost;
   
   if (total === 0) return '-';

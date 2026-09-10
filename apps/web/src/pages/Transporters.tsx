@@ -70,7 +70,7 @@ export default function Transporters() {
           </button>
         </div>
       ) : (
-        <div className="card overflow-hidden">
+        <div className="card overflow-x-auto">
           <table className="table">
             <thead>
               <tr>
@@ -215,6 +215,7 @@ function TransporterDetailModal({ transporterId, onClose }: { transporterId: str
               <button onClick={() => setShowRateModal(true)} className="btn btn-secondary py-1 text-sm"><Plus className="w-4 h-4 mr-1" />Add Rate</button>
             </div>
             {transporter?.transportRates?.length > 0 ? (
+              <div className="table-container">
               <table className="table">
                 <thead><tr><th>Route</th><th>Rate</th><th>Container</th><th>Transit Days</th><th>Valid From</th></tr></thead>
                 <tbody>
@@ -229,6 +230,7 @@ function TransporterDetailModal({ transporterId, onClose }: { transporterId: str
                   ))}
                 </tbody>
               </table>
+              </div>
             ) : (
               <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">No rates added</div>
             )}

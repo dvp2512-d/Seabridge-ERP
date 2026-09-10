@@ -5,7 +5,11 @@ import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode, calculateMarginPercent } from '../utils/helpers';
 import { generateQuotationPDF } from '../services/pdfService';
-import { buildRateMap } from '../services/exchangeRateService';
+import {
+  BASE_CURRENCY_CODE,
+  getBaseCurrency,
+  resolveDocumentCurrency,
+} from '../services/exchangeRateService';
 import { emitEvent } from '../services/eventService';
 import { createOrderFromQuotation } from '../services/orderService';
 
@@ -33,7 +37,6 @@ router.get('/', can('SALES_VIEW'), async (req, res, next) => {
         where,
         include: {
           buyer: { select: { id: true, companyName: true, code: true } },
-          currency: { select: { id: true, code: true, symbol: true } },
           incoterm: { select: { id: true, code: true } },
           _count: { select: { items: true } },
         },
@@ -42,33 +45,22 @@ router.get('/', can('SALES_VIEW'), async (req, res, next) => {
         take: Number(limit),
       }),
       prisma.quotation.count({ where }),
-      // Status counts for the whole filtered set so the summary cards are correct
-      // even when the list is paginated. Grouped by currency too, since quotation
-      // totals in different currencies cannot be added directly.
+      // Every amount is INR, so this is a plain aggregate over the whole filtered
+      // set - the summary cards stay correct while the list is paginated.
       prisma.quotation.groupBy({
-        by: ['status', 'currencyId'],
+        by: ['status'],
         where,
         _count: { _all: true },
         _sum: { grandTotal: true },
       }),
     ]);
 
-    // Fold the currency dimension away, converting into the base currency.
-    const { base, rates } = await buildRateMap(new Date());
-
     const countByStatus: Record<string, number> = {};
     let totalValue = 0;
-    let unconverted = 0;
 
     for (const group of statusGroups) {
-      countByStatus[group.status] = (countByStatus[group.status] ?? 0) + group._count._all;
-
-      const rate = rates.get(group.currencyId);
-      if (rate === undefined) {
-        unconverted += group._count._all;
-        continue;
-      }
-      totalValue += Number(group._sum.grandTotal ?? 0) * rate;
+      countByStatus[group.status] = group._count._all;
+      totalValue += Number(group._sum.grandTotal ?? 0);
     }
 
     res.json({
@@ -76,9 +68,7 @@ router.get('/', can('SALES_VIEW'), async (req, res, next) => {
       data: quotations,
       pagination: { page: Number(page), limit: Number(limit), total },
       summary: {
-        // totalValue is in this currency, not each quotation's own.
-        baseCurrency: base,
-        unconvertedRecords: unconverted,
+        baseCurrency: await getBaseCurrency(),
         countByStatus,
         totalValue: Math.round((totalValue + Number.EPSILON) * 100) / 100,
       },
@@ -96,7 +86,6 @@ router.get('/:id', can('SALES_VIEW'), async (req, res, next) => {
       include: {
         buyer: { include: { country: true, contacts: { where: { isPrimary: true } } } },
         inquiry: { select: { id: true, inquiryNumber: true } },
-        currency: true,
         incoterm: true,
         portOfLoading: true,
         portOfDischarge: true,
@@ -120,7 +109,6 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
     const schema = z.object({
       inquiryId: z.string().optional(),
       buyerId: z.string().min(1),
-      currencyId: z.string().min(1),
       incotermId: z.string().min(1),
       portOfLoadingId: z.string().optional(),
       portOfDischargeId: z.string().optional(),
@@ -144,7 +132,6 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
         costType: z.string().min(1),
         description: z.string().min(1),
         amount: z.number().finite().min(0),
-        currency: z.string().optional(),
       })).optional(),
     });
 
@@ -211,7 +198,6 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
       },
       include: {
         buyer: true,
-        currency: true,
         incoterm: true,
         items: { include: { product: true } },
         costs: true,
@@ -259,7 +245,7 @@ router.put('/:id', can('SALES_MANAGE'), async (req, res, next) => {
     const quotation = await prisma.quotation.update({
       where: { id: req.params.id },
       data: updateData,
-      include: { buyer: true, currency: true, incoterm: true },
+      include: { buyer: true, incoterm: true },
     });
 
     res.json({ success: true, data: quotation });
@@ -298,7 +284,7 @@ router.patch('/:id/status', can('SALES_MANAGE'), async (req, res, next) => {
     const quotation = await prisma.quotation.update({
       where: { id: req.params.id },
       data: updateData,
-      include: { buyer: true, currency: true, incoterm: true },
+      include: { buyer: true, incoterm: true },
     });
 
     // Keep the linked inquiry's pipeline stage in sync.
@@ -367,14 +353,27 @@ router.post('/:id/convert-to-order', can('SALES_MANAGE'), async (req, res, next)
 });
 
 // Generate PDF
+/**
+ * Generate the quotation PDF in a chosen currency.
+ *
+ * Amounts are stored in INR. `currency` and `rate` decide only how the buyer's
+ * copy reads, and both are recorded on the quotation so a reprint reproduces the
+ * document that was sent.
+ *
+ * The rate can be changed freely while the quotation is a DRAFT. Once it has been
+ * marked SENT the buyer holds a copy at a stated price, so the recorded currency
+ * and rate are reused and a request to change them is refused rather than quietly
+ * producing a second, different document under the same number.
+ */
 router.get('/:id/pdf', can('SALES_VIEW'), async (req, res, next) => {
   try {
     const quotation = await prisma.quotation.findUnique({
       where: { id: req.params.id },
       include: {
         buyer: { include: { country: true, contacts: { where: { isPrimary: true } } } },
-        currency: true,
         incoterm: true,
+        portOfLoading: true,
+        portOfDischarge: true,
         items: { include: { product: true } },
         costs: true,
       },
@@ -382,7 +381,62 @@ router.get('/:id/pdf', can('SALES_VIEW'), async (req, res, next) => {
 
     if (!quotation) throw new NotFoundError('Quotation');
 
-    const pdfBuffer = await generateQuotationPDF(quotation);
+    /**
+     * Once a quotation has been issued to a buyer in a foreign currency, that
+     * currency and rate are what they hold, so they are reused and a request to
+     * change them is refused - revising the quotation is the way to re-price.
+     *
+     * Generating in INR does not lock anything: nothing has been committed in
+     * foreign terms, and the base currency is the default. Treating a plain rupee
+     * print as a commitment meant that generating one on an accepted quotation
+     * permanently prevented issuing it in the buyer's currency.
+     */
+    const issuedInForeignCurrency =
+      quotation.pdfCurrency !== null && quotation.pdfCurrency !== BASE_CURRENCY_CODE;
+    const isFrozen = quotation.status !== 'DRAFT' && issuedInForeignCurrency;
+
+    const requestedCode = (req.query.currency as string | undefined)?.toUpperCase();
+    const requestedRate =
+      req.query.rate !== undefined ? Number(req.query.rate) : undefined;
+
+    if (isFrozen && requestedCode && requestedCode !== quotation.pdfCurrency) {
+      throw new AppError(
+        `${quotation.quotationNumber} was already issued in ${quotation.pdfCurrency} at ${Number(
+          quotation.pdfExchangeRate
+        )}. Revise the quotation to price it differently.`,
+        400
+      );
+    }
+
+    const code = isFrozen
+      ? quotation.pdfCurrency!
+      : (requestedCode ?? quotation.pdfCurrency ?? BASE_CURRENCY_CODE);
+    const rate = isFrozen
+      ? Number(quotation.pdfExchangeRate)
+      : (requestedRate ??
+        (quotation.pdfExchangeRate !== null ? Number(quotation.pdfExchangeRate) : 1));
+
+    const currency = await resolveDocumentCurrency(code, rate);
+
+    if (!isFrozen) {
+      await prisma.quotation.update({
+        where: { id: quotation.id },
+        data: {
+          pdfCurrency: currency.code,
+          pdfExchangeRate: rate,
+          pdfGeneratedAt: new Date(),
+        },
+      });
+    }
+
+    const companyProfile = await prisma.companyProfile.findFirst();
+
+    const pdfBuffer = await generateQuotationPDF(quotation, {
+      currencyCode: currency.code,
+      currencySymbol: currency.symbol,
+      rate,
+      companyProfile,
+    });
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${quotation.quotationNumber}.pdf"`);

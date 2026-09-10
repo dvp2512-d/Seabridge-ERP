@@ -110,50 +110,129 @@ function drawItemsHeader(doc: Doc, yPos: number, columns: [string, number][]): n
   return yPos + 25;
 }
 
-export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
+/**
+ * How a document is to be rendered.
+ *
+ * Every stored amount is INR. A document is presented in whatever currency the
+ * buyer deals in, at a rate the operator states when generating it, and both are
+ * recorded on the document so a reprint reproduces it.
+ */
+export interface DocumentRenderOptions {
+  currencyCode: string;
+  currencySymbol: string;
+  /** INR per one unit of currencyCode. 1 when printing in INR. */
+  rate: number;
+  /** The exporter's own details, printed as the letterhead. */
+  companyProfile?: any;
+}
+
+const DEFAULT_RENDER: DocumentRenderOptions = {
+  currencyCode: 'INR',
+  currencySymbol: '₹',
+  rate: 1,
+};
+
+/** Convert an INR amount into the document currency. */
+function fromINR(amountInINR: unknown, rate: number): number {
+  const n = Number(amountInINR ?? 0);
+  if (!Number.isFinite(n)) return 0;
+  if (!Number.isFinite(rate) || rate <= 0) return n;
+  return n / rate;
+}
+
+/**
+ * The exporter's letterhead.
+ *
+ * Reads the saved CompanyProfile so documents carry the real legal name, GSTIN and
+ * IEC rather than a hardcoded placeholder. Falls back to the product name when no
+ * profile has been saved yet, so a document is never blank at the top.
+ */
+function drawLetterhead(doc: Doc, companyProfile?: any): void {
+  doc
+    .fillColor(COLORS.navy)
+    .fontSize(20)
+    .text((companyProfile?.legalName || 'SEABRIDGE EXPORTS').toUpperCase(), PAGE.left, 50, {
+      width: 330,
+    })
+    .fontSize(9)
+    .fillColor(COLORS.gray)
+    .text(
+      [
+        companyProfile?.gstNumber && `GSTIN: ${companyProfile.gstNumber}`,
+        companyProfile?.iecCode && `IEC: ${companyProfile.iecCode}`,
+      ]
+        .filter(Boolean)
+        .join('    ') || 'Excellence in Global Trade',
+      PAGE.left,
+      76
+    );
+}
+
+/**
+ * A note stating the currency and rate a document was produced at.
+ *
+ * Amounts are held in INR, so a foreign-currency document is a conversion. Saying
+ * so on the page is what makes the figures auditable: without it, a reader cannot
+ * reconcile the document against the books.
+ */
+function drawRateNote(doc: Doc, yPos: number, code: string, rate: number): number {
+  if (rate === 1) return yPos;
+  doc
+    .fillColor(COLORS.gray)
+    .fontSize(8)
+    .text(
+      `Amounts shown in ${code}, converted at 1 ${code} = INR ${rate.toFixed(4)}.`,
+      PAGE.left,
+      yPos,
+      { width: 500 }
+    );
+  return yPos + 12;
+}
+
+export async function generateQuotationPDF(
+  quotation: any,
+  options: DocumentRenderOptions = DEFAULT_RENDER
+): Promise<Buffer> {
   const { doc, done } = createDocument();
-  const symbol = quotation.currency?.symbol || '$';
+  const { currencyCode, currencySymbol: symbol, rate, companyProfile } = options;
+  const isBase = rate === 1;
 
   // Additional costs are billed to the buyer but belong to the quotation as a
   // whole, and this table has a single total column with no charges line. So the
   // charges are folded into the unit prices, which keeps Qty x Unit Price =
   // Amount on every row and makes the column sum to the grand total.
   //
-  // Uses the same helper as the order conversion, so what the buyer is quoted per
-  // unit is exactly what the order and its invoices will carry.
-  const additionalCostsTotal = (quotation.costs ?? []).reduce(
-    (sum: number, cost: any) => sum + Number(cost.amount ?? 0),
-    0
+  // The inputs are converted into the document currency FIRST, so the helper's
+  // precision reconciliation happens in the currency the buyer will actually
+  // check with a calculator. Converting afterwards would round each figure
+  // independently and could leave the rows failing to sum to the total.
+  const additionalCostsTotal = fromINR(
+    (quotation.costs ?? []).reduce((sum: number, cost: any) => sum + Number(cost.amount ?? 0), 0),
+    rate
   );
   const quotationItems: any[] = quotation.items ?? [];
   const pricing = calculateInclusiveUnitPrices(
     quotationItems.map((item: any) => ({
       quantity: Number(item.quantity ?? 0),
-      unitPrice: Number(item.unitPrice ?? 0),
+      unitPrice: fromINR(item.unitPrice, rate),
     })),
     additionalCostsTotal
   );
   // pricing.lines is built by mapping the items in order, so indexes line up.
   const items = quotationItems.map((item: any, index: number) => ({
     ...item,
-    printUnitPrice: pricing.lines[index]?.unitPrice ?? Number(item.unitPrice ?? 0),
-    printAmount: pricing.lines[index]?.amount ?? Number(item.totalPrice ?? 0),
+    printUnitPrice: pricing.lines[index]?.unitPrice ?? fromINR(item.unitPrice, rate),
+    printAmount: pricing.lines[index]?.amount ?? fromINR(item.totalPrice, rate),
     printDecimals: pricing.lines[index]?.decimals ?? 2,
   }));
   const goodsSubtotal = quotationItems.reduce(
-    (sum: number, item: any) => sum + Number(item.totalPrice ?? 0),
+    (sum: number, item: any) => sum + fromINR(item.totalPrice, rate),
     0
   );
 
   try {
     // Header
-    doc
-      .fillColor(COLORS.navy)
-      .fontSize(24)
-      .text('SEABRIDGE EXPORTS', PAGE.left, 50)
-      .fontSize(10)
-      .fillColor(COLORS.gray)
-      .text('Excellence in Global Trade', PAGE.left, 78);
+    drawLetterhead(doc, companyProfile);
 
     doc
       .fillColor(COLORS.navy)
@@ -182,7 +261,7 @@ export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
       .fillColor('#000')
       .text(new Date(quotation.createdAt).toLocaleDateString(), 470, 115)
       .text(new Date(quotation.validUntil).toLocaleDateString(), 470, 130)
-      .text(quotation.currency?.code || 'USD', 470, 145)
+      .text(currencyCode, 470, 145)
       .text(quotation.incoterm?.code || 'FOB', 470, 160);
 
     // Buyer
@@ -300,7 +379,11 @@ export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
       yPos = ensureSpace(doc, yPos + 10, 60);
       doc.fillColor(COLORS.gray).fontSize(9).text('Notes:', PAGE.left, yPos);
       doc.fillColor('#000').text(String(quotation.notes), PAGE.left, yPos + 14, { width: 500 });
+      yPos = doc.y + 6;
     }
+
+    yPos = ensureSpace(doc, yPos + 12, 24);
+    drawRateNote(doc, yPos, currencyCode, rate);
 
     doc.end();
   } catch (error) {
@@ -311,19 +394,16 @@ export async function generateQuotationPDF(quotation: any): Promise<Buffer> {
   return done;
 }
 
-export async function generateInvoicePDF(invoice: any): Promise<Buffer> {
+export async function generateInvoicePDF(
+  invoice: any,
+  options: DocumentRenderOptions = DEFAULT_RENDER
+): Promise<Buffer> {
   const { doc, done } = createDocument();
-  const symbol = invoice.currency?.symbol || '$';
+  const { currencyCode, currencySymbol: symbol, rate, companyProfile } = options;
 
   try {
     // Header
-    doc
-      .fillColor(COLORS.navy)
-      .fontSize(24)
-      .text('SEABRIDGE EXPORTS', PAGE.left, 50)
-      .fontSize(10)
-      .fillColor(COLORS.gray)
-      .text('Excellence in Global Trade', PAGE.left, 78);
+    drawLetterhead(doc, companyProfile);
 
     doc
       .fillColor(COLORS.navy)
@@ -355,7 +435,7 @@ export async function generateInvoicePDF(invoice: any): Promise<Buffer> {
       .fillColor('#000')
       .text(new Date(invoice.invoiceDate).toLocaleDateString(), 480, 115)
       .text(new Date(invoice.dueDate).toLocaleDateString(), 480, 130)
-      .text(invoice.currency?.code || 'USD', 480, 145)
+      .text(currencyCode, 480, 145)
       .text(String(invoice.status ?? ''), 480, 160);
 
     // Buyer
@@ -400,8 +480,8 @@ export async function generateInvoicePDF(invoice: any): Promise<Buffer> {
         .text(item.product?.name || '', 55, yPos, { width: 190 })
         .text(String(item.quantity ?? ''), 250, yPos)
         .text(item.unit || 'KG', 300, yPos)
-        .text(money(item.unitPrice, symbol), 350, yPos)
-        .text(money(item.totalPrice, symbol), 450, yPos, { align: 'right', width: 100 });
+        .text(money(fromINR(item.unitPrice, rate), symbol), 350, yPos)
+        .text(money(fromINR(item.totalPrice, rate), symbol), 450, yPos, { align: 'right', width: 100 });
 
       yPos += 20;
     });
@@ -427,33 +507,33 @@ export async function generateInvoicePDF(invoice: any): Promise<Buffer> {
     doc.fillColor(COLORS.gray).fontSize(10).text('Subtotal:', 350, yPos);
     doc
       .fillColor('#000')
-      .text(money(invoice.subtotal, symbol), 450, yPos, { align: 'right', width: 100 });
+      .text(money(fromINR(invoice.subtotal, rate), symbol), 450, yPos, { align: 'right', width: 100 });
 
     if (Number(invoice.taxAmount ?? 0) > 0) {
       yPos += 18;
       doc.fillColor(COLORS.gray).fontSize(10).text('Tax:', 350, yPos);
       doc
         .fillColor('#000')
-        .text(money(invoice.taxAmount, symbol), 450, yPos, { align: 'right', width: 100 });
+        .text(money(fromINR(invoice.taxAmount, rate), symbol), 450, yPos, { align: 'right', width: 100 });
     }
 
     yPos += 22;
     doc.fillColor(COLORS.navy).fontSize(11).text('Total Amount:', 350, yPos);
     doc
       .fillColor(COLORS.navy)
-      .text(money(invoice.totalAmount, symbol), 450, yPos, { align: 'right', width: 100 });
+      .text(money(fromINR(invoice.totalAmount, rate), symbol), 450, yPos, { align: 'right', width: 100 });
 
     yPos += 20;
     doc.fillColor(COLORS.gray).fontSize(10).text('Paid:', 350, yPos);
     doc
       .fillColor('#000')
-      .text(money(invoice.paidAmount, symbol), 450, yPos, { align: 'right', width: 100 });
+      .text(money(fromINR(invoice.paidAmount, rate), symbol), 450, yPos, { align: 'right', width: 100 });
 
     yPos += 18;
     doc.fillColor(COLORS.navy).fontSize(11).text('Balance Due:', 350, yPos);
     doc
       .fillColor(COLORS.navy)
-      .text(money(invoice.balanceAmount, symbol), 450, yPos, { align: 'right', width: 100 });
+      .text(money(fromINR(invoice.balanceAmount, rate), symbol), 450, yPos, { align: 'right', width: 100 });
 
     if (invoice.termsConditions) {
       yPos = ensureSpace(doc, yPos + 30, 60);
@@ -461,7 +541,11 @@ export async function generateInvoicePDF(invoice: any): Promise<Buffer> {
       doc
         .fillColor('#000')
         .text(String(invoice.termsConditions), PAGE.left, yPos + 14, { width: 500 });
+      yPos = doc.y + 6;
     }
+
+    yPos = ensureSpace(doc, yPos + 12, 24);
+    drawRateNote(doc, yPos, currencyCode, rate);
 
     doc.end();
   } catch (error) {

@@ -38,6 +38,8 @@ export default function Buyers() {
 
   const buyers = data?.data?.data || [];
   const pagination = data?.data?.pagination;
+  // totalRevenue is stored in the base currency, not each buyer's own currency.
+  const baseCode = data?.data?.summary?.baseCurrency?.code;
 
   const handleSearch = useDebouncedCallback((value: string) => {
     setSearch(value);
@@ -165,7 +167,7 @@ export default function Buyers() {
                     <td>
                       <div className="flex items-center gap-1">
                         <TrendingUp className="w-4 h-4 text-green-500" />
-                        {formatCurrency(buyer.totalRevenue || 0)}
+                        {formatCurrency(buyer.totalRevenue || 0, baseCode)}
                       </div>
                     </td>
                     <td>{buyer.totalOrders || 0}</td>

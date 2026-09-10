@@ -207,7 +207,7 @@ router.get('/:id', can('FINANCE_VIEW'), async (req, res, next) => {
     const entry = await prisma.income.findUnique({
       where: { id: req.params.id },
       include: {
-        linkedInvoice: { select: { id: true, invoiceNumber: true, currency: true } },
+        linkedInvoice: { select: { id: true, invoiceNumber: true } },
         createdBy: { select: { id: true, firstName: true, lastName: true } },
       },
     });
@@ -219,32 +219,28 @@ router.get('/:id', can('FINANCE_VIEW'), async (req, res, next) => {
 });
 
 /**
- * Suggest a forex gain from an invoice's booked and realised rates.
+ * Suggest a forex gain or loss on an invoice.
  *
- *   gain = (realised rate - booked rate) x invoice amount in foreign currency
+ *   gain = total received in INR - invoice total in INR
+ *
+ * Both figures are rupees actually booked: the invoice was raised at a rupee
+ * total, and each payment records the rupee sum the bank credited. The difference
+ * is therefore realised, not derived from any rate - which is only possible
+ * because nothing is re-converted at read time.
  *
  * Advisory: it returns the figures and the arithmetic, and the user still decides
- * what to record. The result is expressed in rupees, so it is entered as an INR
- * receipt with a rate of 1 rather than being converted a second time.
+ * what to record. The result is already in rupees, so it is entered as an INR
+ * receipt with a rate of 1 rather than being converted again.
  */
 router.get('/forex-gain/:invoiceId', can('FINANCE_VIEW'), async (req, res, next) => {
   try {
     const invoice = await prisma.invoice.findUnique({
       where: { id: req.params.invoiceId },
       include: {
-        currency: { select: { code: true } },
-        payments: { select: { id: true, amount: true, exchangeRate: true, paymentDate: true } },
+        payments: { select: { id: true, amount: true, paymentDate: true, paymentNumber: true } },
       },
     });
     if (!invoice) throw new NotFoundError('Invoice');
-
-    const bookedRate = Number(invoice.exchangeRate ?? 0);
-    if (!bookedRate) {
-      throw new AppError(
-        `Invoice ${invoice.invoiceNumber} has no exchange rate recorded, so a forex gain cannot be derived from it.`,
-        400
-      );
-    }
 
     if (invoice.payments.length === 0) {
       throw new AppError(
@@ -253,36 +249,34 @@ router.get('/forex-gain/:invoiceId', can('FINANCE_VIEW'), async (req, res, next)
       );
     }
 
-    // One line per payment: the gain is realised as each receipt lands, not once
-    // for the invoice as a whole.
-    const breakdown = invoice.payments.map((p) => {
-      const realisedRate = Number(p.exchangeRate ?? 0);
-      const amount = Number(p.amount);
-      return {
-        paymentId: p.id,
-        paymentDate: p.paymentDate,
-        amount,
-        bookedRate,
-        realisedRate,
-        gainINR: round2((realisedRate - bookedRate) * amount),
-      };
-    });
-
-    const totalGain = round2(breakdown.reduce((s, b) => s + b.gainINR, 0));
+    // Only meaningful once the invoice is settled: a partially paid invoice simply
+    // has a balance outstanding, which is not a forex difference.
+    const invoiceTotal = round2(Number(invoice.totalAmount));
+    const received = round2(invoice.payments.reduce((s, p) => s + Number(p.amount), 0));
+    const isSettled = Number(invoice.balanceAmount) <= 0.01;
+    const totalGain = round2(received - invoiceTotal);
 
     res.json({
       success: true,
       data: {
         invoiceId: invoice.id,
         invoiceNumber: invoice.invoiceNumber,
-        invoiceCurrency: invoice.currency?.code,
-        bookedRate,
-        breakdown,
+        invoiceTotalINR: invoiceTotal,
+        receivedINR: received,
+        // A part-paid invoice will always look like a "loss" until settled, so say
+        // whether the comparison is complete rather than leaving it to be assumed.
+        isSettled,
+        breakdown: invoice.payments.map((p) => ({
+          paymentId: p.id,
+          paymentNumber: p.paymentNumber,
+          paymentDate: p.paymentDate,
+          amountINR: round2(Number(p.amount)),
+        })),
         // Negative means a loss; surfaced rather than hidden, since booking only
         // the gains would overstate income.
         totalGainINR: totalGain,
         isLoss: totalGain < 0,
-        formula: '(realised rate - booked rate) x payment amount',
+        formula: 'total received (INR) - invoice total (INR)',
       },
     });
   } catch (error) {

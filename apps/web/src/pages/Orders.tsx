@@ -109,7 +109,7 @@ export default function Orders() {
             <TrendingUp className="w-4 h-4" />
             <span className="text-sm font-medium">Total Value</span>
           </div>
-          <div className="text-xl font-bold text-gray-900">{formatCurrency(stats.totalValue)}</div>
+          <div className="text-xl font-bold text-gray-900">{formatCurrency(stats.totalValue, summary?.baseCurrency?.code)}</div>
         </div>
       </div>
 

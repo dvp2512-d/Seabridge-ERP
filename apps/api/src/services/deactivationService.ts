@@ -113,16 +113,11 @@ const DEPENDENTS: Record<string, (id: string) => Promise<DependentCount[]>> = {
   },
 
   currency: async (id) => {
-    const [quotations, invoices, buyers] = await Promise.all([
-      prisma.quotation.count({ where: { currencyId: id } }),
-      prisma.invoice.count({ where: { currencyId: id } }),
-      prisma.buyer.count({ where: { currencyId: id } }),
-    ]);
-    return [
-      { label: 'quotations', count: quotations },
-      { label: 'invoices', count: invoices },
-      { label: 'buyers', count: buyers },
-    ];
+    // Quotations and invoices no longer reference a currency: their amounts are
+    // INR and the presentation currency is stored as a code on the document. Only
+    // the buyer's preferred currency is a real reference.
+    const buyers = await prisma.buyer.count({ where: { currencyId: id } });
+    return [{ label: 'buyers', count: buyers }];
   },
 
   incoterm: async (id) => {

@@ -35,6 +35,8 @@ const registerSchema = z.object({
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
   role: z.enum(['FOUNDER', 'SALES', 'OPERATIONS', 'FINANCE', 'ADMIN']).optional(),
+  // The Add User form collects a phone number; without it here it was stripped.
+  phone: z.string().optional(),
 });
 
 // Login
@@ -100,7 +102,7 @@ router.post('/register', authenticate, can('USER_MANAGE'), async (req: any, res,
       throw new ValidationError(validation.error.errors);
     }
 
-    const { email, password, firstName, lastName, role } = validation.data;
+    const { email, password, firstName, lastName, role, phone } = validation.data;
 
     // Only FOUNDER can create other FOUNDERs (prevent privilege escalation)
     if (role === 'FOUNDER' && req.user.role !== 'FOUNDER') {
@@ -123,6 +125,7 @@ router.post('/register', authenticate, can('USER_MANAGE'), async (req: any, res,
         passwordHash,
         firstName,
         lastName,
+        phone,
         role: role || 'SALES',
       },
     });
@@ -170,6 +173,43 @@ router.get('/me', authenticate, async (req, res, next) => {
       success: true,
       data: user,
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Update your own profile.
+//
+// Deliberately limited to display details: role, status and email are not
+// editable here, because changing your own role is how a founder locks the
+// business out of its own settings. Those go through /api/users, which requires
+// USER_MANAGE. The id comes from the token, never the body, so this route can
+// only ever modify the caller's own row.
+router.patch('/me', authenticate, async (req, res, next) => {
+  try {
+    const schema = z.object({
+      firstName: z.string().min(1).optional(),
+      lastName: z.string().min(1).optional(),
+      phone: z.string().optional().nullable(),
+    });
+
+    const validation = schema.safeParse(req.body);
+    if (!validation.success) throw new ValidationError(validation.error.errors);
+
+    const user = await prisma.user.update({
+      where: { id: req.user!.id },
+      data: validation.data,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        phone: true,
+      },
+    });
+
+    res.json({ success: true, data: user });
   } catch (error) {
     next(error);
   }

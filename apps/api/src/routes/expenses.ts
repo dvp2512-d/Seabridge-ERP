@@ -14,7 +14,7 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
-import { buildRateMapByCode } from '../services/exchangeRateService';
+import { getBaseCurrency } from '../services/exchangeRateService';
 import { emitEvent } from '../services/eventService';
 
 const router: Router = Router();
@@ -69,50 +69,39 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
         take: Number(limit),
       }),
       prisma.expense.count({ where }),
-      // Grouped by currency too, so the totals can be converted rather than
-      // adding rupees to dollars.
       prisma.expense.groupBy({
-        by: ['status', 'currency'],
+        by: ['status'],
         where,
         _count: { _all: true },
         _sum: { amount: true },
       }),
       prisma.expense.groupBy({
-        by: ['category', 'currency'],
+        by: ['category'],
         where,
         _count: { _all: true },
         _sum: { amount: true },
       }),
     ]);
 
-    const { base, rates } = await buildRateMapByCode(new Date());
     const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
 
     const countByStatus: Record<string, number> = {};
     let totalSpend = 0;
     let pendingApproval = 0;
-    let unconverted = 0;
 
     for (const group of statusGroups) {
-      countByStatus[group.status] = (countByStatus[group.status] ?? 0) + group._count._all;
-      const rate = rates.get(group.currency);
-      if (rate === undefined) {
-        unconverted += group._count._all;
-        continue;
-      }
-      const converted = Number(group._sum.amount ?? 0) * rate;
+      countByStatus[group.status] = group._count._all;
+      const amount = Number(group._sum.amount ?? 0);
       // Rejected expenses are not spend.
-      if (group.status !== 'REJECTED') totalSpend += converted;
-      if (group.status === 'PENDING') pendingApproval += converted;
+      if (group.status !== 'REJECTED') totalSpend += amount;
+      if (group.status === 'PENDING') pendingApproval += amount;
     }
 
     const byCategory = new Map<string, number>();
     for (const group of categoryGroups) {
-      const rate = rates.get(group.currency);
-      if (rate === undefined) continue;
       byCategory.set(
         group.category,
-        (byCategory.get(group.category) ?? 0) + Number(group._sum.amount ?? 0) * rate
+        (byCategory.get(group.category) ?? 0) + Number(group._sum.amount ?? 0)
       );
     }
 
@@ -121,8 +110,7 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
       data: expenses,
       pagination: { page: Number(page), limit: Number(limit), total },
       summary: {
-        baseCurrency: base,
-        unconvertedRecords: unconverted,
+        baseCurrency: await getBaseCurrency(),
         countByStatus,
         totalSpend: round2(totalSpend),
         pendingApproval: round2(pendingApproval),
@@ -151,8 +139,8 @@ router.get('/:id', can('FINANCE_VIEW'), async (req, res, next) => {
 const createSchema = z.object({
   category: z.enum(CATEGORIES),
   description: z.string().min(1, 'Description is required'),
+  // INR. Expenses are domestic costs recorded in rupees, like every amount here.
   amount: z.number().positive('Amount must be greater than zero'),
-  currency: z.string().min(3).max(3).optional(),
   expenseDate: z.string().min(1),
   vendorName: z.string().optional(),
   invoiceRef: z.string().optional(),
@@ -166,25 +154,6 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
 
     const data = validation.data;
 
-    // Default to the company's own currency rather than a hardcoded one, since
-    // most expenses are domestic.
-    let currencyCode = data.currency?.toUpperCase();
-    if (!currencyCode) {
-      // INR is the base currency for Indian exporters
-      const base = await prisma.currency.findFirst({ where: { code: 'INR', isActive: true } });
-      currencyCode = base?.code ?? 'INR';
-    }
-
-    // An unknown currency would make the expense unconvertible and quietly
-    // missing from every total.
-    const known = await prisma.currency.findFirst({ where: { code: currencyCode } });
-    if (!known) {
-      throw new AppError(
-        `Currency "${currencyCode}" is not configured in Master Data. Add it before recording expenses in it.`,
-        400
-      );
-    }
-
     const expenseNumber = await generateCode('EXPENSE', 'EXP');
 
     const expense = await prisma.expense.create({
@@ -193,7 +162,6 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
         category: data.category,
         description: data.description,
         amount: data.amount,
-        currency: currencyCode,
         expenseDate: new Date(data.expenseDate),
         vendorName: data.vendorName,
         invoiceRef: data.invoiceRef,

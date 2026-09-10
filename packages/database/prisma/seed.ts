@@ -64,19 +64,24 @@ async function main() {
   console.log('✅ Seeded countries');
 
   // Seed Currencies
+  //
+  // No exchange rate here on purpose. Every amount in the database is INR; a
+  // currency and a rate are chosen when a quotation or invoice PDF is generated
+  // and recorded on that document. A single mutable rate here used to re-price
+  // every historical total whenever it was edited.
   const currencies = [
-    { code: 'USD', name: 'US Dollar', symbol: '$', exchangeRate: 1 },
-    { code: 'EUR', name: 'Euro', symbol: '€', exchangeRate: 0.92 },
-    { code: 'GBP', name: 'British Pound', symbol: '£', exchangeRate: 0.79 },
-    { code: 'INR', name: 'Indian Rupee', symbol: '₹', exchangeRate: 83.12 },
-    { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ', exchangeRate: 3.67 },
-    { code: 'JPY', name: 'Japanese Yen', symbol: '¥', exchangeRate: 149.50 },
+    { code: 'INR', name: 'Indian Rupee', symbol: '₹' },
+    { code: 'USD', name: 'US Dollar', symbol: '$' },
+    { code: 'EUR', name: 'Euro', symbol: '€' },
+    { code: 'GBP', name: 'British Pound', symbol: '£' },
+    { code: 'AED', name: 'UAE Dirham', symbol: 'د.إ' },
+    { code: 'JPY', name: 'Japanese Yen', symbol: '¥' },
   ];
 
   for (const currency of currencies) {
     await prisma.currency.upsert({
       where: { code: currency.code },
-      update: {},
+      update: { name: currency.name, symbol: currency.symbol },
       create: currency,
     });
   }

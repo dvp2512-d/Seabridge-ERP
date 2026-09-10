@@ -38,6 +38,7 @@ export default function Inquiries() {
     queryFn: () => inquiriesApi.list({
       search: search || undefined,
       stage: stageFilter || undefined,
+      priority: priorityFilter || undefined,
       page,
       limit: 50,
     }),
@@ -50,22 +51,24 @@ export default function Inquiries() {
 
   const inquiries = data?.data?.data || [];
   const pagination = data?.data?.pagination;
+  const summary = data?.data?.summary;
+  const baseCode = summary?.baseCurrency?.code;
 
   const handleSearch = useDebouncedCallback((value: string) => {
     setSearch(value);
     setPage(1);
   }, 300);
 
-  // Calculate pipeline stats
+  // Stage counts and values come from the API, computed over the whole pipeline
+  // rather than the current page. Computing them client-side meant selecting one
+  // stage zeroed every other card, because the list was already stage-filtered.
   const pipelineStats = STAGES.slice(0, 5).map(stage => ({
     ...stage,
-    count: inquiries.filter((i: any) => i.stage === stage.id).length,
-    value: inquiries
-      .filter((i: any) => i.stage === stage.id)
-      .reduce((sum: number, i: any) => sum + (parseFloat(i.expectedValue) || 0), 0),
+    count: summary?.countByStage?.[stage.id] ?? 0,
+    value: summary?.valueByStage?.[stage.id] ?? 0,
   }));
 
-  const totalPipelineValue = pipelineStats.reduce((sum, s) => sum + s.value, 0);
+  const totalPipelineValue = summary?.pipelineValue ?? 0;
 
   return (
     <div className="space-y-6">
@@ -96,7 +99,7 @@ export default function Inquiries() {
               <span className="text-sm font-medium text-gray-600">{stage.label}</span>
             </div>
             <div className="text-2xl font-bold text-gray-900">{stage.count}</div>
-            <div className="text-sm text-gray-500">{formatCurrency(stage.value)}</div>
+            <div className="text-sm text-gray-500">{formatCurrency(stage.value, baseCode)}</div>
           </button>
         ))}
       </div>
@@ -220,7 +223,7 @@ function InquiryTable({ inquiries, onView }: { inquiries: any[]; onView: (id: st
   }
 
   return (
-    <div className="card overflow-hidden">
+    <div className="card overflow-x-auto">
       <table className="table">
         <thead>
           <tr>
@@ -254,7 +257,7 @@ function InquiryTable({ inquiries, onView }: { inquiries: any[]; onView: (id: st
                 </span>
               </td>
               <td className="font-medium">
-                {inquiry.expectedValue ? formatCurrency(inquiry.expectedValue) : '-'}
+                {inquiry.expectedValue ? formatCurrency(inquiry.expectedValue, inquiry.currency?.code) : '-'}
               </td>
               <td>
                 <div className="flex items-center gap-2">
@@ -331,7 +334,7 @@ function InquiryKanban({ inquiries, onView }: { inquiries: any[]; onView: (id: s
                     </div>
                     {inquiry.expectedValue && (
                       <div className="text-sm text-green-600 font-medium">
-                        {formatCurrency(inquiry.expectedValue)}
+                        {formatCurrency(inquiry.expectedValue, inquiry.currency?.code)}
                       </div>
                     )}
                     <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-100">
@@ -484,11 +487,11 @@ function NewInquiryModal({ dropdowns, onClose, onSuccess }: { dropdowns: any; on
                 placeholder="EMAIL, PHONE, EXHIBITION..."
               />
               <FormField
-                label="Expected Value"
+                label="Expected Value (₹)"
                 type="number"
                 value={formData.expectedValue}
                 onChange={(e) => setFormData({ ...formData, expectedValue: e.target.value })}
-                placeholder="Estimated order value"
+                placeholder="Estimated order value in rupees"
               />
               <FormField
                 label="Expected Close Date"

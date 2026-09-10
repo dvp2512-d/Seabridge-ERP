@@ -60,7 +60,7 @@ export default function CHAs() {
           </button>
         </div>
       ) : (
-        <div className="card overflow-hidden">
+        <div className="card overflow-x-auto">
           <table className="table">
             <thead>
               <tr>
@@ -200,8 +200,9 @@ function CHADetailModal({ chaId, onClose }: { chaId: string; onClose: () => void
               <button onClick={() => setShowRateModal(true)} className="btn btn-secondary py-1 text-sm"><Plus className="w-4 h-4 mr-1" />Add Rate</button>
             </div>
             {cha?.chaRates?.length > 0 ? (
-              <table className="table">
-                <thead><tr><th>Service Type</th><th>Rate</th><th>Container</th><th>Valid From</th></tr></thead>
+              <div className="table-container">
+                <table className="table">
+                  <thead><tr><th>Service Type</th><th>Rate</th><th>Container</th><th>Valid From</th></tr></thead>
                 <tbody>
                   {cha.chaRates.map((rate: any) => (
                     <tr key={rate.id}>
@@ -211,8 +212,9 @@ function CHADetailModal({ chaId, onClose }: { chaId: string; onClose: () => void
                       <td>{formatDate(rate.validFrom)}</td>
                     </tr>
                   ))}
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+              </div>
             ) : (
               <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">No rates added</div>
             )}

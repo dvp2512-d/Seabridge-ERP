@@ -37,6 +37,16 @@ const ACTION_COLORS: Record<string, string> = {
   REACTIVATE: 'text-emerald-600 bg-emerald-50',
 };
 
+/**
+ * The audit API returns the actor as firstName/lastName/email (see the `user`
+ * select in routes/audit.ts) - there is no `name` column on User. Returns an
+ * empty string when there is no actor, so callers can fall back to "System".
+ */
+function userName(user?: { firstName?: string; lastName?: string } | null): string {
+  if (!user) return '';
+  return [user.firstName, user.lastName].filter(Boolean).join(' ');
+}
+
 export default function AuditLog() {
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({
@@ -166,7 +176,7 @@ export default function AuditLog() {
               onChange={(e) => handleFilterChange('userId', e.target.value)}
               options={[
                 { value: '', label: 'All Users' },
-                ...(options?.users?.map((u: any) => ({ value: u.id, label: u.name })) ?? []),
+                ...(options?.users?.map((u: any) => ({ value: u.id, label: userName(u) })) ?? []),
               ]}
             />
             <button onClick={clearFilters} className="btn btn-secondary">
@@ -217,7 +227,7 @@ export default function AuditLog() {
                         </div>
                       </td>
                       <td>
-                        <span className="font-medium">{entry.user?.name || 'System'}</span>
+                        <span className="font-medium">{userName(entry.user) || 'System'}</span>
                         {entry.user?.email && (
                           <div className="text-xs text-gray-500">{entry.user.email}</div>
                         )}
@@ -299,7 +309,7 @@ export default function AuditLog() {
               <div>
                 <label className="text-sm text-gray-500">User</label>
                 <div className="font-medium">
-                  {selectedEntry.user?.name || 'System'}
+                  {userName(selectedEntry.user) || 'System'}
                   {selectedEntry.user?.email && (
                     <span className="text-gray-500 ml-2">({selectedEntry.user.email})</span>
                   )}

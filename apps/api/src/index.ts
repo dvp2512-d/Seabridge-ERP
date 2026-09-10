@@ -27,6 +27,7 @@ import { settingsRouter } from './routes/settings';
 import { lifecycleRouter } from './routes/lifecycle';
 import { auditRouter } from './routes/audit';
 import { recordDeletionRouter } from './routes/recordDeletion';
+import { auditLog } from './middleware/auditLog';
 
 dotenv.config();
 
@@ -70,6 +71,13 @@ app.use('/api/auth', authLimiter, authRouter);
 
 // All other API routes use general rate limiting
 app.use('/api', apiLimiter);
+
+// Record every successful create/update/delete. Mounted after /api/auth on
+// purpose: login bodies carry passwords, and a failed login changes nothing.
+// The middleware reads req.user inside the response 'finish' handler, so the
+// per-router authenticate call has already run by the time it needs the actor.
+app.use('/api', auditLog);
+
 app.use('/api/users', userRouter);
 app.use('/api/buyers', buyerRouter);
 app.use('/api/products', productRouter);

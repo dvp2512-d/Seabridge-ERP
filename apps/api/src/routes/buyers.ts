@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { ValidationError, NotFoundError } from '../middleware/errorHandler';
+import { getBaseCurrency } from '../services/exchangeRateService';
 import { generateCode } from '../utils/helpers';
+import { optionalEmail } from '../utils/validators';
 
 const router: Router = Router();
 
@@ -44,6 +46,12 @@ router.get('/', can('BUYER_VIEW'), async (req, res, next) => {
       success: true,
       data: buyers,
       pagination: { page: Number(page), limit: Number(limit), total },
+      summary: {
+        // Buyer.totalRevenue is accumulated in the base currency (payments are
+        // converted via revenueInBase when recorded), so the UI needs the base
+        // code to label it correctly rather than defaulting to USD.
+        baseCurrency: await getBaseCurrency(),
+      },
     });
   } catch (error) {
     next(error);
@@ -60,15 +68,23 @@ router.get('/:id', can('BUYER_VIEW'), async (req, res, next) => {
         currency: true,
         contacts: { where: { isActive: true }, orderBy: { isPrimary: 'desc' } },
         communications: { take: 10, orderBy: { createdAt: 'desc' }, include: { user: { select: { firstName: true, lastName: true } } } },
+        // Each child row's amounts are INR, like everything else.
         inquiries: { take: 10, orderBy: { createdAt: 'desc' }, select: { id: true, inquiryNumber: true, stage: true, expectedValue: true, createdAt: true } },
         quotations: { take: 10, orderBy: { createdAt: 'desc' }, select: { id: true, quotationNumber: true, status: true, grandTotal: true, createdAt: true } },
         orders: { take: 10, orderBy: { createdAt: 'desc' }, select: { id: true, orderNumber: true, status: true, totalValue: true, createdAt: true } },
-        invoices: { take: 10, orderBy: { createdAt: 'desc' }, select: { id: true, invoiceNumber: true, status: true, totalAmount: true, balanceAmount: true } },
+        invoices: { take: 10, orderBy: { createdAt: 'desc' }, select: { id: true, invoiceNumber: true, status: true, totalAmount: true, balanceAmount: true, dueDate: true } },
       },
     });
 
     if (!buyer) throw new NotFoundError('Buyer');
-    res.json({ success: true, data: buyer });
+    res.json({
+      success: true,
+      data: buyer,
+      summary: {
+        // totalRevenue is accumulated in the base currency, not the buyer's own.
+        baseCurrency: await getBaseCurrency(),
+      },
+    });
   } catch (error) {
     next(error);
   }
@@ -159,7 +175,7 @@ router.post('/:id/contacts', can('BUYER_MANAGE'), async (req, res, next) => {
       firstName: z.string().min(1),
       lastName: z.string().optional(),
       designation: z.string().optional(),
-      email: z.string().email().optional(),
+      email: optionalEmail,
       phone: z.string().optional(),
       mobile: z.string().optional(),
       isPrimary: z.boolean().optional(),
@@ -185,7 +201,7 @@ router.put('/:id/contacts/:contactId', can('BUYER_MANAGE'), async (req, res, nex
       firstName: z.string().min(1).optional(),
       lastName: z.string().optional(),
       designation: z.string().optional(),
-      email: z.string().email().optional().or(z.literal('')),
+      email: optionalEmail,
       phone: z.string().optional(),
       mobile: z.string().optional(),
       isPrimary: z.boolean().optional(),

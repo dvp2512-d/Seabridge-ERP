@@ -4,6 +4,7 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
+import { getBaseCurrency } from '../services/exchangeRateService';
 
 const router: Router = Router();
 
@@ -12,10 +13,13 @@ router.use(authenticate);
 // List inquiries
 router.get('/', can('SALES_VIEW'), async (req, res, next) => {
   try {
-    const { stage, buyerId, salesOwnerId, search, page = 1, limit = 50 } = req.query;
+    const { stage, priority, buyerId, salesOwnerId, search, page = 1, limit = 50 } = req.query;
 
     const where: any = {};
     if (stage) where.stage = stage;
+    // The pipeline page has a Priority dropdown. Without this the filter was
+    // accepted by the UI, triggered a refetch, and returned the same list.
+    if (priority) where.priority = priority;
     if (buyerId) where.buyerId = buyerId;
     if (salesOwnerId) where.salesOwnerId = salesOwnerId;
     if (search) {
@@ -25,7 +29,12 @@ router.get('/', can('SALES_VIEW'), async (req, res, next) => {
       ];
     }
 
-    const [inquiries, total] = await Promise.all([
+    // The stage cards summarise the whole pipeline, so they must not be affected
+    // by the stage filter applied to the list itself - otherwise selecting one
+    // stage zeroes the other cards. Everything except `stage` still applies.
+    const { stage: _stage, ...summaryWhere } = where;
+
+    const [inquiries, total, stageGroups] = await Promise.all([
       prisma.inquiry.findMany({
         where,
         include: {
@@ -38,12 +47,42 @@ router.get('/', can('SALES_VIEW'), async (req, res, next) => {
         take: Number(limit),
       }),
       prisma.inquiry.count({ where }),
+      prisma.inquiry.groupBy({
+        by: ['stage'],
+        where: summaryWhere,
+        _count: { _all: true },
+        _sum: { expectedValue: true },
+      }),
     ]);
+
+    const countByStage: Record<string, number> = {};
+    const valueByStage: Record<string, number> = {};
+    let pipelineValue = 0;
+
+    for (const group of stageGroups) {
+      countByStage[group.stage] = group._count._all;
+      const value = Number(group._sum.expectedValue ?? 0);
+      valueByStage[group.stage] = value;
+      // Won and lost inquiries are no longer in play, so they are counted but
+      // excluded from the open pipeline figure.
+      if (group.stage !== 'WON' && group.stage !== 'LOST') pipelineValue += value;
+    }
+
+    const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
     res.json({
       success: true,
       data: inquiries,
       pagination: { page: Number(page), limit: Number(limit), total },
+      summary: {
+        baseCurrency: await getBaseCurrency(),
+        countByStage,
+        valueByStage: Object.fromEntries(
+          Object.entries(valueByStage).map(([k, v]) => [k, round2(v)])
+        ),
+        pipelineValue: round2(pipelineValue),
+        totalCount: Object.values(countByStage).reduce((a, b) => a + b, 0),
+      },
     });
   } catch (error) {
     next(error);
@@ -80,6 +119,7 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
       salesOwnerId: z.string().optional(),
       priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'URGENT']).optional(),
       source: z.string().optional(),
+      // expectedValue is INR, like every amount in this system.
       expectedValue: z.number().optional(),
       expectedDate: z.string().transform(s => new Date(s)).optional(),
       requirements: z.string().optional(),

@@ -25,7 +25,6 @@ import Expenses from '@/pages/Expenses';
 import Income from '@/pages/Income';
 import Tasks from '@/pages/Tasks';
 import Users from '@/pages/Users';
-import ExchangeRates from '@/pages/ExchangeRates';
 import AuditLog from '@/pages/AuditLog';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -70,7 +69,9 @@ function App() {
                 <Route path="/income" element={<Income />} />
                 <Route path="/tasks" element={<Tasks />} />
                 <Route path="/users" element={<Users />} />
-                <Route path="/exchange-rates" element={<ExchangeRates />} />
+                {/* Exchange rates now live on the Currencies tab of Master Data.
+                    Old bookmarks and in-app links land there instead of 404ing. */}
+                <Route path="/exchange-rates" element={<Navigate to="/master-data" replace />} />
                 <Route path="/master-data" element={<MasterData />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/audit-log" element={<AuditLog />} />

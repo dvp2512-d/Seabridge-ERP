@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
-import { ValidationError } from '../middleware/errorHandler';
+import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 
 const router: Router = Router();
 
@@ -141,16 +141,44 @@ router.get('/currencies', can('MASTER_VIEW'), async (req, res, next) => {
   }
 });
 
+/**
+ * A currency's exchangeRate is how many units of the BASE currency (INR) one
+ * unit of it is worth. Conversions multiply by this column, so a wrong value
+ * here silently misstates every converted total in the application.
+ *
+ * Two protections:
+ *  - z.coerce.number() accepts the Decimal-as-string the API itself returns, so
+ *    round-tripping a row back through the form cannot fail on a type.
+ *  - exactly 1 is rejected for anything but the base currency. 1 is the column
+ *    default, so "never set" and "set to 1" are indistinguishable, and a rate of
+ *    1 claims the currency is at parity with the rupee.
+ */
+const BASE_CURRENCY_CODE = 'INR';
+
+function assertSensibleRate(rate: number | undefined, code: string) {
+  if (rate === undefined) return;
+  if (code.toUpperCase() === BASE_CURRENCY_CODE) return;
+  if (rate === 1) {
+    throw new AppError(
+      `A rate of 1 would mean 1 ${code.toUpperCase()} = 1 ${BASE_CURRENCY_CODE}. ` +
+        `Enter how many ${BASE_CURRENCY_CODE} one ${code.toUpperCase()} is worth.`,
+      400
+    );
+  }
+}
+
 router.post('/currencies', can('MASTER_MANAGE'), async (req, res, next) => {
   try {
     const schema = z.object({
       code: z.string().length(3),
       name: z.string().min(1),
       symbol: z.string().min(1),
-      exchangeRate: z.number().positive().optional(),
+      exchangeRate: z.coerce.number().positive().optional(),
     });
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
+
+    assertSensibleRate(validation.data.exchangeRate, validation.data.code);
 
     const currency = await prisma.currency.create({ data: validation.data });
     res.status(201).json({ success: true, data: currency });
@@ -162,10 +190,19 @@ router.post('/currencies', can('MASTER_MANAGE'), async (req, res, next) => {
 router.put('/currencies/:id', can('MASTER_MANAGE'), async (req, res, next) => {
   try {
     const schema = z.object({
-      exchangeRate: z.number().positive(),
+      exchangeRate: z.coerce.number().positive().optional(),
+      isActive: z.boolean().optional(),
     });
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
+
+    const existing = await prisma.currency.findUnique({
+      where: { id: req.params.id },
+      select: { code: true },
+    });
+    if (!existing) throw new NotFoundError('Currency');
+
+    assertSensibleRate(validation.data.exchangeRate, existing.code);
 
     const currency = await prisma.currency.update({
       where: { id: req.params.id },

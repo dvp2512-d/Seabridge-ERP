@@ -136,7 +136,7 @@ export default function NewInvoice() {
                 onChange={(e) => setOrderId(e.target.value)}
                 options={availableOrders.map((o: any) => ({
                   value: o.id,
-                  label: `${o.orderNumber} - ${o.buyer?.companyName} (${formatCurrency(o.totalValue || o.grandTotal)})`,
+                  label: `${o.orderNumber} - ${o.buyer?.companyName} (${formatCurrency(o.totalValue, o.currency)})`,
                 }))}
                 placeholder="Select an order to invoice"
               />
@@ -173,7 +173,7 @@ export default function NewInvoice() {
                 </div>
 
                 {/* Order Items */}
-                <div className="border rounded-lg overflow-hidden">
+                <div className="border rounded-lg overflow-hidden overflow-x-auto">
                   <table className="table">
                     <thead>
                       <tr>

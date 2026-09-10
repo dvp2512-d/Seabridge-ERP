@@ -8,6 +8,12 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 // Format currency.
+//
+// Every amount stored in this system is INR, so that is the default: passing no
+// code yields rupees rather than dollars. A code is only supplied where a figure
+// is genuinely being presented in another currency, which happens on generated
+// documents and in the dialog that previews them.
+//
 // Guards against invalid/empty currency codes, which would otherwise make
 // Intl.NumberFormat throw a RangeError and blank out the whole page.
 export function formatCurrency(
@@ -16,16 +22,17 @@ export function formatCurrency(
 ): string {
   const num = typeof amount === 'string' ? parseFloat(amount) : amount;
   const safeAmount = Number.isFinite(num as number) ? (num as number) : 0;
-  const code = (currency || 'USD').toUpperCase();
+  const code = (currency || 'INR').toUpperCase();
 
   try {
-    return new Intl.NumberFormat('en-US', {
+    return new Intl.NumberFormat('en-IN', {
       style: 'currency',
       currency: code,
+      maximumFractionDigits: 2,
     }).format(safeAmount);
   } catch {
     // Unknown code - still show the number rather than breaking the page.
-    return `${code} ${safeAmount.toLocaleString('en-US', {
+    return `${code} ${safeAmount.toLocaleString('en-IN', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })}`;

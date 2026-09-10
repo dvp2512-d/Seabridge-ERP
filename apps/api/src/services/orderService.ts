@@ -41,7 +41,6 @@ export async function createOrderFromQuotation(
     include: {
       items: true,
       costs: true,
-      currency: true,
     },
   });
 
@@ -117,8 +116,6 @@ export async function createOrderFromQuotation(
         // Equals the sum of the line amounts below, which is the quotation's
         // grandTotal once rounding has reconciled.
         totalValue: pricing.total,
-        // Carry the quotation's currency across instead of defaulting to USD.
-        currency: quotation.currency.code,
         paymentTerms: quotation.paymentTerms,
         deliveryTerms: quotation.deliveryTerms,
         notes: options.notes,

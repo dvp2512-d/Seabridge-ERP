@@ -24,7 +24,6 @@ import {
   Wallet,
   CheckSquare,
   UserCog,
-  TrendingUp,
   History,
 } from 'lucide-react';
 
@@ -55,9 +54,15 @@ const navigation: {
   { name: 'Expenses', href: '/expenses', icon: Receipt, permission: 'FINANCE_VIEW' },
   { name: 'Income', href: '/income', icon: Wallet, permission: 'FINANCE_VIEW' },
   { name: 'Tasks', href: '/tasks', icon: CheckSquare, permission: 'MASTER_VIEW' },
-  { name: 'Exchange Rates', href: '/exchange-rates', icon: TrendingUp, permission: 'MASTER_VIEW' },
   { name: 'Users', href: '/users', icon: UserCog, permission: 'USER_MANAGE' },
-  { name: 'Master Data', href: '/master-data', icon: Database, permission: 'MASTER_MANAGE' },
+  // Exchange rates are maintained on the Currencies tab of Master Data, which is
+  // where the rate actually lives (Currency.exchangeRate). A separate top-level
+  // section implied a rate history that the schema does not store.
+  //
+  // Gated on MASTER_VIEW rather than MASTER_MANAGE so finance and operations can
+  // still reach the rates their totals depend on; the write routes remain
+  // restricted to MASTER_MANAGE.
+  { name: 'Master Data', href: '/master-data', icon: Database, permission: 'MASTER_VIEW' },
   { name: 'Audit Log', href: '/audit-log', icon: History, permission: 'SETTINGS_MANAGE' },
 ];
 

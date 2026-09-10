@@ -7,18 +7,24 @@ import Modal from '@/components/ui/Modal';
 import { FormField, SelectField } from '@/components/ui/FormFields';
 import { Plus, Edit2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAuthStore } from '@/store/authStore';
+import { can } from '@/lib/permissions';
 
 type TabType = 'countries' | 'currencies' | 'incoterms' | 'categories' | 'ports';
 
-const tabs: { id: TabType; label: string }[] = [
-  { id: 'countries', label: 'Countries' },
-  { id: 'currencies', label: 'Currencies' },
-  { id: 'incoterms', label: 'Incoterms' },
-  { id: 'categories', label: 'Product Categories' },
-  { id: 'ports', label: 'Ports' },
+const tabs: { id: TabType; label: string; singular: string }[] = [
+  { id: 'countries', label: 'Countries', singular: 'Country' },
+  { id: 'currencies', label: 'Currencies', singular: 'Currency' },
+  { id: 'incoterms', label: 'Incoterms', singular: 'Incoterm' },
+  { id: 'categories', label: 'Product Categories', singular: 'Product Category' },
+  { id: 'ports', label: 'Ports', singular: 'Port' },
 ];
 
 export default function MasterData() {
+  const { user } = useAuthStore();
+  // Everyone can read master data (finance needs the rates their totals depend
+  // on), but only MASTER_MANAGE roles may change it, matching the API.
+  const canManage = can(user?.role, 'MASTER_MANAGE');
   const [activeTab, setActiveTab] = useState<TabType>('countries');
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState<any>(null);
@@ -29,10 +35,12 @@ export default function MasterData() {
         title="Master Data"
         subtitle="Manage dropdown values and reference data"
         actions={
-          <button onClick={() => { setEditItem(null); setShowModal(true); }} className="btn btn-primary">
-            <Plus className="w-4 h-4 mr-2" />
-            Add {tabs.find(t => t.id === activeTab)?.label.slice(0, -1)}
-          </button>
+          canManage ? (
+            <button onClick={() => { setEditItem(null); setShowModal(true); }} className="btn btn-primary">
+              <Plus className="w-4 h-4 mr-2" />
+              Add {tabs.find(t => t.id === activeTab)?.singular}
+            </button>
+          ) : undefined
         }
       />
 
@@ -57,11 +65,11 @@ export default function MasterData() {
       </div>
 
       {/* Content */}
-      {activeTab === 'countries' && <CountriesTab onEdit={(item) => { setEditItem(item); setShowModal(true); }} />}
-      {activeTab === 'currencies' && <CurrenciesTab onEdit={(item) => { setEditItem(item); setShowModal(true); }} />}
-      {activeTab === 'incoterms' && <IncotermsTab onEdit={(item) => { setEditItem(item); setShowModal(true); }} />}
-      {activeTab === 'categories' && <CategoriesTab onEdit={(item) => { setEditItem(item); setShowModal(true); }} />}
-      {activeTab === 'ports' && <PortsTab onEdit={(item) => { setEditItem(item); setShowModal(true); }} />}
+      {activeTab === 'countries' && <CountriesTab onEdit={canManage ? (item) => { setEditItem(item); setShowModal(true); } : undefined} />}
+      {activeTab === 'currencies' && <CurrenciesTab onEdit={canManage ? (item) => { setEditItem(item); setShowModal(true); } : undefined} />}
+      {activeTab === 'incoterms' && <IncotermsTab onEdit={canManage ? (item) => { setEditItem(item); setShowModal(true); } : undefined} />}
+      {activeTab === 'categories' && <CategoriesTab onEdit={canManage ? (item) => { setEditItem(item); setShowModal(true); } : undefined} />}
+      {activeTab === 'ports' && <PortsTab onEdit={canManage ? (item) => { setEditItem(item); setShowModal(true); } : undefined} />}
 
       {/* Add/Edit Modal */}
       {showModal && (
@@ -76,7 +84,7 @@ export default function MasterData() {
 }
 
 // Countries Tab
-function CountriesTab({ onEdit }: { onEdit: (item: any) => void }) {
+function CountriesTab({ onEdit }: { onEdit?: (item: any) => void }) {
   const { data, isLoading } = useQuery({
     queryKey: ['countries'],
     queryFn: () => masterApi.getCountries(),
@@ -85,7 +93,7 @@ function CountriesTab({ onEdit }: { onEdit: (item: any) => void }) {
   const countries = data?.data?.data || [];
 
   return (
-    <div className="card">
+    <div className="card overflow-x-auto">
       <table className="table">
         <thead>
           <tr>
@@ -109,9 +117,11 @@ function CountriesTab({ onEdit }: { onEdit: (item: any) => void }) {
                 <td>{c.region || '-'}</td>
                 <td><span className={`badge ${c.isActive ? 'badge-success' : 'badge-gray'}`}>{c.isActive ? 'Active' : 'Inactive'}</span></td>
                 <td>
-                  <button onClick={() => onEdit(c)} className="text-navy-600 hover:text-navy-800">
-                    <Edit2 className="w-4 h-4" />
-                  </button>
+                  {onEdit && (
+                    <button onClick={() => onEdit(c)} className="text-navy-600 hover:text-navy-800">
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))
@@ -123,7 +133,7 @@ function CountriesTab({ onEdit }: { onEdit: (item: any) => void }) {
 }
 
 // Currencies Tab
-function CurrenciesTab({ onEdit }: { onEdit: (item: any) => void }) {
+function CurrenciesTab({ onEdit }: { onEdit?: (item: any) => void }) {
   const { data, isLoading } = useQuery({
     queryKey: ['currencies'],
     queryFn: () => masterApi.getCurrencies(),
@@ -132,35 +142,40 @@ function CurrenciesTab({ onEdit }: { onEdit: (item: any) => void }) {
   const currencies = data?.data?.data || [];
 
   return (
-    <div className="card">
+    <div className="card overflow-x-auto">
       <table className="table">
         <thead>
           <tr>
             <th>Code</th>
             <th>Name</th>
             <th>Symbol</th>
-            <th>Exchange Rate (to USD)</th>
             <th>Status</th>
             <th className="w-20">Actions</th>
           </tr>
         </thead>
         <tbody>
           {isLoading ? (
-            <tr><td colSpan={6} className="text-center py-8">Loading...</td></tr>
+            <tr><td colSpan={5} className="text-center py-8">Loading...</td></tr>
           ) : currencies.length === 0 ? (
-            <tr><td colSpan={6} className="text-center py-8 text-gray-500">No currencies found</td></tr>
+            <tr><td colSpan={5} className="text-center py-8 text-gray-500">No currencies found</td></tr>
           ) : (
             currencies.map((c: any) => (
               <tr key={c.id}>
-                <td className="font-medium">{c.code}</td>
+                <td className="font-medium">
+                  {c.code}
+                  {c.code === 'INR' && (
+                    <span className="ml-2 text-xs text-gray-500">base</span>
+                  )}
+                </td>
                 <td>{c.name}</td>
                 <td>{c.symbol}</td>
-                <td>{c.exchangeRate}</td>
                 <td><span className={`badge ${c.isActive ? 'badge-success' : 'badge-gray'}`}>{c.isActive ? 'Active' : 'Inactive'}</span></td>
                 <td>
-                  <button onClick={() => onEdit(c)} className="text-navy-600 hover:text-navy-800">
-                    <Edit2 className="w-4 h-4" />
-                  </button>
+                  {onEdit && (
+                    <button onClick={() => onEdit(c)} className="text-navy-600 hover:text-navy-800">
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))
@@ -172,7 +187,7 @@ function CurrenciesTab({ onEdit }: { onEdit: (item: any) => void }) {
 }
 
 // Incoterms Tab
-function IncotermsTab({ onEdit }: { onEdit: (item: any) => void }) {
+function IncotermsTab({ onEdit }: { onEdit?: (item: any) => void }) {
   const { data, isLoading } = useQuery({
     queryKey: ['incoterms'],
     queryFn: () => masterApi.getIncoterms(),
@@ -181,7 +196,7 @@ function IncotermsTab({ onEdit }: { onEdit: (item: any) => void }) {
   const incoterms = data?.data?.data || [];
 
   return (
-    <div className="card">
+    <div className="card overflow-x-auto">
       <table className="table">
         <thead>
           <tr>
@@ -205,9 +220,11 @@ function IncotermsTab({ onEdit }: { onEdit: (item: any) => void }) {
                 <td className="max-w-xs truncate">{i.description || '-'}</td>
                 <td><span className={`badge ${i.isActive ? 'badge-success' : 'badge-gray'}`}>{i.isActive ? 'Active' : 'Inactive'}</span></td>
                 <td>
-                  <button onClick={() => onEdit(i)} className="text-navy-600 hover:text-navy-800">
-                    <Edit2 className="w-4 h-4" />
-                  </button>
+                  {onEdit && (
+                    <button onClick={() => onEdit(i)} className="text-navy-600 hover:text-navy-800">
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))
@@ -219,7 +236,7 @@ function IncotermsTab({ onEdit }: { onEdit: (item: any) => void }) {
 }
 
 // Categories Tab
-function CategoriesTab({ onEdit }: { onEdit: (item: any) => void }) {
+function CategoriesTab({ onEdit }: { onEdit?: (item: any) => void }) {
   const { data, isLoading } = useQuery({
     queryKey: ['productCategories'],
     queryFn: () => masterApi.getProductCategories(),
@@ -228,7 +245,7 @@ function CategoriesTab({ onEdit }: { onEdit: (item: any) => void }) {
   const categories = data?.data?.data || [];
 
   return (
-    <div className="card">
+    <div className="card overflow-x-auto">
       <table className="table">
         <thead>
           <tr>
@@ -250,9 +267,11 @@ function CategoriesTab({ onEdit }: { onEdit: (item: any) => void }) {
                 <td>{c.description || '-'}</td>
                 <td><span className={`badge ${c.isActive ? 'badge-success' : 'badge-gray'}`}>{c.isActive ? 'Active' : 'Inactive'}</span></td>
                 <td>
-                  <button onClick={() => onEdit(c)} className="text-navy-600 hover:text-navy-800">
-                    <Edit2 className="w-4 h-4" />
-                  </button>
+                  {onEdit && (
+                    <button onClick={() => onEdit(c)} className="text-navy-600 hover:text-navy-800">
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))
@@ -264,7 +283,7 @@ function CategoriesTab({ onEdit }: { onEdit: (item: any) => void }) {
 }
 
 // Ports Tab
-function PortsTab({ onEdit }: { onEdit: (item: any) => void }) {
+function PortsTab({ onEdit }: { onEdit?: (item: any) => void }) {
   const { data, isLoading } = useQuery({
     queryKey: ['ports'],
     queryFn: () => masterApi.getPorts(),
@@ -273,7 +292,7 @@ function PortsTab({ onEdit }: { onEdit: (item: any) => void }) {
   const ports = data?.data?.data || [];
 
   return (
-    <div className="card">
+    <div className="card overflow-x-auto">
       <table className="table">
         <thead>
           <tr>
@@ -299,9 +318,11 @@ function PortsTab({ onEdit }: { onEdit: (item: any) => void }) {
                 <td><span className="badge badge-navy">{p.type}</span></td>
                 <td><span className={`badge ${p.isActive ? 'badge-success' : 'badge-gray'}`}>{p.isActive ? 'Active' : 'Inactive'}</span></td>
                 <td>
-                  <button onClick={() => onEdit(p)} className="text-navy-600 hover:text-navy-800">
-                    <Edit2 className="w-4 h-4" />
-                  </button>
+                  {onEdit && (
+                    <button onClick={() => onEdit(p)} className="text-navy-600 hover:text-navy-800">
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))
@@ -387,7 +408,10 @@ function MasterDataModal({ type, item, onClose }: { type: TabType; item: any; on
             <FormField label="Code" required value={formData.code || ''} onChange={(e) => setFormData({ ...formData, code: e.target.value })} placeholder="e.g., USD" maxLength={3} disabled={!!item} />
             <FormField label="Name" required value={formData.name || ''} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="e.g., US Dollar" disabled={!!item} />
             <FormField label="Symbol" required value={formData.symbol || ''} onChange={(e) => setFormData({ ...formData, symbol: e.target.value })} placeholder="e.g., $" disabled={!!item} />
-            <FormField label="Exchange Rate (to USD)" required type="number" step="0.0001" value={formData.exchangeRate || ''} onChange={(e) => setFormData({ ...formData, exchangeRate: parseFloat(e.target.value) })} />
+            <p className="text-xs text-gray-500">
+              No exchange rate is stored. All amounts are held in INR; you choose a
+              currency and rate when generating a quotation or invoice PDF.
+            </p>
           </>
         )}
 
@@ -435,6 +459,27 @@ function MasterDataModal({ type, item, onClose }: { type: TabType; item: any; on
               ]}
             />
           </>
+        )}
+
+        {/* Every PUT accepts isActive, but there was no control for it, so a
+            stale port or Incoterm could never be retired. Only meaningful on an
+            existing row - new rows default to active. */}
+        {item && (
+          <div>
+            <label className="label">Status</label>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input
+                type="checkbox"
+                className="rounded border-gray-300"
+                checked={formData.isActive !== false}
+                onChange={(e) => setFormData({ ...formData, isActive: e.target.checked })}
+              />
+              Active
+            </label>
+            <p className="text-xs text-gray-500 mt-1">
+              Inactive entries stay on existing records but stop appearing in dropdowns.
+            </p>
+          </div>
         )}
 
         <div className="flex justify-end gap-3 pt-4 border-t">

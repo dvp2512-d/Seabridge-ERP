@@ -79,7 +79,7 @@ export default function Suppliers() {
           </button>
         </div>
       ) : (
-        <div className="card overflow-hidden">
+        <div className="card overflow-x-auto">
           <table className="table">
             <thead>
               <tr>
@@ -264,6 +264,7 @@ function SupplierDetailModal({ supplierId, onClose }: { supplierId: string; onCl
           </div>
           
           {supplier?.supplierPrices?.length > 0 ? (
+            <div className="table-container">
             <table className="table">
               <thead>
                 <tr>
@@ -286,6 +287,7 @@ function SupplierDetailModal({ supplierId, onClose }: { supplierId: string; onCl
                 ))}
               </tbody>
             </table>
+            </div>
           ) : (
             <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
               No pricing added yet

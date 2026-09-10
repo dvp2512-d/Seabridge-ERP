@@ -7,7 +7,7 @@ import { useAuthStore } from '@/store/authStore';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField } from '@/components/ui/FormFields';
 import { formatDateTime, getInitials } from '@/lib/utils';
-import { Plus, Users as UsersIcon, ShieldAlert, Edit, Trash2 } from 'lucide-react';
+import { Plus, Users as UsersIcon, ShieldAlert, Edit, Ban, RotateCcw } from 'lucide-react';
 
 /** What each role can reach, so the choice is an informed one. */
 const ROLE_DESCRIPTIONS: Record<string, string> = {
@@ -47,19 +47,32 @@ export default function Users() {
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['users'],
-    queryFn: () => usersApi.list({ limit: 200 }).then((r: any) => r.data),
+    // GET /api/users is not paginated - it returns every user - so there is no
+    // page parameter to pass and nothing is hidden below the fold.
+    queryFn: () => usersApi.list().then((r: any) => r.data),
     retry: false,
   });
 
   const users = data?.data ?? [];
 
-  const remove = useMutation({
-    mutationFn: (id: string) => usersApi.remove(id),
+  const deactivate = useMutation({
+    mutationFn: (id: string) => usersApi.deactivate(id),
     onSuccess: () => {
-      toast.success('User removed');
+      toast.success('User deactivated');
       queryClient.invalidateQueries({ queryKey: ['users'] });
     },
-    onError: (err: any) => toast.error(err.response?.data?.message || 'Could not remove user'),
+    onError: (err: any) =>
+      toast.error(err.response?.data?.message || 'Could not deactivate user'),
+  });
+
+  const reactivate = useMutation({
+    mutationFn: (id: string) => usersApi.reactivate(id),
+    onSuccess: () => {
+      toast.success('User reactivated');
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    },
+    onError: (err: any) =>
+      toast.error(err.response?.data?.message || 'Could not reactivate user'),
   });
 
   // A non-privileged role reaching this page gets a clear explanation rather
@@ -169,21 +182,31 @@ export default function Users() {
                         >
                           <Edit className="w-4 h-4" />
                         </button>
-                        {/* Removing your own account would lock you out mid-session */}
-                        {!isSelf && (
+                        {/* Deactivating your own account would lock you out mid-session */}
+                        {!isSelf && u.status !== 'INACTIVE' && (
                           <button
                             onClick={() => {
                               if (
                                 confirm(
-                                  `Remove ${u.firstName} ${u.lastName}? Their tasks and audit history remain.`
+                                  `Deactivate ${u.firstName} ${u.lastName}? They will no longer be able to sign in. Their tasks and audit history remain, and you can reactivate them later.`
                                 )
                               ) {
-                                remove.mutate(u.id);
+                                deactivate.mutate(u.id);
                               }
                             }}
-                            className="btn btn-ghost btn-sm text-red-600"
+                            className="btn btn-ghost btn-sm text-amber-600"
+                            title="Deactivate user"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Ban className="w-4 h-4" />
+                          </button>
+                        )}
+                        {!isSelf && u.status === 'INACTIVE' && (
+                          <button
+                            onClick={() => reactivate.mutate(u.id)}
+                            className="btn btn-ghost btn-sm text-emerald-600"
+                            title="Reactivate user"
+                          >
+                            <RotateCcw className="w-4 h-4" />
                           </button>
                         )}
                       </td>

@@ -36,6 +36,10 @@ export default function BuyerDetail() {
   });
 
   const buyer = data?.data?.data;
+  // totalRevenue is accumulated in the base currency; the buyer's own currency
+  // applies to their credit limit and to each order/invoice row.
+  const baseCode = data?.data?.summary?.baseCurrency?.code;
+  const buyerCode = buyer?.currency?.code;
 
   if (isLoading) {
     return (
@@ -103,7 +107,7 @@ export default function BuyerDetail() {
         <StatCard
           icon={TrendingUp}
           label="Total Revenue"
-          value={formatCurrency(buyer.totalRevenue || 0)}
+          value={formatCurrency(buyer.totalRevenue || 0, baseCode)}
           color="text-green-600"
         />
         <StatCard
@@ -121,7 +125,7 @@ export default function BuyerDetail() {
         <StatCard
           icon={CreditCard}
           label="Credit Limit"
-          value={buyer.creditLimit ? formatCurrency(buyer.creditLimit) : 'Not set'}
+          value={buyer.creditLimit ? formatCurrency(buyer.creditLimit, buyerCode) : 'Not set'}
           color="text-orange-600"
         />
       </div>
@@ -288,7 +292,7 @@ function OverviewTab({ buyer }: { buyer: any }) {
             </div>
             <div>
               <div className="text-sm text-gray-500">Credit Limit</div>
-              <div>{buyer.creditLimit ? formatCurrency(buyer.creditLimit) : '-'}</div>
+              <div>{buyer.creditLimit ? formatCurrency(buyer.creditLimit, buyer.currency?.code) : '-'}</div>
             </div>
             <div>
               <div className="text-sm text-gray-500">Credit Days</div>
@@ -500,7 +504,7 @@ function CommunicationsTab({ communications, onAdd }: { communications: any[]; o
 // Inquiries Tab
 function InquiriesTab({ inquiries }: { inquiries: any[] }) {
   return (
-    <div className="card">
+    <div className="card overflow-x-auto">
       <table className="table">
         <thead>
           <tr>
@@ -523,7 +527,7 @@ function InquiriesTab({ inquiries }: { inquiries: any[] }) {
                   {inquiry.stage?.replace(/_/g, ' ')}
                 </span>
               </td>
-              <td>{inquiry.expectedValue ? formatCurrency(inquiry.expectedValue) : '-'}</td>
+              <td>{inquiry.expectedValue ? formatCurrency(inquiry.expectedValue, inquiry.currency?.code) : '-'}</td>
               <td>{formatDate(inquiry.createdAt)}</td>
             </tr>
           ))}
@@ -541,7 +545,7 @@ function InquiriesTab({ inquiries }: { inquiries: any[] }) {
 // Orders Tab
 function OrdersTab({ orders }: { orders: any[] }) {
   return (
-    <div className="card">
+    <div className="card overflow-x-auto">
       <table className="table">
         <thead>
           <tr>
@@ -564,7 +568,7 @@ function OrdersTab({ orders }: { orders: any[] }) {
                   {order.status?.replace(/_/g, ' ')}
                 </span>
               </td>
-              <td>{formatCurrency(order.totalValue || 0)}</td>
+              <td>{formatCurrency(order.totalValue || 0, order.currency)}</td>
               <td>{formatDate(order.createdAt)}</td>
             </tr>
           ))}
@@ -582,7 +586,7 @@ function OrdersTab({ orders }: { orders: any[] }) {
 // Invoices Tab
 function InvoicesTab({ invoices }: { invoices: any[] }) {
   return (
-    <div className="card">
+    <div className="card overflow-x-auto">
       <table className="table">
         <thead>
           <tr>
@@ -606,9 +610,9 @@ function InvoicesTab({ invoices }: { invoices: any[] }) {
                   {invoice.status?.replace(/_/g, ' ')}
                 </span>
               </td>
-              <td>{formatCurrency(invoice.totalAmount || 0)}</td>
+              <td>{formatCurrency(invoice.totalAmount || 0, invoice.currency?.code)}</td>
               <td className={Number(invoice.balanceAmount) > 0 ? 'text-red-600 font-medium' : ''}>
-                {formatCurrency(invoice.balanceAmount || 0)}
+                {formatCurrency(invoice.balanceAmount || 0, invoice.currency?.code)}
               </td>
               <td>{formatDate(invoice.dueDate)}</td>
             </tr>
