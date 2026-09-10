@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { dashboardApi } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { can } from '@/lib/permissions';
-import { formatCurrency, formatDate, getStatusColor, cn } from '@/lib/utils';
+import { formatCurrency, formatDate, getStatusColor, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
 import NetPositionPanel from '@/components/ui/NetPositionPanel';
 import {
   TrendingUp,
@@ -12,7 +12,7 @@ import {
   FileText,
   ShoppingCart,
   Ship,
-  DollarSign,
+  IndianRupee,
   AlertCircle,
   ArrowRight,
   Clock,
@@ -37,10 +37,23 @@ export default function Dashboard() {
   const canViewSales = can(user?.role, 'DASHBOARD_SALES');
   const canViewFinance = can(user?.role, 'DASHBOARD_FINANCE');
 
+  /**
+   * Always refetched on mount.
+   *
+   * These are aggregates over every record, so anything the user did on another
+   * screen changes them. The global staleTime of five minutes, combined with
+   * refetchOnWindowFocus being off, meant arriving at the dashboard could show
+   * figures from before an invoice was raised or a payment recorded - the numbers
+   * looked simply wrong. Mutations invalidate these keys too (see
+   * lib/queryKeys.ts), but refetching on mount is the safety net that does not
+   * depend on every screen remembering to.
+   */
   const { data, isLoading } = useQuery({
     queryKey: ['dashboard'],
     queryFn: () => dashboardApi.getMain(),
     enabled: canViewFull,
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 
   // Sales data for charts
@@ -48,6 +61,8 @@ export default function Dashboard() {
     queryKey: ['dashboard-sales'],
     queryFn: () => dashboardApi.getSales(),
     enabled: canViewSales,
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 
   // Finance data
@@ -55,6 +70,8 @@ export default function Dashboard() {
     queryKey: ['dashboard-finance'],
     queryFn: () => dashboardApi.getFinance(),
     enabled: canViewFinance,
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 
   const dashboard = data?.data?.data;
@@ -168,7 +185,7 @@ export default function Dashboard() {
           title="Total Receivables"
           value={formatCurrency(kpis.totalReceivables || 0, baseCode)}
           subtitle={kpis.overdueReceivables > 0 ? `${formatCurrency(kpis.overdueReceivables, baseCode)} overdue` : 'All current'}
-          icon={DollarSign}
+          icon={IndianRupee}
           iconBg={kpis.overdueReceivables > 0 ? "bg-red-100" : "bg-green-100"}
           iconColor={kpis.overdueReceivables > 0 ? "text-red-600" : "text-green-600"}
           alert={kpis.overdueReceivables > 0}
@@ -288,7 +305,7 @@ export default function Dashboard() {
                     <div className="text-xs text-gray-500">{order.buyer?.companyName}</div>
                   </div>
                   <div className="text-right">
-                    <div className="font-medium text-sm">{formatCurrency(order.totalValue || order.grandTotal, order.currency)}</div>
+                    <div className="font-medium text-sm">{formatCurrency(order.totalValue || order.grandTotal, BASE_CURRENCY_CODE)}</div>
                     <span className={`badge text-xs ${getStatusColor(order.status)}`}>
                       {order.status.replace(/_/g, ' ')}
                     </span>

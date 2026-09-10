@@ -5,7 +5,12 @@ import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { invoicesApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
-import { formatCurrency, formatDate, getStatusColor, downloadFile, isPastDue, cn } from '@/lib/utils';
+import {
+  INVOICE_TYPE_BADGE_CLASS,
+  describeExcludedDocuments,
+  isDocumentOnlyInvoice,
+} from '@/lib/invoiceTypes';
+import { formatCurrency, formatDate, getStatusColor, downloadFile, isPastDue, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import {
   Search,
@@ -54,7 +59,13 @@ export default function Invoices() {
     setPage(1);
   }, 300);
 
-  const countByStatus: Record<string, number> = summary?.countByStatus ?? {};
+  /**
+   * The cards are about getting paid, so they count commercial invoices only.
+   * Proformas and sample invoices are issued for documentation and will never be
+   * paid, so counting a sent one as "pending" overstates what is outstanding.
+   */
+  const countByStatus: Record<string, number> = summary?.countByStatusCommercial ?? {};
+  const excludedLabel = describeExcludedDocuments(summary?.countByType);
   // Summary money is already converted into the base currency by the API.
   const baseCode = summary?.baseCurrency?.code;
   const stats = {
@@ -63,9 +74,6 @@ export default function Invoices() {
     partiallyPaid: countByStatus.PARTIALLY_PAID ?? 0,
     paid: countByStatus.PAID ?? 0,
     overdue: summary?.overdueCount ?? 0,
-    // Only summary.totalOutstanding is currency-converted. The receivables
-    // report sums balances across currencies at face value, so it is not used
-    // as a fallback here.
     totalReceivable: summary?.totalOutstanding ?? 0,
     totalPaid: summary?.totalCollected ?? 0,
   };
@@ -105,6 +113,9 @@ export default function Invoices() {
           </div>
           <div className="text-xs text-gray-500 mt-1">
             {stats.overdue} overdue
+            {/* Stated so the cards and the list cannot appear to disagree: a
+                document appears as a row but carries no receivable. */}
+            {excludedLabel && ` · excludes ${excludedLabel}`}
           </div>
         </div>
         <div className="card p-4 border-l-4 border-green-500">
@@ -128,7 +139,10 @@ export default function Invoices() {
             {stats.sent + stats.partiallyPaid}
           </div>
           <div className="text-xs text-gray-500 mt-1">
+            {/* Commercial invoices awaiting payment. Documents are never pending
+                payment, so they are reported separately rather than counted here. */}
             {stats.partiallyPaid} partially paid
+            {excludedLabel && ` · ${excludedLabel} issued as documents`}
           </div>
         </div>
         <div className="card p-4 border-l-4 border-blue-500">
@@ -220,7 +234,10 @@ export default function Invoices() {
             </thead>
             <tbody>
               {invoices.map((invoice: any) => {
+                const isDocumentOnly = isDocumentOnlyInvoice(invoice.type);
+                // A document-only invoice is never overdue - nothing is owed on it.
                 const isOverdue =
+                  !isDocumentOnly &&
                   !['PAID', 'CANCELLED'].includes(invoice.status) && isPastDue(invoice.dueDate);
                 const balance = parseFloat(invoice.balanceAmount || 0);
                 
@@ -230,7 +247,20 @@ export default function Invoices() {
                     className={cn('cursor-pointer hover:bg-gray-50', isOverdue && 'bg-red-50')}
                     onClick={() => navigate(`/invoices/${invoice.id}`)}
                   >
-                    <td className="font-medium font-mono">{invoice.invoiceNumber}</td>
+                    <td className="font-medium font-mono">
+                      {invoice.invoiceNumber}
+                      {/* Marked in the list so a SENT proforma or sample is not read
+                          as an invoice awaiting payment. */}
+                      {isDocumentOnly && (
+                        <span
+                          className={`ml-2 badge text-xs ${
+                            INVOICE_TYPE_BADGE_CLASS[invoice.type] ?? 'badge-info'
+                          }`}
+                        >
+                          {invoice.type}
+                        </span>
+                      )}
+                    </td>
                     <td>
                       <div className="font-medium text-gray-900">{invoice.buyer?.companyName}</div>
                       <div className="text-xs text-gray-500">{invoice.buyer?.code}</div>
@@ -252,16 +282,16 @@ export default function Invoices() {
                       </span>
                     </td>
                     <td className="text-right font-medium">
-                      {formatCurrency(invoice.totalAmount, invoice.currency?.code)}
+                      {formatCurrency(invoice.totalAmount, BASE_CURRENCY_CODE)}
                     </td>
                     <td className="text-right text-green-600">
-                      {formatCurrency(invoice.paidAmount || 0, invoice.currency?.code)}
+                      {formatCurrency(invoice.paidAmount || 0, BASE_CURRENCY_CODE)}
                     </td>
                     <td className={cn(
                       'text-right font-medium',
                       balance > 0 ? 'text-red-600' : 'text-green-600'
                     )}>
-                      {formatCurrency(balance, invoice.currency?.code)}
+                      {formatCurrency(balance, BASE_CURRENCY_CODE)}
                     </td>
                     <td className={cn(isOverdue ? 'text-red-600 font-medium' : 'text-gray-600')}>
                       {formatDate(invoice.dueDate)}

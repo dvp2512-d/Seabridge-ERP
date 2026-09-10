@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { masterApi } from '@/lib/api';
+import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField } from '@/components/ui/FormFields';
-import { Plus, Edit2 } from 'lucide-react';
+import { Plus, Edit2, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
 import { can } from '@/lib/permissions';
@@ -19,6 +20,204 @@ const tabs: { id: TabType; label: string; singular: string }[] = [
   { id: 'categories', label: 'Product Categories', singular: 'Product Category' },
   { id: 'ports', label: 'Ports', singular: 'Port' },
 ];
+
+const PAGE_SIZE = 25;
+
+/**
+ * Search, paging and the active/inactive toggle for one master data table.
+ *
+ * These tables hold worldwide reference data - 250 countries, 179 currencies, 400+
+ * ports - so rendering them whole is not usable. Filtering happens on the server
+ * rather than in the browser so a search reaches rows that are not on the current
+ * page; filtering the page client-side would only ever match the 25 rows already
+ * loaded, which looks like missing data.
+ */
+function useMasterList(
+  resource: string,
+  fetcher: (params: any) => Promise<any>,
+  extraParams: Record<string, any> = {}
+) {
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [includeInactive, setIncludeInactive] = useState(false);
+
+  // Debounced so typing does not fire a request per keystroke. Any change resets
+  // to page 1, otherwise a narrower search can land the user on an empty page.
+  const commitSearch = useDebouncedCallback((value: string) => {
+    setSearch(value);
+    setPage(1);
+  }, 300);
+
+  const onSearchChange = (value: string) => {
+    setSearchInput(value);
+    commitSearch(value);
+  };
+
+  const extraKey = JSON.stringify(extraParams);
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: [resource, { search, page, includeInactive, extraKey }],
+    queryFn: () =>
+      fetcher({
+        page,
+        limit: PAGE_SIZE,
+        ...(search ? { search } : {}),
+        ...(includeInactive ? { includeInactive: true } : {}),
+        ...extraParams,
+      }),
+    // Keeps the previous page visible while the next one loads, instead of
+    // collapsing the table to a spinner on every page change.
+    placeholderData: (previous: any) => previous,
+  });
+
+  const rows: any[] = data?.data?.data ?? [];
+  const total: number = data?.data?.pagination?.total ?? rows.length;
+
+  return {
+    rows,
+    total,
+    page,
+    setPage,
+    isLoading,
+    isFetching,
+    searchInput,
+    onSearchChange,
+    includeInactive,
+    setIncludeInactive,
+    pageCount: Math.max(1, Math.ceil(total / PAGE_SIZE)),
+  };
+}
+
+/** The chrome around every master data table: search box, toggle, table, paging. */
+function MasterTable({
+  list,
+  placeholder,
+  headers,
+  emptyLabel,
+  children,
+}: {
+  list: ReturnType<typeof useMasterList>;
+  placeholder: string;
+  headers: string[];
+  emptyLabel: string;
+  children: React.ReactNode;
+}) {
+  const { rows, total, page, setPage, pageCount, isLoading, isFetching } = list;
+  const from = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const to = Math.min(page * PAGE_SIZE, total);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[240px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            type="text"
+            value={list.searchInput}
+            onChange={(e) => list.onSearchChange(e.target.value)}
+            placeholder={placeholder}
+            className="input pl-9 w-full"
+          />
+        </div>
+        <label className="flex items-center gap-2 text-sm text-gray-600 whitespace-nowrap">
+          <input
+            type="checkbox"
+            checked={list.includeInactive}
+            onChange={(e) => {
+              list.setIncludeInactive(e.target.checked);
+              setPage(1);
+            }}
+            className="rounded border-gray-300"
+          />
+          Show inactive
+        </label>
+        <span className="text-sm text-gray-500 whitespace-nowrap">
+          {total.toLocaleString('en-IN')} total
+        </span>
+      </div>
+
+      <div className={cn('card overflow-x-auto', isFetching && !isLoading && 'opacity-60')}>
+        <table className="table">
+          <thead>
+            <tr>
+              {headers.map((h) => (
+                <th key={h} className={h === 'Actions' ? 'w-20' : undefined}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading ? (
+              <tr>
+                <td colSpan={headers.length} className="text-center py-8">
+                  Loading...
+                </td>
+              </tr>
+            ) : rows.length === 0 ? (
+              <tr>
+                <td colSpan={headers.length} className="text-center py-8 text-gray-500">
+                  {list.searchInput ? `No matches for "${list.searchInput}"` : emptyLabel}
+                </td>
+              </tr>
+            ) : (
+              children
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {pageCount > 1 && (
+        <div className="flex items-center justify-between text-sm">
+          <span className="text-gray-500">
+            Showing {from.toLocaleString('en-IN')}-{to.toLocaleString('en-IN')} of{' '}
+            {total.toLocaleString('en-IN')}
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setPage(Math.max(1, page - 1))}
+              disabled={page === 1}
+              className="btn btn-secondary btn-sm disabled:opacity-40"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span className="text-gray-600">
+              Page {page} of {pageCount}
+            </span>
+            <button
+              onClick={() => setPage(Math.min(pageCount, page + 1))}
+              disabled={page >= pageCount}
+              className="btn btn-secondary btn-sm disabled:opacity-40"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Shared Active/Inactive pill. */
+function StatusBadge({ active }: { active: boolean }) {
+  return (
+    <span className={`badge ${active ? 'badge-success' : 'badge-gray'}`}>
+      {active ? 'Active' : 'Inactive'}
+    </span>
+  );
+}
+
+/** Shared edit button, rendered only when the user may manage master data. */
+function EditCell({ item, onEdit }: { item: any; onEdit?: (item: any) => void }) {
+  if (!onEdit) return <td />;
+  return (
+    <td>
+      <button onClick={() => onEdit(item)} className="text-navy-600 hover:text-navy-800">
+        <Edit2 className="w-4 h-4" />
+      </button>
+    </td>
+  );
+}
 
 export default function MasterData() {
   const { user } = useAuthStore();
@@ -85,254 +284,151 @@ export default function MasterData() {
 
 // Countries Tab
 function CountriesTab({ onEdit }: { onEdit?: (item: any) => void }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['countries'],
-    queryFn: () => masterApi.getCountries(),
-  });
-
-  const countries = data?.data?.data || [];
+  const list = useMasterList('countries', masterApi.getCountries);
 
   return (
-    <div className="card overflow-x-auto">
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Code</th>
-            <th>Name</th>
-            <th>Region</th>
-            <th>Status</th>
-            <th className="w-20">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {isLoading ? (
-            <tr><td colSpan={5} className="text-center py-8">Loading...</td></tr>
-          ) : countries.length === 0 ? (
-            <tr><td colSpan={5} className="text-center py-8 text-gray-500">No countries found</td></tr>
-          ) : (
-            countries.map((c: any) => (
-              <tr key={c.id}>
-                <td className="font-medium">{c.code}</td>
-                <td>{c.name}</td>
-                <td>{c.region || '-'}</td>
-                <td><span className={`badge ${c.isActive ? 'badge-success' : 'badge-gray'}`}>{c.isActive ? 'Active' : 'Inactive'}</span></td>
-                <td>
-                  {onEdit && (
-                    <button onClick={() => onEdit(c)} className="text-navy-600 hover:text-navy-800">
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
+    <MasterTable
+      list={list}
+      placeholder="Search by country name, ISO code or region..."
+      headers={['Code', 'Name', 'Region', 'Status', 'Actions']}
+      emptyLabel="No countries found"
+    >
+      {list.rows.map((c: any) => (
+        <tr key={c.id}>
+          <td className="font-medium font-mono">{c.code}</td>
+          <td>{c.name}</td>
+          <td>{c.region || '-'}</td>
+          <td><StatusBadge active={c.isActive} /></td>
+          <EditCell item={c} onEdit={onEdit} />
+        </tr>
+      ))}
+    </MasterTable>
   );
 }
-
 // Currencies Tab
 function CurrenciesTab({ onEdit }: { onEdit?: (item: any) => void }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['currencies'],
-    queryFn: () => masterApi.getCurrencies(),
-  });
-
-  const currencies = data?.data?.data || [];
+  const list = useMasterList('currencies', masterApi.getCurrencies);
 
   return (
-    <div className="card overflow-x-auto">
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Code</th>
-            <th>Name</th>
-            <th>Symbol</th>
-            <th>Status</th>
-            <th className="w-20">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {isLoading ? (
-            <tr><td colSpan={5} className="text-center py-8">Loading...</td></tr>
-          ) : currencies.length === 0 ? (
-            <tr><td colSpan={5} className="text-center py-8 text-gray-500">No currencies found</td></tr>
-          ) : (
-            currencies.map((c: any) => (
-              <tr key={c.id}>
-                <td className="font-medium">
-                  {c.code}
-                  {c.code === 'INR' && (
-                    <span className="ml-2 text-xs text-gray-500">base</span>
-                  )}
-                </td>
-                <td>{c.name}</td>
-                <td>{c.symbol}</td>
-                <td><span className={`badge ${c.isActive ? 'badge-success' : 'badge-gray'}`}>{c.isActive ? 'Active' : 'Inactive'}</span></td>
-                <td>
-                  {onEdit && (
-                    <button onClick={() => onEdit(c)} className="text-navy-600 hover:text-navy-800">
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
+    <MasterTable
+      list={list}
+      placeholder="Search by currency code or name..."
+      headers={['Code', 'Name', 'Symbol', 'Status', 'Actions']}
+      emptyLabel="No currencies found"
+    >
+      {list.rows.map((c: any) => (
+        <tr key={c.id}>
+          <td className="font-medium font-mono">
+            {c.code}
+            {/* Every stored amount is INR, so the base currency is worth marking. */}
+            {c.code === 'INR' && <span className="ml-2 text-xs text-gray-500">base</span>}
+          </td>
+          <td>{c.name}</td>
+          <td>{c.symbol}</td>
+          <td><StatusBadge active={c.isActive} /></td>
+          <EditCell item={c} onEdit={onEdit} />
+        </tr>
+      ))}
+    </MasterTable>
   );
 }
-
 // Incoterms Tab
 function IncotermsTab({ onEdit }: { onEdit?: (item: any) => void }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['incoterms'],
-    queryFn: () => masterApi.getIncoterms(),
-  });
-
-  const incoterms = data?.data?.data || [];
+  const list = useMasterList('incoterms', masterApi.getIncoterms);
 
   return (
-    <div className="card overflow-x-auto">
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Code</th>
-            <th>Name</th>
-            <th>Description</th>
-            <th>Status</th>
-            <th className="w-20">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {isLoading ? (
-            <tr><td colSpan={5} className="text-center py-8">Loading...</td></tr>
-          ) : incoterms.length === 0 ? (
-            <tr><td colSpan={5} className="text-center py-8 text-gray-500">No incoterms found</td></tr>
-          ) : (
-            incoterms.map((i: any) => (
-              <tr key={i.id}>
-                <td className="font-medium">{i.code}</td>
-                <td>{i.name}</td>
-                <td className="max-w-xs truncate">{i.description || '-'}</td>
-                <td><span className={`badge ${i.isActive ? 'badge-success' : 'badge-gray'}`}>{i.isActive ? 'Active' : 'Inactive'}</span></td>
-                <td>
-                  {onEdit && (
-                    <button onClick={() => onEdit(i)} className="text-navy-600 hover:text-navy-800">
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
+    <MasterTable
+      list={list}
+      placeholder="Search by Incoterm code or name..."
+      headers={['Code', 'Name', 'Description', 'Status', 'Actions']}
+      emptyLabel="No incoterms found"
+    >
+      {list.rows.map((i: any) => (
+        <tr key={i.id}>
+          <td className="font-medium font-mono">{i.code}</td>
+          <td className="whitespace-nowrap">{i.name}</td>
+          <td className="text-sm text-gray-600">{i.description || '-'}</td>
+          <td><StatusBadge active={i.isActive} /></td>
+          <EditCell item={i} onEdit={onEdit} />
+        </tr>
+      ))}
+    </MasterTable>
   );
 }
-
 // Categories Tab
 function CategoriesTab({ onEdit }: { onEdit?: (item: any) => void }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['productCategories'],
-    queryFn: () => masterApi.getProductCategories(),
-  });
-
-  const categories = data?.data?.data || [];
+  const list = useMasterList('productCategories', masterApi.getProductCategories);
 
   return (
-    <div className="card overflow-x-auto">
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Description</th>
-            <th>Status</th>
-            <th className="w-20">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {isLoading ? (
-            <tr><td colSpan={4} className="text-center py-8">Loading...</td></tr>
-          ) : categories.length === 0 ? (
-            <tr><td colSpan={4} className="text-center py-8 text-gray-500">No categories found</td></tr>
-          ) : (
-            categories.map((c: any) => (
-              <tr key={c.id}>
-                <td className="font-medium">{c.name}</td>
-                <td>{c.description || '-'}</td>
-                <td><span className={`badge ${c.isActive ? 'badge-success' : 'badge-gray'}`}>{c.isActive ? 'Active' : 'Inactive'}</span></td>
-                <td>
-                  {onEdit && (
-                    <button onClick={() => onEdit(c)} className="text-navy-600 hover:text-navy-800">
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
+    <MasterTable
+      list={list}
+      placeholder="Search by category name or description..."
+      headers={['Name', 'Description', 'Status', 'Actions']}
+      emptyLabel="No categories found"
+    >
+      {list.rows.map((c: any) => (
+        <tr key={c.id}>
+          <td className="font-medium">{c.name}</td>
+          <td className="text-sm text-gray-600">{c.description || '-'}</td>
+          <td><StatusBadge active={c.isActive} /></td>
+          <EditCell item={c} onEdit={onEdit} />
+        </tr>
+      ))}
+    </MasterTable>
   );
 }
-
 // Ports Tab
 function PortsTab({ onEdit }: { onEdit?: (item: any) => void }) {
-  const { data, isLoading } = useQuery({
-    queryKey: ['ports'],
-    queryFn: () => masterApi.getPorts(),
-  });
-
-  const ports = data?.data?.data || [];
+  const [type, setType] = useState<'' | 'SEA' | 'AIR' | 'LAND'>('');
+  const list = useMasterList('ports', masterApi.getPorts, type ? { type } : {});
 
   return (
-    <div className="card overflow-x-auto">
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Code</th>
-            <th>Name</th>
-            <th>Country</th>
-            <th>Type</th>
-            <th>Status</th>
-            <th className="w-20">Actions</th>
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        {[
+          { value: '', label: 'All' },
+          { value: 'SEA', label: 'Sea' },
+          { value: 'AIR', label: 'Air' },
+          { value: 'LAND', label: 'Land' },
+        ].map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => {
+              setType(opt.value as any);
+              list.setPage(1);
+            }}
+            className={cn(
+              'px-3 py-1.5 rounded-md text-sm font-medium border transition-colors',
+              type === opt.value
+                ? 'bg-navy-900 text-white border-navy-900'
+                : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+            )}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      <MasterTable
+        list={list}
+        placeholder="Search by port name, UN/LOCODE or country..."
+        headers={['Code', 'Name', 'Country', 'Type', 'Status', 'Actions']}
+        emptyLabel="No ports found"
+      >
+        {list.rows.map((p: any) => (
+          <tr key={p.id}>
+            <td className="font-medium font-mono">{p.code}</td>
+            <td>{p.name}</td>
+            <td>{p.country?.name || '-'}</td>
+            <td><span className="badge badge-navy">{p.type}</span></td>
+            <td><StatusBadge active={p.isActive} /></td>
+            <EditCell item={p} onEdit={onEdit} />
           </tr>
-        </thead>
-        <tbody>
-          {isLoading ? (
-            <tr><td colSpan={6} className="text-center py-8">Loading...</td></tr>
-          ) : ports.length === 0 ? (
-            <tr><td colSpan={6} className="text-center py-8 text-gray-500">No ports found</td></tr>
-          ) : (
-            ports.map((p: any) => (
-              <tr key={p.id}>
-                <td className="font-medium">{p.code}</td>
-                <td>{p.name}</td>
-                <td>{p.country?.name || '-'}</td>
-                <td><span className="badge badge-navy">{p.type}</span></td>
-                <td><span className={`badge ${p.isActive ? 'badge-success' : 'badge-gray'}`}>{p.isActive ? 'Active' : 'Inactive'}</span></td>
-                <td>
-                  {onEdit && (
-                    <button onClick={() => onEdit(p)} className="text-navy-600 hover:text-navy-800">
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+        ))}
+      </MasterTable>
     </div>
   );
 }
-
 // Modal for adding/editing master data
 function MasterDataModal({ type, item, onClose }: { type: TabType; item: any; onClose: () => void }) {
   const queryClient = useQueryClient();

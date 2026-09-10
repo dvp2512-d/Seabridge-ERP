@@ -6,7 +6,7 @@ import { chaApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
-import { Plus, Search, Edit2, Star, Eye, Anchor, DollarSign } from 'lucide-react';
+import { Plus, Search, Edit2, Star, Eye, Anchor, IndianRupee } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 
@@ -196,7 +196,7 @@ function CHADetailModal({ chaId, onClose }: { chaId: string; onClose: () => void
 
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold flex items-center gap-2"><DollarSign className="w-4 h-4" />Service Rates</h3>
+              <h3 className="font-semibold flex items-center gap-2"><IndianRupee className="w-4 h-4" />Service Rates</h3>
               <button onClick={() => setShowRateModal(true)} className="btn btn-secondary py-1 text-sm"><Plus className="w-4 h-4 mr-1" />Add Rate</button>
             </div>
             {cha?.chaRates?.length > 0 ? (

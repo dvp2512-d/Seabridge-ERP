@@ -1,4 +1,5 @@
-// Enhanced Inquiries Page with Pipeline Viewimport { useState } from 'react';import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';import { useNavigate } from 'react-router-dom';import toast from 'react-hot-toast';import { inquiriesApi, buyersApi, masterApi, productsApi } from '@/lib/api';import PageHeader from '@/components/ui/PageHeader';import Modal from '@/components/ui/Modal';import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';import { formatCurrency, formatDate, getStatusColor, getPriorityColor, cn } from '@/lib/utils';
+// Enhanced Inquiries Page with Pipeline Viewimport { useState } from 'react';import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';import { useNavigate } from 'react-router-dom';import toast from 'react-hot-toast';import { inquiriesApi, buyersApi, masterApi, productsApi } from '@/lib/api';import PageHeader from '@/components/ui/PageHeader';import Modal from '@/components/ui/Modal';import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';import { formatCurrency, formatDate, getStatusColor, getPriorityColor, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
+import { refreshAggregates } from '@/lib/queryKeys';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';import {
   Plus,
   Search,
@@ -202,6 +203,7 @@ export default function Inquiries() {
           onSuccess={(inquiry) => {
             setShowModal(false);
             queryClient.invalidateQueries({ queryKey: ['inquiries'] });
+      refreshAggregates(queryClient);
             if (inquiry?.id) navigate(`/inquiries/${inquiry.id}`);
           }}
         />
@@ -257,7 +259,7 @@ function InquiryTable({ inquiries, onView }: { inquiries: any[]; onView: (id: st
                 </span>
               </td>
               <td className="font-medium">
-                {inquiry.expectedValue ? formatCurrency(inquiry.expectedValue, inquiry.currency?.code) : '-'}
+                {inquiry.expectedValue ? formatCurrency(inquiry.expectedValue, BASE_CURRENCY_CODE) : '-'}
               </td>
               <td>
                 <div className="flex items-center gap-2">
@@ -334,7 +336,7 @@ function InquiryKanban({ inquiries, onView }: { inquiries: any[]; onView: (id: s
                     </div>
                     {inquiry.expectedValue && (
                       <div className="text-sm text-green-600 font-medium">
-                        {formatCurrency(inquiry.expectedValue, inquiry.currency?.code)}
+                        {formatCurrency(inquiry.expectedValue, BASE_CURRENCY_CODE)}
                       </div>
                     )}
                     <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-100">

@@ -95,7 +95,7 @@ export const masterApi = {
   getDropdowns: () => api.get('/master/dropdowns'),
   
   // Countries
-  getCountries: () => api.get('/master/countries'),
+  getCountries: (params?: any) => api.get('/master/countries', { params }),
   createCountry: (data: any) => api.post('/master/countries', data),
   updateCountry: (id: string, data: any) => api.put(`/master/countries/${id}`, data),
   
@@ -105,17 +105,17 @@ export const masterApi = {
   updatePort: (id: string, data: any) => api.put(`/master/ports/${id}`, data),
   
   // Currencies
-  getCurrencies: () => api.get('/master/currencies'),
+  getCurrencies: (params?: any) => api.get('/master/currencies', { params }),
   createCurrency: (data: any) => api.post('/master/currencies', data),
   updateCurrency: (id: string, data: any) => api.put(`/master/currencies/${id}`, data),
   
   // Incoterms
-  getIncoterms: () => api.get('/master/incoterms'),
+  getIncoterms: (params?: any) => api.get('/master/incoterms', { params }),
   createIncoterm: (data: any) => api.post('/master/incoterms', data),
   updateIncoterm: (id: string, data: any) => api.put(`/master/incoterms/${id}`, data),
   
   // Product Categories
-  getProductCategories: () => api.get('/master/product-categories'),
+  getProductCategories: (params?: any) => api.get('/master/product-categories', { params }),
   createProductCategory: (data: any) => api.post('/master/product-categories', data),
   updateProductCategory: (id: string, data: any) =>
     api.put(`/master/product-categories/${id}`, data),

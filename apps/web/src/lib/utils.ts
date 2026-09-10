@@ -7,6 +7,15 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * The currency every stored amount is denominated in.
+ *
+ * Exported so screens do not scatter the literal 'INR' around, and so the one
+ * place it is defined is obvious if the base currency ever changes. A document's
+ * presentation currency is a separate thing entirely - see Quotation.pdfCurrency.
+ */
+export const BASE_CURRENCY_CODE = 'INR';
+
 // Format currency.
 //
 // Every amount stored in this system is INR, so that is the default: passing no

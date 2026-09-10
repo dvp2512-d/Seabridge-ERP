@@ -1,26 +1,35 @@
 // New Invoice Page - Create invoice from order
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { invoicesApi, ordersApi } from '@/lib/api';
+import { refreshAggregates } from '@/lib/queryKeys';
 import PageHeader from '@/components/ui/PageHeader';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import {
+  INVOICE_TYPE_LABELS,
+  INVOICE_TYPE_OPTIONS,
+  INVOICE_TYPE_SHORT_LABELS,
+  isDocumentOnlyInvoice,
+  type InvoiceType,
+} from '@/lib/invoiceTypes';
+import { formatCurrency, formatDate, BASE_CURRENCY_CODE } from '@/lib/utils';
 import {
   Receipt,
   Package,
   Building2,
-  DollarSign,
+  IndianRupee,
 } from 'lucide-react';
 
 export default function NewInvoice() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const preselectedOrderId = searchParams.get('orderId');
 
   const [orderId, setOrderId] = useState(preselectedOrderId || '');
-  const [type, setType] = useState<'EXPORT' | 'PROFORMA'>('EXPORT');
+  const [type, setType] = useState<InvoiceType>('EXPORT');
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState(() => {
     const date = new Date();
@@ -61,13 +70,15 @@ export default function NewInvoice() {
   const subtotal = order ? parseFloat(order.totalValue || order.grandTotal || 0) : 0;
   const tax = parseFloat(taxAmount) || 0;
   const total = subtotal + tax;
-  const currency = order?.currency?.code || order?.currency || 'USD';
+  // Order amounts are INR; ExportOrder has no currency column any more.
+  const currency = BASE_CURRENCY_CODE;
 
   // Create mutation
   const mutation = useMutation({
     mutationFn: (data: any) => invoicesApi.create(data),
     onSuccess: (response) => {
       toast.success('Invoice created successfully');
+      refreshAggregates(queryClient);
       navigate(`/invoices/${response.data?.data?.id}`);
     },
     onError: (error: any) => {
@@ -136,7 +147,7 @@ export default function NewInvoice() {
                 onChange={(e) => setOrderId(e.target.value)}
                 options={availableOrders.map((o: any) => ({
                   value: o.id,
-                  label: `${o.orderNumber} - ${o.buyer?.companyName} (${formatCurrency(o.totalValue, o.currency)})`,
+                  label: `${o.orderNumber} - ${o.buyer?.companyName} (${formatCurrency(o.totalValue, BASE_CURRENCY_CODE)})`,
                 }))}
                 placeholder="Select an order to invoice"
               />
@@ -215,12 +226,17 @@ export default function NewInvoice() {
                 <SelectField
                   label="Invoice Type"
                   value={type}
-                  onChange={(e) => setType(e.target.value as any)}
-                  options={[
-                    { value: 'EXPORT', label: 'Export Invoice' },
-                    { value: 'PROFORMA', label: 'Proforma Invoice' },
-                  ]}
+                  onChange={(e) => setType(e.target.value as InvoiceType)}
+                  options={INVOICE_TYPE_OPTIONS}
                 />
+                {/* Stated up front, because the choice changes whether this document
+                    can ever be paid - not just how it is titled. */}
+                {isDocumentOnlyInvoice(type) && (
+                  <p className="col-span-2 -mt-2 text-xs text-amber-700">
+                    A {INVOICE_TYPE_LABELS[type].toLowerCase()} is a document only. It will not
+                    appear in receivables and no payment can be recorded against it.
+                  </p>
+                )}
                 <FormField
                   label="Invoice Date"
                   type="date"
@@ -274,7 +290,7 @@ export default function NewInvoice() {
           <div className="card sticky top-6">
             <div className="card-header bg-navy-900 text-white rounded-t-xl">
               <h2 className="font-semibold flex items-center gap-2">
-                <DollarSign className="w-5 h-5" />
+                <IndianRupee className="w-5 h-5" />
                 Invoice Summary
               </h2>
             </div>
@@ -310,7 +326,7 @@ export default function NewInvoice() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Type</span>
-                      <span className="font-medium">{type === 'PROFORMA' ? 'Proforma' : 'Export'}</span>
+                      <span className="font-medium">{INVOICE_TYPE_SHORT_LABELS[type]}</span>
                     </div>
                   </div>
 

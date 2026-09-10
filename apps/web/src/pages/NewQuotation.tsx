@@ -1,4 +1,4 @@
-// New Quotation Page with Automatic Costing Calculatorimport { useState, useEffect, useMemo } from 'react';import { useNavigate, useSearchParams } from 'react-router-dom';import { useQuery, useMutation } from '@tanstack/react-query';import toast from 'react-hot-toast';import {
+// New Quotation Page with Automatic Costing Calculatorimport { useState, useEffect, useMemo } from 'react';import { useNavigate, useSearchParams } from 'react-router-dom';import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';import toast from 'react-hot-toast';import {
   quotationsApi,
   inquiriesApi,
   buyersApi,
@@ -6,14 +6,15 @@
   productsApi,
   chaApi,
   transportersApi,
-} from '@/lib/api';import PageHeader from '@/components/ui/PageHeader';import Modal from '@/components/ui/Modal';import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';import { formatCurrency, cn } from '@/lib/utils';import {
+} from '@/lib/api';import PageHeader from '@/components/ui/PageHeader';import Modal from '@/components/ui/Modal';import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';import { formatCurrency, cn } from '@/lib/utils';
+import { refreshAggregates } from '@/lib/queryKeys';import {
   Plus,
   Trash2,
   Calculator,
   TrendingUp,
   AlertCircle,
   Package,
-  DollarSign,
+  IndianRupee,
   Percent,
   FileText,
 } from 'lucide-react';
@@ -53,6 +54,7 @@ interface AdditionalCost {
 
 export default function NewQuotation() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const inquiryId = searchParams.get('inquiryId');
 
@@ -169,6 +171,7 @@ export default function NewQuotation() {
     mutationFn: (data: any) => quotationsApi.create(data),
     onSuccess: (response) => {
       toast.success('Quotation created successfully');
+      refreshAggregates(queryClient);
       navigate(`/quotations/${response.data?.data?.id}`);
     },
     onError: (error: any) => {
@@ -409,7 +412,7 @@ export default function NewQuotation() {
           <div className="card">
             <div className="card-header flex items-center justify-between">
               <h2 className="font-semibold flex items-center gap-2">
-                <DollarSign className="w-5 h-5" />
+                <IndianRupee className="w-5 h-5" />
                 Additional Costs
               </h2>
               <button onClick={() => setShowCostModal(true)} className="btn btn-secondary py-1 text-sm">

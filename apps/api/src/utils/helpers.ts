@@ -19,9 +19,9 @@ export async function generateCode(entityType: string, prefix: string): Promise<
   return `${sequence.prefix}-${paddedNo}`;
 }
 
-// Format currency
-export function formatCurrency(amount: number, currency: string = 'USD'): string {
-  return new Intl.NumberFormat('en-US', {
+// Format currency. Every stored amount is INR, so that is the default.
+export function formatCurrency(amount: number, currency: string = 'INR'): string {
+  return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency,
   }).format(amount);

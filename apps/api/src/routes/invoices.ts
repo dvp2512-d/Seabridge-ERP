@@ -11,6 +11,13 @@ import {
   resolveDocumentCurrency,
 } from '../services/exchangeRateService';
 import { emitEvent } from '../services/eventService';
+import {
+  COMMERCIAL_TYPE_FILTER,
+  DOCUMENT_ONLY_INVOICE_TYPES,
+  INVOICE_TYPES,
+  INVOICE_TYPE_LABELS,
+  isDocumentOnlyInvoice,
+} from '../utils/invoiceTypes';
 
 const router: Router = Router();
 
@@ -43,10 +50,16 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
         take: Number(limit),
       }),
       prisma.invoice.count({ where }),
-      // Summary figures cover the whole filtered set, not just this page. Every
-      // amount is INR, so this is a plain aggregate.
+      /**
+       * Summary figures cover the whole filtered set, not just this page. Every
+       * amount is INR, so this is a plain aggregate.
+       *
+       * Grouped by type as well so proformas can be left out of the money totals:
+       * a proforma is a document, not a receivable, and counting it would inflate
+       * both what has been invoiced and what is outstanding.
+       */
       prisma.invoice.groupBy({
-        by: ['status'],
+        by: ['status', 'type'],
         where,
         _count: { _all: true },
         _sum: { balanceAmount: true, paidAmount: true, totalAmount: true },
@@ -54,23 +67,53 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
       prisma.invoice.count({
         where: {
           ...where,
+          type: COMMERCIAL_TYPE_FILTER,
           status: { in: ['SENT', 'PARTIALLY_PAID', 'OVERDUE'] },
           dueDate: { lt: new Date() },
         },
       }),
     ]);
 
+    /** Every document, for labelling rows. */
     const countByStatus: Record<string, number> = {};
+    /**
+     * Commercial invoices only, for the payment-oriented cards.
+     *
+     * A proforma or sample marked SENT has been issued, not left awaiting payment -
+     * it will never be paid at all - so counting it as "pending" overstates the work
+     * outstanding. The two maps are kept apart rather than one being derived from
+     * the other, because the list and the cards genuinely measure different things.
+     */
+    const countByStatusCommercial: Record<string, number> = {};
+    /** Per-type tally of the document-only invoices, so the UI can name what it left out. */
+    const countByType: Record<string, number> = {};
     let outstanding = 0;
     let invoiced = 0;
     let collected = 0;
+    let documentOnlyCount = 0;
 
     for (const group of statusGroups) {
-      countByStatus[group.status] = group._count._all;
+      countByStatus[group.status] = (countByStatus[group.status] ?? 0) + group._count._all;
+
+      // Counted in the list, excluded from every money figure.
+      if (isDocumentOnlyInvoice(group.type)) {
+        documentOnlyCount += group._count._all;
+        countByType[group.type] = (countByType[group.type] ?? 0) + group._count._all;
+        continue;
+      }
+
+      countByStatusCommercial[group.status] =
+        (countByStatusCommercial[group.status] ?? 0) + group._count._all;
 
       invoiced += Number(group._sum.totalAmount ?? 0);
       collected += Number(group._sum.paidAmount ?? 0);
-      if (!['PAID', 'CANCELLED'].includes(group.status)) {
+      /**
+       * Outstanding means issued and unpaid, which is the same definition the
+       * dashboard uses. A DRAFT has not been sent, so nothing is owed on it yet -
+       * including drafts here made this card disagree with the dashboard by the
+       * value of every unsent invoice.
+       */
+      if (['SENT', 'PARTIALLY_PAID', 'OVERDUE'].includes(group.status)) {
         outstanding += Number(group._sum.balanceAmount ?? 0);
       }
     }
@@ -84,7 +127,18 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
       summary: {
         baseCurrency: await getBaseCurrency(),
         countByStatus,
+        countByStatusCommercial,
         overdueCount,
+        /**
+         * Money figures cover commercial invoices only. Proformas and sample
+         * invoices are documents and create no receivable, so they are counted here
+         * but excluded from the totals - stated explicitly, and broken down by type,
+         * so the cards and the list cannot appear to disagree.
+         */
+        documentOnlyCount,
+        countByType,
+        documentOnlyTypes: [...DOCUMENT_ONLY_INVOICE_TYPES],
+        moneyExcludesDocumentOnly: true,
         totalInvoiced: round2(invoiced),
         totalCollected: round2(collected),
         totalOutstanding: round2(outstanding),
@@ -124,7 +178,7 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
   try {
     const schema = z.object({
       orderId: z.string().min(1),
-      type: z.enum(['EXPORT', 'PROFORMA']).optional(),
+      type: z.enum(INVOICE_TYPES).optional(),
       invoiceDate: z.string().transform(s => new Date(s)).optional(),
       dueDate: z.string().transform(s => new Date(s)),
       taxAmount: z.number().min(0).optional(),
@@ -245,6 +299,23 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
     });
 
     if (!invoice) throw new NotFoundError('Invoice');
+
+    /**
+     * A proforma invoice is a document, not a demand for payment.
+     *
+     * It is issued so a buyer can open a letter of credit, arrange an advance or
+     * clear customs, and it creates no receivable. Payments belong against the
+     * commercial invoice that follows it, so recording one here would double-count
+     * the sale and leave a balance that can never be reconciled.
+     */
+    if (isDocumentOnlyInvoice(invoice.type)) {
+      const label = (INVOICE_TYPE_LABELS[invoice.type] ?? invoice.type).toLowerCase();
+      throw new AppError(
+        `${invoice.invoiceNumber} is a ${label}, which is issued for documentation only. ` +
+          `Raise the commercial invoice for this order and record the payment against that.`,
+        400
+      );
+    }
 
     if (invoice.status === 'CANCELLED') {
       throw new AppError('Cannot record a payment against a cancelled invoice', 400);
@@ -472,6 +543,8 @@ router.get('/reports/receivables', can('FINANCE_VIEW'), async (req, res, next) =
     const [receivables, base] = await Promise.all([
       prisma.invoice.findMany({
         where: {
+          // A proforma is a document, not a receivable.
+          type: COMMERCIAL_TYPE_FILTER,
           status: { in: ['SENT', 'PARTIALLY_PAID', 'OVERDUE'] },
           balanceAmount: { gt: 0 },
         },

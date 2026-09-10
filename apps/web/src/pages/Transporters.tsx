@@ -6,7 +6,7 @@ import { transportersApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
-import { Plus, Search, Edit2, Star, Eye, Truck, DollarSign } from 'lucide-react';
+import { Plus, Search, Edit2, Star, Eye, Truck, IndianRupee } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 
@@ -211,7 +211,7 @@ function TransporterDetailModal({ transporterId, onClose }: { transporterId: str
 
           <div>
             <div className="flex items-center justify-between mb-3">
-              <h3 className="font-semibold flex items-center gap-2"><DollarSign className="w-4 h-4" />Transport Rates</h3>
+              <h3 className="font-semibold flex items-center gap-2"><IndianRupee className="w-4 h-4" />Transport Rates</h3>
               <button onClick={() => setShowRateModal(true)} className="btn btn-secondary py-1 text-sm"><Plus className="w-4 h-4 mr-1" />Add Rate</button>
             </div>
             {transporter?.transportRates?.length > 0 ? (

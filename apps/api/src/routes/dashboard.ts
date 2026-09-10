@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { prisma } from '@seabridge/database';
+import { prisma, Prisma } from '@seabridge/database';
+import { COMMERCIAL_TYPE_FILTER, DOCUMENT_ONLY_TYPE_LIST } from '../utils/invoiceTypes';
 import { authenticate, can } from '../middleware/auth';
 import {
   startOfFinancialYear,
@@ -167,7 +168,12 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
         _sum: { amount: true },
       }),
       prisma.invoice.aggregate({
-        where: { status: { in: ['SENT', 'PARTIALLY_PAID', 'OVERDUE'] } },
+        // Proformas and samples are documents, not receivables, so they are excluded from
+        // every money figure here.
+        where: {
+          type: COMMERCIAL_TYPE_FILTER,
+          status: { in: ['SENT', 'PARTIALLY_PAID', 'OVERDUE'] },
+        },
         _sum: { balanceAmount: true },
       }),
       prisma.invoice.aggregate({
@@ -176,6 +182,7 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
         // filtering on it reported zero while the alert banner and the aging
         // chart - which both use the due date - correctly showed arrears.
         where: {
+          type: COMMERCIAL_TYPE_FILTER,
           status: { in: ['SENT', 'PARTIALLY_PAID', 'OVERDUE'] },
           balanceAmount: { gt: 0 },
           dueDate: { lt: new Date() },
@@ -514,7 +521,11 @@ router.get('/finance', can('DASHBOARD_FINANCE'), async (req, res, next) => {
           -- as soon as a single invoice is outstanding).
           COUNT(*)::int as count
         FROM invoices
+        -- Proformas and samples are documents and carry no receivable, so they are
+        -- excluded. Prisma.join binds one parameter per type; a comma-joined string
+        -- would be bound as a single value and would quietly match nothing.
         WHERE status IN ('SENT', 'PARTIALLY_PAID', 'OVERDUE')
+        AND type NOT IN (${Prisma.join(DOCUMENT_ONLY_TYPE_LIST)})
         GROUP BY aging
       `,
       
@@ -535,6 +546,7 @@ router.get('/finance', can('DASHBOARD_FINANCE'), async (req, res, next) => {
       // Overdue invoices
       prisma.invoice.findMany({
         where: { 
+          type: COMMERCIAL_TYPE_FILTER,
           status: { in: ['SENT', 'PARTIALLY_PAID'] },
           dueDate: { lt: new Date() },
         },
@@ -607,6 +619,7 @@ async function getAlerts() {
   // Overdue invoices
   const overdueInvoices = await prisma.invoice.count({
     where: { 
+      type: COMMERCIAL_TYPE_FILTER,
       dueDate: { lt: today },
       status: { in: ['SENT', 'PARTIALLY_PAID'] },
     },

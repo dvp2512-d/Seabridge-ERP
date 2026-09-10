@@ -4,12 +4,12 @@ import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { buyersApi, masterApi } from '@/lib/api';
-import { formatCurrency, formatDate, formatDateTime, getStatusColor, cn } from '@/lib/utils';
+import { formatCurrency, formatDate, formatDateTime, getStatusColor, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import {
   ArrowLeft, Mail, Phone, Globe, Building2, Edit2, Plus,
-  User, MessageSquare, FileText, ShoppingCart, DollarSign,
+  User, MessageSquare, FileText, ShoppingCart, IndianRupee,
   Calendar, MapPin, CreditCard, TrendingUp
 } from 'lucide-react';
 
@@ -39,7 +39,6 @@ export default function BuyerDetail() {
   // totalRevenue is accumulated in the base currency; the buyer's own currency
   // applies to their credit limit and to each order/invoice row.
   const baseCode = data?.data?.summary?.baseCurrency?.code;
-  const buyerCode = buyer?.currency?.code;
 
   if (isLoading) {
     return (
@@ -66,7 +65,7 @@ export default function BuyerDetail() {
     { id: 'communications', label: 'Communications', icon: MessageSquare, count: buyer.communications?.length },
     { id: 'inquiries', label: 'Inquiries', icon: FileText, count: buyer.inquiries?.length },
     { id: 'orders', label: 'Orders', icon: ShoppingCart, count: buyer.orders?.length },
-    { id: 'invoices', label: 'Invoices', icon: DollarSign, count: buyer.invoices?.length },
+    { id: 'invoices', label: 'Invoices', icon: IndianRupee, count: buyer.invoices?.length },
   ];
 
   return (
@@ -125,7 +124,7 @@ export default function BuyerDetail() {
         <StatCard
           icon={CreditCard}
           label="Credit Limit"
-          value={buyer.creditLimit ? formatCurrency(buyer.creditLimit, buyerCode) : 'Not set'}
+          value={buyer.creditLimit ? formatCurrency(buyer.creditLimit, BASE_CURRENCY_CODE) : 'Not set'}
           color="text-orange-600"
         />
       </div>
@@ -284,7 +283,7 @@ function OverviewTab({ buyer }: { buyer: any }) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <div className="text-sm text-gray-500">Currency</div>
-              <div>{buyer.currency?.code || 'USD'}</div>
+              <div>{buyer.currency?.code || BASE_CURRENCY_CODE}</div>
             </div>
             <div>
               <div className="text-sm text-gray-500">Payment Terms</div>
@@ -292,7 +291,7 @@ function OverviewTab({ buyer }: { buyer: any }) {
             </div>
             <div>
               <div className="text-sm text-gray-500">Credit Limit</div>
-              <div>{buyer.creditLimit ? formatCurrency(buyer.creditLimit, buyer.currency?.code) : '-'}</div>
+              <div>{buyer.creditLimit ? formatCurrency(buyer.creditLimit, BASE_CURRENCY_CODE) : '-'}</div>
             </div>
             <div>
               <div className="text-sm text-gray-500">Credit Days</div>
@@ -527,7 +526,7 @@ function InquiriesTab({ inquiries }: { inquiries: any[] }) {
                   {inquiry.stage?.replace(/_/g, ' ')}
                 </span>
               </td>
-              <td>{inquiry.expectedValue ? formatCurrency(inquiry.expectedValue, inquiry.currency?.code) : '-'}</td>
+              <td>{inquiry.expectedValue ? formatCurrency(inquiry.expectedValue, BASE_CURRENCY_CODE) : '-'}</td>
               <td>{formatDate(inquiry.createdAt)}</td>
             </tr>
           ))}
@@ -568,7 +567,7 @@ function OrdersTab({ orders }: { orders: any[] }) {
                   {order.status?.replace(/_/g, ' ')}
                 </span>
               </td>
-              <td>{formatCurrency(order.totalValue || 0, order.currency)}</td>
+              <td>{formatCurrency(order.totalValue || 0, BASE_CURRENCY_CODE)}</td>
               <td>{formatDate(order.createdAt)}</td>
             </tr>
           ))}
@@ -610,9 +609,9 @@ function InvoicesTab({ invoices }: { invoices: any[] }) {
                   {invoice.status?.replace(/_/g, ' ')}
                 </span>
               </td>
-              <td>{formatCurrency(invoice.totalAmount || 0, invoice.currency?.code)}</td>
+              <td>{formatCurrency(invoice.totalAmount || 0, BASE_CURRENCY_CODE)}</td>
               <td className={Number(invoice.balanceAmount) > 0 ? 'text-red-600 font-medium' : ''}>
-                {formatCurrency(invoice.balanceAmount || 0, invoice.currency?.code)}
+                {formatCurrency(invoice.balanceAmount || 0, BASE_CURRENCY_CODE)}
               </td>
               <td>{formatDate(invoice.dueDate)}</td>
             </tr>

@@ -5,7 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { quotationsApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
-import { formatCurrency, formatDate, getStatusColor, downloadFile, isPastDue, cn } from '@/lib/utils';
+import { formatCurrency, formatDate, getStatusColor, downloadFile, isPastDue, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { Plus, Search, Eye, Download, FileText, Clock, CheckCircle } from 'lucide-react';
 
@@ -173,7 +173,7 @@ export default function Quotations() {
                     <span className={`badge ${getStatusColor(q.status)}`}>{q.status}</span>
                   </td>
                   <td>{q._count?.items || 0}</td>
-                  <td className="font-medium">{formatCurrency(q.grandTotal, q.currency?.code)}</td>
+                  <td className="font-medium">{formatCurrency(q.grandTotal, BASE_CURRENCY_CODE)}</td>
                   <td className={cn(
                     'font-medium',
                     parseFloat(q.marginPercent) >= 15 ? 'text-green-600' :

@@ -8,7 +8,15 @@ import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import DeleteRecordButton from '@/components/DeleteRecordButton';
 import GenerateDocumentDialog from '@/components/modals/GenerateDocumentDialog';
+import {
+  INVOICE_TYPE_BADGE_CLASS,
+  INVOICE_TYPE_EXPLANATIONS,
+  INVOICE_TYPE_LABELS,
+  INVOICE_TYPE_SHORT_LABELS,
+  isDocumentOnlyInvoice,
+} from '@/lib/invoiceTypes';
 import { formatCurrency, formatDate, downloadFile, isPastDue, cn } from '@/lib/utils';
+import { refreshAggregates } from '@/lib/queryKeys';
 import {
   ArrowLeft,
   Receipt,
@@ -22,7 +30,7 @@ import {
   Phone,
   Mail,
   Calendar,
-  DollarSign,
+  IndianRupee,
   CreditCard,
   Plus,
   Package,
@@ -118,6 +126,7 @@ export default function InvoiceDetail() {
     onSuccess: () => {
       toast.success('Exchange gain recorded under Other Income');
       queryClient.invalidateQueries({ queryKey: ['invoice', id] });
+      refreshAggregates(queryClient);
       queryClient.invalidateQueries({ queryKey: ['income'] });
     },
     onError: (err: any) => toast.error(getApiErrorMessage(err, 'Could not record the gain')),
@@ -128,6 +137,7 @@ export default function InvoiceDetail() {
     mutationFn: (data: any) => invoicesApi.update(id!, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invoice', id] });
+      refreshAggregates(queryClient);
       queryClient.invalidateQueries({ queryKey: ['invoices'] });
       toast.success('Invoice updated');
     },
@@ -147,6 +157,7 @@ export default function InvoiceDetail() {
       toast.success(`PDF generated in ${pdfCurrency}`);
       setShowPdfDialog(false);
       queryClient.invalidateQueries({ queryKey: ['invoice', id] });
+      refreshAggregates(queryClient);
     } catch (error: any) {
       let message = 'Failed to generate PDF';
       const data = error?.response?.data;
@@ -193,6 +204,16 @@ export default function InvoiceDetail() {
   const paidAmount = parseFloat(invoice.paidAmount || 0);
   const balanceAmount = parseFloat(invoice.balanceAmount || 0);
   const paidPercent = totalAmount > 0 ? (paidAmount / totalAmount) * 100 : 0;
+  /**
+   * Proforma and sample invoices are issued for documentation - opening an LC,
+   * arranging an advance, clearing a sample shipment through customs - and carry no
+   * receivable, so no payment can be recorded against them. The commercial invoice
+   * that follows takes the money.
+   */
+  const isDocumentOnly = isDocumentOnlyInvoice(invoice.type);
+  const typeLabel = INVOICE_TYPE_LABELS[invoice.type] ?? invoice.type;
+  const acceptsPayment =
+    !isDocumentOnly && ['SENT', 'PARTIALLY_PAID', 'OVERDUE'].includes(invoice.status);
   // Realised exchange gain across all payments on this invoice.
   const totalExchangeGain = Math.round(
     ((invoice.payments ?? []).reduce((sum: number, p: any) => sum + paymentSurplus(p), 0) +
@@ -217,8 +238,10 @@ export default function InvoiceDetail() {
                 <StatusIcon className="w-4 h-4" />
                 {displayStatus.replace(/_/g, ' ')}
               </span>
-              {invoice.type === 'PROFORMA' && (
-                <span className="badge badge-info">Proforma</span>
+              {isDocumentOnly && (
+                <span className={`badge ${INVOICE_TYPE_BADGE_CLASS[invoice.type] ?? 'badge-info'}`}>
+                  {INVOICE_TYPE_SHORT_LABELS[invoice.type] ?? invoice.type}
+                </span>
               )}
             </div>
             <p className="text-gray-500 mt-1">
@@ -246,7 +269,7 @@ export default function InvoiceDetail() {
               Mark as Sent
             </button>
           )}
-          {['SENT', 'PARTIALLY_PAID', 'OVERDUE'].includes(invoice.status) && (
+          {acceptsPayment && (
             <button onClick={() => setShowPaymentModal(true)} className="btn btn-gold">
               <CreditCard className="w-4 h-4 mr-2" />
               Record Payment
@@ -392,7 +415,7 @@ export default function InvoiceDetail() {
                   <div className="text-sm text-gray-500">
                     {invoice.payments?.length || 0} payment(s) recorded
                   </div>
-                  {['SENT', 'PARTIALLY_PAID', 'OVERDUE'].includes(invoice.status) && (
+                  {acceptsPayment && (
                     <button onClick={() => setShowPaymentModal(true)} className="btn btn-secondary py-1 text-sm">
                       <Plus className="w-4 h-4 mr-1" /> Record Payment
                     </button>
@@ -475,11 +498,22 @@ export default function InvoiceDetail() {
                 ) : (
                   <div className="p-8 text-center text-gray-500">
                     <Banknote className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                    <p>No payments recorded yet</p>
-                    {['SENT', 'PARTIALLY_PAID', 'OVERDUE'].includes(invoice.status) && (
-                      <button onClick={() => setShowPaymentModal(true)} className="btn btn-primary mt-3">
-                        <Plus className="w-4 h-4 mr-1" /> Record First Payment
-                      </button>
+                    {isDocumentOnly ? (
+                      <>
+                        <p>{typeLabel}s are not paid</p>
+                        <p className="text-sm mt-1 max-w-md mx-auto">
+                          {INVOICE_TYPE_EXPLANATIONS[invoice.type]}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p>No payments recorded yet</p>
+                        {acceptsPayment && (
+                          <button onClick={() => setShowPaymentModal(true)} className="btn btn-primary mt-3">
+                            <Plus className="w-4 h-4 mr-1" /> Record First Payment
+                          </button>
+                        )}
+                      </>
                     )}
                   </div>
                 )}
@@ -517,15 +551,26 @@ export default function InvoiceDetail() {
           <div className="card">
             <div className="card-header bg-navy-900 text-white rounded-t-xl">
               <h2 className="font-semibold flex items-center gap-2">
-                <DollarSign className="w-5 h-5" />
-                Payment Summary
+                <IndianRupee className="w-5 h-5" />
+                {isDocumentOnly ? 'Document Summary' : 'Payment Summary'}
               </h2>
             </div>
             <div className="card-body space-y-4">
               <div className="flex justify-between">
-                <span className="text-gray-500">Invoice Total</span>
+                <span className="text-gray-500">{isDocumentOnly ? 'Document Value' : 'Invoice Total'}</span>
                 <span className="font-bold text-lg">{formatCurrency(totalAmount)}</span>
               </div>
+
+              {/* A document-only invoice carries no receivable, so Amount Paid,
+                  Balance Due and a progress bar would all be meaningless here. */}
+              {isDocumentOnly && (
+                <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm text-blue-900">
+                  Issued for documentation only. It creates no receivable and is left
+                  out of outstanding totals and the dashboard.
+                </div>
+              )}
+              {!isDocumentOnly && (
+                <>
               <div className="flex justify-between text-green-600">
                 <span>Amount Paid</span>
                 <span className="font-semibold">{formatCurrency(paidAmount)}</span>
@@ -566,9 +611,11 @@ export default function InvoiceDetail() {
                   />
                 </div>
               </div>
+                </>
+              )}
 
               {/* Record Payment Button */}
-              {balanceAmount > 0 && ['SENT', 'PARTIALLY_PAID', 'OVERDUE'].includes(invoice.status) && (
+              {balanceAmount > 0 && acceptsPayment && (
                 <button 
                   onClick={() => setShowPaymentModal(true)}
                   className="btn btn-gold w-full mt-4"
@@ -650,6 +697,7 @@ export default function InvoiceDetail() {
           onClose={() => setShowPaymentModal(false)}
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['invoice', id] });
+      refreshAggregates(queryClient);
             setShowPaymentModal(false);
           }}
         />

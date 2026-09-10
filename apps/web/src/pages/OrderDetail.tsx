@@ -7,7 +7,8 @@ import { ordersApi, chaApi, transportersApi, suppliersApi, masterApi } from '@/l
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import DeleteRecordButton from '@/components/DeleteRecordButton';
-import { formatCurrency, formatDate, getStatusColor, isPastDue, cn } from '@/lib/utils';
+import { formatCurrency, formatDate, getStatusColor, isPastDue, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
+import { refreshAggregates } from '@/lib/queryKeys';
 import {
   ArrowLeft,
   Package,
@@ -21,7 +22,7 @@ import {
   Phone,
   Mail,
   Calendar,
-  DollarSign,
+  IndianRupee,
   Truck,
   Anchor,
   Plus,
@@ -73,6 +74,7 @@ export default function OrderDetail() {
     mutationFn: (data: any) => ordersApi.update(id!, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['order', id] });
+      refreshAggregates(queryClient);
       toast.success('Order status updated');
       setShowStatusModal(false);
     },
@@ -99,7 +101,9 @@ export default function OrderDetail() {
   }
 
   const currentStageIndex = ORDER_STAGES.indexOf(order.status);
-  const currency = order.currency?.code || order.currency || 'USD';
+  // Order amounts are INR. ExportOrder no longer carries a currency column, so the
+  // old `order.currency || 'USD'` fallback always won and showed dollars.
+  const currency = BASE_CURRENCY_CODE;
   const isOverdue =
     !['DELIVERED', 'CANCELLED'].includes(order.status) && isPastDue(order.expectedDate);
 
@@ -311,7 +315,7 @@ export default function OrderDetail() {
           <div className="card">
             <div className="card-header bg-navy-900 text-white rounded-t-xl">
               <h2 className="font-semibold flex items-center gap-2">
-                <DollarSign className="w-5 h-5" />
+                <IndianRupee className="w-5 h-5" />
                 Order Summary
               </h2>
             </div>
@@ -489,6 +493,7 @@ export default function OrderDetail() {
           onClose={() => setShowProcurementModal(false)}
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['order', id] });
+      refreshAggregates(queryClient);
             setShowProcurementModal(false);
           }}
         />
@@ -500,6 +505,7 @@ export default function OrderDetail() {
           onClose={() => setShowShipmentModal(false)}
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['order', id] });
+      refreshAggregates(queryClient);
             setShowShipmentModal(false);
           }}
         />
@@ -512,6 +518,7 @@ export default function OrderDetail() {
           onClose={() => { setShowDocumentModal(false); setSelectedDocument(null); }}
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['order', id] });
+      refreshAggregates(queryClient);
             setShowDocumentModal(false);
             setSelectedDocument(null);
           }}

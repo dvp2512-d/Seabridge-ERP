@@ -8,6 +8,7 @@ import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import DeleteRecordButton from '@/components/DeleteRecordButton';
 import { formatCurrency, formatDate, getStatusColor, getPriorityColor, cn } from '@/lib/utils';
+import { refreshAggregates } from '@/lib/queryKeys';
 import {
   ArrowLeft,
   Edit2,
@@ -451,6 +452,7 @@ export default function InquiryDetail() {
           onSuccess={() => {
             setShowStageModal(false);
             queryClient.invalidateQueries({ queryKey: ['inquiry', id] });
+      refreshAggregates(queryClient);
           }}
         />
       )}
@@ -462,6 +464,7 @@ export default function InquiryDetail() {
           onSuccess={() => {
             setShowFollowUpModal(false);
             queryClient.invalidateQueries({ queryKey: ['inquiry', id] });
+      refreshAggregates(queryClient);
           }}
         />
       )}
@@ -473,6 +476,7 @@ export default function InquiryDetail() {
           onSuccess={() => {
             setShowItemModal(false);
             queryClient.invalidateQueries({ queryKey: ['inquiry', id] });
+      refreshAggregates(queryClient);
           }}
         />
       )}
@@ -484,6 +488,7 @@ export default function InquiryDetail() {
           onSuccess={() => {
             setShowEditModal(false);
             queryClient.invalidateQueries({ queryKey: ['inquiry', id] });
+      refreshAggregates(queryClient);
           }}
         />
       )}

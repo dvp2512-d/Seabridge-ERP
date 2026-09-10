@@ -5,10 +5,11 @@
  * Shows a confirmation dialog with cascade preview before deletion.
  */
 import { useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { recordsApi } from '@/lib/api';
+import { refreshAggregates } from '@/lib/queryKeys';
 import { useAuthStore } from '@/store/authStore';
 import Modal from '@/components/ui/Modal';
 import { Trash2, AlertTriangle, Loader2 } from 'lucide-react';
@@ -35,6 +36,7 @@ export default function DeleteRecordButton({
 }: DeleteRecordButtonProps) {
   const { user } = useAuthStore();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [showConfirm, setShowConfirm] = useState(false);
   const [confirmText, setConfirmText] = useState('');
 
@@ -56,6 +58,9 @@ export default function DeleteRecordButton({
     onSuccess: () => {
       toast.success(`${recordName} permanently deleted`);
       setShowConfirm(false);
+      // Deleting a record changes every aggregate, so the dashboard has to be
+      // refetched rather than left showing totals that include the deleted row.
+      refreshAggregates(queryClient);
       navigate(redirectTo);
     },
     onError: (error: any) => {

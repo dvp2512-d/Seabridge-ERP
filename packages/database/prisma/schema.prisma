@@ -777,7 +777,7 @@ model Invoice {
   invoiceNumber  String        @unique @map("invoice_number")
   orderId        String        @map("order_id")
   buyerId        String        @map("buyer_id")
-  type           String        @default("EXPORT") // EXPORT, PROFORMA
+  type           String        @default("EXPORT") // EXPORT, PROFORMA, SAMPLE - see apps/api/src/utils/invoiceTypes.ts
   status         InvoiceStatus @default(DRAFT)
   invoiceDate    DateTime      @map("invoice_date")
   dueDate        DateTime      @map("due_date")

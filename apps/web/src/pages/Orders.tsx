@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { ordersApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
-import { formatCurrency, formatDate, getStatusColor, isPastDue, cn } from '@/lib/utils';
+import { formatCurrency, formatDate, getStatusColor, isPastDue, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import {
   Search,
@@ -210,7 +210,7 @@ export default function Orders() {
                     </td>
                     <td>{order._count?.items || order.items?.length || 0}</td>
                     <td className="font-medium">
-                      {formatCurrency(order.totalValue || order.grandTotal, order.currency?.code || order.currency)}
+                      {formatCurrency(order.totalValue || order.grandTotal, BASE_CURRENCY_CODE)}
                     </td>
                     <td className="text-gray-600">{formatDate(order.orderDate)}</td>
                     <td className={cn(isOverdue ? 'text-red-600 font-medium' : 'text-gray-600')}>

@@ -1,3 +1,8 @@
+import {
+  INVOICE_TYPE_DECLARATIONS,
+  INVOICE_TYPE_DOCUMENT_TITLES,
+  isDocumentOnlyInvoice,
+} from '../utils/invoiceTypes';
 import PDFDocument from 'pdfkit';
 import { calculateInclusiveUnitPrices } from './inclusivePricing';
 
@@ -92,9 +97,28 @@ function ensureSpace(doc: Doc, yPos: number, needed = 20): number {
  * decimals. Printing such a price rounded to two would make the row fail the
  * buyer's own multiplication, so it is shown at the precision it was computed at.
  */
-function money(value: unknown, symbol: string, decimals = 2): string {
+/**
+ * Money for a printed document, prefixed with the ISO currency code.
+ *
+ * The code is used rather than the symbol because PDFKit's built-in Helvetica has
+ * no glyph for the rupee sign - it rendered as a stray superscript, so an INR
+ * document read "¹1050.00". Embedding a font to fix one character is not worth a
+ * binary asset, and on an export document naming the currency outright ("INR
+ * 1,050.00", "USD 10.98") is standard practice and unambiguous for the buyer.
+ *
+ * `decimals` exists because an inclusive unit price may carry more than two
+ * decimals. Printing such a price rounded to two would make the row fail the
+ * buyer's own multiplication, so it is shown at the precision it was computed at.
+ */
+function money(value: unknown, code: string, decimals = 2): string {
   const n = Number(value ?? 0);
-  return `${symbol}${(Number.isFinite(n) ? n : 0).toFixed(decimals)}`;
+  const safe = Number.isFinite(n) ? n : 0;
+  // Grouped thousands: an unseparated 3515137.25 is hard to check by eye.
+  const formatted = safe.toLocaleString('en-IN', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+  return `${code} ${formatted}`;
 }
 
 function drawItemsHeader(doc: Doc, yPos: number, columns: [string, number][]): number {
@@ -194,7 +218,7 @@ export async function generateQuotationPDF(
   options: DocumentRenderOptions = DEFAULT_RENDER
 ): Promise<Buffer> {
   const { doc, done } = createDocument();
-  const { currencyCode, currencySymbol: symbol, rate, companyProfile } = options;
+  const { currencyCode, rate, companyProfile } = options;
   const isBase = rate === 1;
 
   // Additional costs are billed to the buyer but belong to the quotation as a
@@ -308,8 +332,8 @@ export async function generateQuotationPDF(
         .text(item.product?.name || '', 55, yPos, { width: 190 })
         .text(String(item.quantity ?? ''), 250, yPos)
         .text(item.unit || 'KG', 300, yPos)
-        .text(money(item.printUnitPrice, symbol, item.printDecimals), 350, yPos)
-        .text(money(item.printAmount, symbol), 450, yPos, {
+        .text(money(item.printUnitPrice, currencyCode, item.printDecimals), 350, yPos)
+        .text(money(item.printAmount, currencyCode), 450, yPos, {
           align: 'right',
           width: 100,
         });
@@ -335,21 +359,21 @@ export async function generateQuotationPDF(
     doc.fillColor(COLORS.gray).fontSize(10).text('Subtotal:', 350, yPos);
     doc
       .fillColor('#000')
-      .text(money(goodsSubtotal, symbol), 450, yPos, { align: 'right', width: 100 });
+      .text(money(goodsSubtotal, currencyCode), 450, yPos, { align: 'right', width: 100 });
 
     if (additionalCostsTotal > 0) {
       yPos += 18;
       doc.fillColor(COLORS.gray).fontSize(10).text('Additional Charges:', 350, yPos);
       doc
         .fillColor('#000')
-        .text(money(additionalCostsTotal, symbol), 450, yPos, { align: 'right', width: 100 });
+        .text(money(additionalCostsTotal, currencyCode), 450, yPos, { align: 'right', width: 100 });
     }
 
     yPos += 20;
     doc.fillColor(COLORS.navy).fontSize(11).text('Grand Total:', 350, yPos);
     doc
       .fillColor(COLORS.navy)
-      .text(money(pricing.total, symbol), 450, yPos, { align: 'right', width: 100 });
+      .text(money(pricing.total, currencyCode), 450, yPos, { align: 'right', width: 100 });
 
     // Terms
     yPos = ensureSpace(doc, yPos + 40, 60);
@@ -399,7 +423,7 @@ export async function generateInvoicePDF(
   options: DocumentRenderOptions = DEFAULT_RENDER
 ): Promise<Buffer> {
   const { doc, done } = createDocument();
-  const { currencyCode, currencySymbol: symbol, rate, companyProfile } = options;
+  const { currencyCode, rate, companyProfile } = options;
 
   try {
     // Header
@@ -408,10 +432,12 @@ export async function generateInvoicePDF(
     doc
       .fillColor(COLORS.navy)
       .fontSize(16)
-      .text(invoice.type === 'PROFORMA' ? 'PROFORMA INVOICE' : 'INVOICE', 380, 50, {
-        align: 'right',
-        width: 182,
-      })
+      .text(
+        INVOICE_TYPE_DOCUMENT_TITLES[invoice.type] ?? INVOICE_TYPE_DOCUMENT_TITLES.EXPORT,
+        380,
+        50,
+        { align: 'right', width: 182 }
+      )
       .fontSize(11)
       .text(invoice.invoiceNumber, 400, 70, { align: 'right' });
 
@@ -480,8 +506,8 @@ export async function generateInvoicePDF(
         .text(item.product?.name || '', 55, yPos, { width: 190 })
         .text(String(item.quantity ?? ''), 250, yPos)
         .text(item.unit || 'KG', 300, yPos)
-        .text(money(fromINR(item.unitPrice, rate), symbol), 350, yPos)
-        .text(money(fromINR(item.totalPrice, rate), symbol), 450, yPos, { align: 'right', width: 100 });
+        .text(money(fromINR(item.unitPrice, rate), currencyCode), 350, yPos)
+        .text(money(fromINR(item.totalPrice, rate), currencyCode), 450, yPos, { align: 'right', width: 100 });
 
       yPos += 20;
     });
@@ -507,33 +533,53 @@ export async function generateInvoicePDF(
     doc.fillColor(COLORS.gray).fontSize(10).text('Subtotal:', 350, yPos);
     doc
       .fillColor('#000')
-      .text(money(fromINR(invoice.subtotal, rate), symbol), 450, yPos, { align: 'right', width: 100 });
+      .text(money(fromINR(invoice.subtotal, rate), currencyCode), 450, yPos, { align: 'right', width: 100 });
 
     if (Number(invoice.taxAmount ?? 0) > 0) {
       yPos += 18;
       doc.fillColor(COLORS.gray).fontSize(10).text('Tax:', 350, yPos);
       doc
         .fillColor('#000')
-        .text(money(fromINR(invoice.taxAmount, rate), symbol), 450, yPos, { align: 'right', width: 100 });
+        .text(money(fromINR(invoice.taxAmount, rate), currencyCode), 450, yPos, { align: 'right', width: 100 });
     }
 
     yPos += 22;
     doc.fillColor(COLORS.navy).fontSize(11).text('Total Amount:', 350, yPos);
     doc
       .fillColor(COLORS.navy)
-      .text(money(fromINR(invoice.totalAmount, rate), symbol), 450, yPos, { align: 'right', width: 100 });
+      .text(money(fromINR(invoice.totalAmount, rate), currencyCode), 450, yPos, { align: 'right', width: 100 });
 
-    yPos += 20;
-    doc.fillColor(COLORS.gray).fontSize(10).text('Paid:', 350, yPos);
-    doc
-      .fillColor('#000')
-      .text(money(fromINR(invoice.paidAmount, rate), symbol), 450, yPos, { align: 'right', width: 100 });
+    /**
+     * Paid and Balance Due are suppressed on document-only invoices.
+     *
+     * Nothing can be paid against a proforma or a sample, so those lines would read
+     * "Paid: 0.00 / Balance Due: <full value>" - which invites a buyer, or a customs
+     * officer assessing a free sample, to read the declared value as a debt. A plain
+     * statement of what the document is replaces them.
+     */
+    if (isDocumentOnlyInvoice(invoice.type)) {
+      const declaration = INVOICE_TYPE_DECLARATIONS[invoice.type];
+      if (declaration) {
+        yPos = ensureSpace(doc, yPos + 26, 40);
+        doc
+          .fillColor(COLORS.gray)
+          .fontSize(9)
+          .text(declaration, PAGE.left, yPos, { width: 500 });
+        yPos = doc.y + 6;
+      }
+    } else {
+      yPos += 20;
+      doc.fillColor(COLORS.gray).fontSize(10).text('Paid:', 350, yPos);
+      doc
+        .fillColor('#000')
+        .text(money(fromINR(invoice.paidAmount, rate), currencyCode), 450, yPos, { align: 'right', width: 100 });
 
-    yPos += 18;
-    doc.fillColor(COLORS.navy).fontSize(11).text('Balance Due:', 350, yPos);
-    doc
-      .fillColor(COLORS.navy)
-      .text(money(fromINR(invoice.balanceAmount, rate), symbol), 450, yPos, { align: 'right', width: 100 });
+      yPos += 18;
+      doc.fillColor(COLORS.navy).fontSize(11).text('Balance Due:', 350, yPos);
+      doc
+        .fillColor(COLORS.navy)
+        .text(money(fromINR(invoice.balanceAmount, rate), currencyCode), 450, yPos, { align: 'right', width: 100 });
+    }
 
     if (invoice.termsConditions) {
       yPos = ensureSpace(doc, yPos + 30, 60);

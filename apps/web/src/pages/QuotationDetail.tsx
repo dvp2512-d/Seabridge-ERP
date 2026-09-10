@@ -8,7 +8,8 @@ import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import DeleteRecordButton from '@/components/DeleteRecordButton';
 import GenerateDocumentDialog from '@/components/modals/GenerateDocumentDialog';
-import { formatCurrency, formatDate, cn } from '@/lib/utils';
+import { formatCurrency, formatDate, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
+import { refreshAggregates } from '@/lib/queryKeys';
 import {
   ArrowLeft,
   FileText,
@@ -19,7 +20,7 @@ import {
   Clock,
   Building2,
   Package,
-  DollarSign,
+  IndianRupee,
   TrendingUp,
   Edit,
   ShoppingCart,
@@ -64,6 +65,7 @@ export default function QuotationDetail() {
       quotationsApi.updateStatus(id!, status, notes),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['quotation', id] });
+      refreshAggregates(queryClient);
       toast.success('Status updated successfully');
       setShowStatusModal(false);
     },
@@ -90,6 +92,7 @@ export default function QuotationDetail() {
       setShowPdfDialog(false);
       // The chosen currency and rate are recorded on the quotation.
       queryClient.invalidateQueries({ queryKey: ['quotation', id] });
+      refreshAggregates(queryClient);
     } catch (error: any) {
       // The server refuses a currency change on an issued quotation, and that
       // message is the useful one.
@@ -131,7 +134,15 @@ export default function QuotationDetail() {
 
   const statusConfig = STATUS_CONFIG[quotation.status] || STATUS_CONFIG.DRAFT;
   const StatusIcon = statusConfig.icon;
-  const currency = quotation.currency?.code || 'USD';
+  /**
+   * Amounts on a quotation are INR.
+   *
+   * This previously read `quotation.currency?.code || 'USD'`, but Quotation no
+   * longer has a currency relation - the presentation currency lives on
+   * pdfCurrency and applies to the printed document only. So the fallback always
+   * won and every figure on this page rendered with a dollar sign.
+   */
+  const currency = BASE_CURRENCY_CODE;
 
   // A quotation can only ever be converted into one order; the API returns the
   // relation as an array so take the first entry if it exists.
@@ -256,7 +267,7 @@ export default function QuotationDetail() {
               <nav className="flex -mb-px">
                 {[
                   { key: 'items', label: 'Line Items', icon: Package },
-                  { key: 'costs', label: 'Additional Costs', icon: DollarSign },
+                  { key: 'costs', label: 'Additional Costs', icon: IndianRupee },
                 ].map((tab) => (
                   <button
                     key={tab.key}
@@ -583,7 +594,7 @@ function QuickInfoCard({ quotation }: { quotation: any }) {
         )}
         {quotation.paymentTerms && (
           <div className="flex items-center gap-3">
-            <DollarSign className="w-4 h-4 text-gray-400" />
+            <IndianRupee className="w-4 h-4 text-gray-400" />
             <div>
               <div className="text-xs text-gray-500">Payment Terms</div>
               <div className="font-medium">{quotation.paymentTerms}</div>

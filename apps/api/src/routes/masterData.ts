@@ -8,17 +8,82 @@ const router: Router = Router();
 
 router.use(authenticate);
 
+/**
+ * Shared list controls for the master data tables.
+ *
+ * Pagination is deliberately opt-in: it applies only when the caller passes `page`
+ * or `limit`. Several dropdowns read these same endpoints expecting the complete
+ * list - the currency picker in the document dialog, the port picker on a shipment,
+ * the country picker in the port form - so a default page size would silently
+ * truncate them and hide options the user needs.
+ *
+ * `includeInactive` exists because these tables now hold worldwide reference data.
+ * An exporter will deactivate the countries and ports they never touch, and if the
+ * list only ever returned active rows those would vanish with no way to restore
+ * them, even though the screen shows a Status column.
+ */
+function listControls(req: { query: Record<string, any> }) {
+  const rawSearch = req.query.search;
+  const search = typeof rawSearch === 'string' ? rawSearch.trim() : '';
+
+  const paginated = req.query.page !== undefined || req.query.limit !== undefined;
+  const page = Math.max(1, Number(req.query.page) || 1);
+  // Capped so a caller cannot ask for an unbounded page.
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 25));
+
+  const includeInactive =
+    req.query.includeInactive === 'true' || req.query.includeInactive === '1';
+
+  return {
+    search,
+    paginated,
+    page,
+    limit,
+    skip: (page - 1) * limit,
+    activeFilter: includeInactive ? {} : { isActive: true },
+  };
+}
+
+/** Case-insensitive "contains" across the given fields. */
+function searchFilter(search: string, fields: string[]) {
+  if (!search) return {};
+  return {
+    OR: fields.map((f) =>
+      f.includes('.')
+        ? {
+            [f.split('.')[0]]: {
+              [f.split('.')[1]]: { contains: search, mode: 'insensitive' as const },
+            },
+          }
+        : { [f]: { contains: search, mode: 'insensitive' as const } }
+    ),
+  };
+}
+
+/** Only advertises `pagination` when the caller actually paginated. */
+function listResponse(data: unknown[], total: number, c: ReturnType<typeof listControls>) {
+  return c.paginated
+    ? { success: true, data, pagination: { page: c.page, limit: c.limit, total } }
+    : { success: true, data, total };
+}
+
 // ============================================
 // COUNTRIES
 // ============================================
 
 router.get('/countries', can('MASTER_VIEW'), async (req, res, next) => {
   try {
-    const countries = await prisma.country.findMany({
-      where: { isActive: true },
-      orderBy: { name: 'asc' },
-    });
-    res.json({ success: true, data: countries });
+    const c = listControls(req);
+    const where = { ...c.activeFilter, ...searchFilter(c.search, ['code', 'name', 'region']) };
+    const [countries, total] = await Promise.all([
+      prisma.country.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        ...(c.paginated ? { skip: c.skip, take: c.limit } : {}),
+      }),
+      prisma.country.count({ where }),
+    ]);
+    res.json(listResponse(countries, total, c));
   } catch (error) {
     next(error);
   }
@@ -68,17 +133,25 @@ router.put('/countries/:id', can('MASTER_MANAGE'), async (req, res, next) => {
 
 router.get('/ports', can('MASTER_VIEW'), async (req, res, next) => {
   try {
+    const c = listControls(req);
     const { countryId, type } = req.query;
-    const where: any = { isActive: true };
+    const where: any = {
+      ...c.activeFilter,
+      ...searchFilter(c.search, ['code', 'name', 'country.name']),
+    };
     if (countryId) where.countryId = countryId;
     if (type) where.type = type;
 
-    const ports = await prisma.port.findMany({
-      where,
-      include: { country: { select: { name: true, code: true } } },
-      orderBy: { name: 'asc' },
-    });
-    res.json({ success: true, data: ports });
+    const [ports, total] = await Promise.all([
+      prisma.port.findMany({
+        where,
+        include: { country: { select: { name: true, code: true } } },
+        orderBy: [{ code: 'asc' }],
+        ...(c.paginated ? { skip: c.skip, take: c.limit } : {}),
+      }),
+      prisma.port.count({ where }),
+    ]);
+    res.json(listResponse(ports, total, c));
   } catch (error) {
     next(error);
   }
@@ -131,11 +204,17 @@ router.put('/ports/:id', can('MASTER_MANAGE'), async (req, res, next) => {
 
 router.get('/currencies', can('MASTER_VIEW'), async (req, res, next) => {
   try {
-    const currencies = await prisma.currency.findMany({
-      where: { isActive: true },
-      orderBy: { code: 'asc' },
-    });
-    res.json({ success: true, data: currencies });
+    const c = listControls(req);
+    const where = { ...c.activeFilter, ...searchFilter(c.search, ['code', 'name']) };
+    const [currencies, total] = await Promise.all([
+      prisma.currency.findMany({
+        where,
+        orderBy: { code: 'asc' },
+        ...(c.paginated ? { skip: c.skip, take: c.limit } : {}),
+      }),
+      prisma.currency.count({ where }),
+    ]);
+    res.json(listResponse(currencies, total, c));
   } catch (error) {
     next(error);
   }
@@ -220,11 +299,17 @@ router.put('/currencies/:id', can('MASTER_MANAGE'), async (req, res, next) => {
 
 router.get('/incoterms', can('MASTER_VIEW'), async (req, res, next) => {
   try {
-    const incoterms = await prisma.incoterm.findMany({
-      where: { isActive: true },
-      orderBy: { code: 'asc' },
-    });
-    res.json({ success: true, data: incoterms });
+    const c = listControls(req);
+    const where = { ...c.activeFilter, ...searchFilter(c.search, ['code', 'name']) };
+    const [incoterms, total] = await Promise.all([
+      prisma.incoterm.findMany({
+        where,
+        orderBy: { code: 'asc' },
+        ...(c.paginated ? { skip: c.skip, take: c.limit } : {}),
+      }),
+      prisma.incoterm.count({ where }),
+    ]);
+    res.json(listResponse(incoterms, total, c));
   } catch (error) {
     next(error);
   }
@@ -274,11 +359,17 @@ router.put('/incoterms/:id', can('MASTER_MANAGE'), async (req, res, next) => {
 
 router.get('/product-categories', can('MASTER_VIEW'), async (req, res, next) => {
   try {
-    const categories = await prisma.productCategory.findMany({
-      where: { isActive: true },
-      orderBy: { name: 'asc' },
-    });
-    res.json({ success: true, data: categories });
+    const c = listControls(req);
+    const where = { ...c.activeFilter, ...searchFilter(c.search, ['name', 'description']) };
+    const [categories, total] = await Promise.all([
+      prisma.productCategory.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        ...(c.paginated ? { skip: c.skip, take: c.limit } : {}),
+      }),
+      prisma.productCategory.count({ where }),
+    ]);
+    res.json(listResponse(categories, total, c));
   } catch (error) {
     next(error);
   }
