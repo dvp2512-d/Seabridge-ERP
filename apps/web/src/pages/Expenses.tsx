@@ -1,5 +1,5 @@
 // Expenses - costs incurred running the export business
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { expensesApi } from '@/lib/api';
@@ -11,7 +11,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { refreshAggregates } from '@/lib/queryKeys';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
-import { Plus, Receipt, Search, Check, X, Trash2, Edit } from 'lucide-react';
+import { Plus, Receipt, Search, Check, X, Trash2, Edit, Link2, Loader2 } from 'lucide-react';
 
 const CATEGORY_LABELS: Record<string, string> = {
   FREIGHT: 'Freight',
@@ -408,7 +408,6 @@ function ExpenseFormModal({
 }) {
   const isEdit = !!expense;
 
-
   const [form, setForm] = useState({
     category: expense?.category ?? 'FREIGHT',
     description: expense?.description ?? '',
@@ -420,6 +419,59 @@ function ExpenseFormModal({
     invoiceRef: expense?.invoiceRef ?? '',
     notes: expense?.notes ?? '',
   });
+
+  const [vendorSearch, setVendorSearch] = useState('');
+  const [showVendorDropdown, setShowVendorDropdown] = useState(false);
+  const [showLinkableRecords, setShowLinkableRecords] = useState(false);
+
+  // Fetch vendors for auto-complete
+  const { data: vendorsData, isFetching: vendorsLoading } = useQuery({
+    queryKey: ['expense-vendors', vendorSearch, form.category],
+    queryFn: () => expensesApi.searchVendors({ search: vendorSearch, category: form.category }),
+    enabled: vendorSearch.length >= 1 || showVendorDropdown,
+  });
+
+  // Fetch linkable records when category changes
+  const { data: linkableData, isFetching: linkableLoading } = useQuery({
+    queryKey: ['expense-linkable', form.category],
+    queryFn: () => expensesApi.getLinkableRecords(form.category),
+    enabled: showLinkableRecords && ['FREIGHT', 'CHA', 'TRANSPORT'].includes(form.category),
+  });
+
+  const vendors = vendorsData?.data?.data ?? [];
+  const suggestions = linkableData?.data?.data?.suggestions ?? [];
+
+  // Debounced vendor search
+  const debouncedVendorSearch = useDebouncedCallback((value: string) => {
+    setVendorSearch(value);
+  }, 300);
+
+  // Auto-fetch suggestions when category changes to FREIGHT, CHA, or TRANSPORT
+  useEffect(() => {
+    if (['FREIGHT', 'CHA', 'TRANSPORT'].includes(form.category) && !isEdit) {
+      setShowLinkableRecords(true);
+    } else {
+      setShowLinkableRecords(false);
+    }
+  }, [form.category, isEdit]);
+
+  const handleVendorSelect = (vendor: any) => {
+    setForm({ ...form, vendorName: vendor.name });
+    setShowVendorDropdown(false);
+    setVendorSearch('');
+  };
+
+  const handleSuggestionSelect = (suggestion: any) => {
+    setForm({
+      ...form,
+      description: suggestion.description || form.description,
+      amount: suggestion.amount ? String(suggestion.amount) : form.amount,
+      vendorName: suggestion.vendorName || form.vendorName,
+      invoiceRef: suggestion.reference || form.invoiceRef,
+    });
+    setShowLinkableRecords(false);
+    toast.success('Details filled from ' + suggestion.reference);
+  };
 
   const save = useMutation({
     mutationFn: (payload: any) =>
@@ -455,7 +507,6 @@ function ExpenseFormModal({
       invoiceRef: form.invoiceRef || undefined,
       notes: form.notes || undefined,
     };
-    // figure, so it is only sent when creating.
 
     save.mutate(payload);
   };
@@ -463,6 +514,38 @@ function ExpenseFormModal({
   return (
     <Modal isOpen onClose={onClose} title={isEdit ? 'Edit Expense' : 'Record Expense'} size="lg">
       <form onSubmit={submit} className="space-y-4">
+        {/* Auto-fill suggestions for FREIGHT, CHA, TRANSPORT */}
+        {showLinkableRecords && suggestions.length > 0 && !isEdit && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Link2 className="w-4 h-4 text-blue-600" />
+              <span className="text-sm font-medium text-blue-800">Auto-fill from existing records</span>
+              {linkableLoading && <Loader2 className="w-4 h-4 animate-spin text-blue-500" />}
+            </div>
+            <div className="space-y-2 max-h-32 overflow-y-auto">
+              {suggestions.slice(0, 5).map((s: any, idx: number) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => handleSuggestionSelect(s)}
+                  className="w-full text-left p-2 rounded bg-white hover:bg-blue-100 border border-blue-100 text-sm"
+                >
+                  <div className="font-medium text-gray-800">{s.reference}</div>
+                  <div className="text-xs text-gray-500 truncate">{s.description}</div>
+                  <div className="flex justify-between mt-1">
+                    {s.vendorName && (
+                      <span className="text-xs text-blue-600">{s.vendorName}</span>
+                    )}
+                    {s.amount && (
+                      <span className="text-xs font-medium">{formatCurrency(s.amount)}</span>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-4">
           <SelectField
             label="Category"
@@ -496,11 +579,53 @@ function ExpenseFormModal({
             value={form.amount}
             onChange={(e) => setForm({ ...form, amount: e.target.value })}
           />
-          <FormField
-            label="Vendor"
-            value={form.vendorName}
-            onChange={(e) => setForm({ ...form, vendorName: e.target.value })}
-          />
+          
+          {/* Enhanced Vendor field with auto-complete */}
+          <div className="relative">
+            <label className="label">Vendor</label>
+            <input
+              type="text"
+              className="input"
+              value={form.vendorName}
+              onChange={(e) => {
+                setForm({ ...form, vendorName: e.target.value });
+                debouncedVendorSearch(e.target.value);
+                setShowVendorDropdown(true);
+              }}
+              onFocus={() => setShowVendorDropdown(true)}
+              onBlur={() => setTimeout(() => setShowVendorDropdown(false), 200)}
+              placeholder="Start typing to search..."
+            />
+            {showVendorDropdown && vendors.length > 0 && (
+              <div className="absolute z-10 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                {vendorsLoading && (
+                  <div className="p-2 text-center text-gray-500">
+                    <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
+                    Searching...
+                  </div>
+                )}
+                {vendors.map((v: any) => (
+                  <button
+                    key={`${v.type}-${v.id}`}
+                    type="button"
+                    className="w-full text-left px-3 py-2 hover:bg-gray-100 flex justify-between items-center"
+                    onMouseDown={() => handleVendorSelect(v)}
+                  >
+                    <div>
+                      <div className="font-medium text-sm">{v.name}</div>
+                      {v.contactPerson && (
+                        <div className="text-xs text-gray-500">{v.contactPerson}</div>
+                      )}
+                    </div>
+                    <span className="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-600">
+                      {v.type}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <FormField
             label="Invoice Reference"
             value={form.invoiceRef}

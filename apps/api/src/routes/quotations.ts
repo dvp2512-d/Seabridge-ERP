@@ -374,6 +374,8 @@ router.get('/:id/pdf', can('SALES_VIEW'), async (req, res, next) => {
         incoterm: true,
         portOfLoading: true,
         portOfDischarge: true,
+        // The printed "Buyer Reference" is the inquiry this quotation answers.
+        inquiry: { select: { inquiryNumber: true } },
         items: { include: { product: true } },
         costs: true,
       },

@@ -7,28 +7,35 @@
  * if these lists diverge, a screen will offer to record a payment the API refuses.
  */
 
-export const INVOICE_TYPES = ['EXPORT', 'PROFORMA', 'SAMPLE'] as const;
+/**
+ * Exactly the invoice-family sheets in MASTER DRAFT.xlsx. There is no separate
+ * "Export Invoice": on an Indian export shipment the commercial invoice is the
+ * export invoice.
+ */
+export const INVOICE_TYPES = ['COMMERCIAL', 'PROFORMA', 'SAMPLE', 'PACKING_LIST'] as const;
 
 export type InvoiceType = (typeof INVOICE_TYPES)[number];
 
 /** Issued for documentation only: no payment accepted, never a receivable. */
-export const DOCUMENT_ONLY_INVOICE_TYPES: readonly string[] = ['PROFORMA', 'SAMPLE'];
+export const DOCUMENT_ONLY_INVOICE_TYPES: readonly string[] = ['PROFORMA', 'SAMPLE', 'PACKING_LIST'];
 
 export function isDocumentOnlyInvoice(type: string | null | undefined): boolean {
   return DOCUMENT_ONLY_INVOICE_TYPES.includes(type ?? '');
 }
 
 export const INVOICE_TYPE_LABELS: Record<string, string> = {
-  EXPORT: 'Export Invoice',
+  COMMERCIAL: 'Commercial Invoice',
   PROFORMA: 'Proforma Invoice',
   SAMPLE: 'Sample Invoice',
+  PACKING_LIST: 'Packing List',
 };
 
 /** Compact form for table rows and badges, where the word "Invoice" is redundant. */
 export const INVOICE_TYPE_SHORT_LABELS: Record<string, string> = {
-  EXPORT: 'Export',
+  COMMERCIAL: 'Commercial',
   PROFORMA: 'Proforma',
   SAMPLE: 'Sample',
+  PACKING_LIST: 'Packing List',
 };
 
 /** Options for the Invoice Type dropdown. */
@@ -38,8 +45,10 @@ export const INVOICE_TYPE_OPTIONS = INVOICE_TYPES.map((value) => ({
 }));
 
 export const INVOICE_TYPE_BADGE_CLASS: Record<string, string> = {
+  COMMERCIAL: 'badge-success',
   PROFORMA: 'badge-info',
   SAMPLE: 'badge-warning',
+  PACKING_LIST: 'badge-gray',
 };
 
 /** Why this document exists, shown where a user might expect to record a payment. */

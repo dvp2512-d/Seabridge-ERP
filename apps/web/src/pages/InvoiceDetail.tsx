@@ -654,7 +654,12 @@ export default function InvoiceDetail() {
                 <Receipt className="w-4 h-4 text-gray-400" />
                 <div>
                   <div className="text-xs text-gray-500">Invoice Type</div>
-                  <div className="font-medium">{invoice.type || 'Export Invoice'}</div>
+                  {/* The label, not the raw enum: "PACKING_LIST" is not a name a
+                      user should be shown. The old fallback named a type that no
+                      longer exists. */}
+                  <div className="font-medium">
+                    {INVOICE_TYPE_LABELS[invoice.type] || invoice.type || '-'}
+                  </div>
                 </div>
               </div>
             </div>

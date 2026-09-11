@@ -234,6 +234,8 @@ export const ordersApi = {
   addShipment: (id: string, data: any) => api.post(`/orders/${id}/shipments`, data),
   updateDocument: (orderId: string, docId: string, data: any) => 
     api.put(`/orders/${orderId}/documents/${docId}`, data),
+  downloadProcurementPdf: (orderId: string, procId: string) =>
+    api.get(`/orders/${orderId}/procurements/${procId}/pdf`, { responseType: 'blob' }),
 };
 
 // ============================================
@@ -319,6 +321,12 @@ export const expensesApi = {
   setStatus: (id: string, status: string) =>
     api.put(`/expenses/${id}/status`, { status }),
   options: () => api.get('/expenses/meta/options'),
+  /** Search vendors (suppliers, CHAs, transporters) for auto-complete */
+  searchVendors: (params?: { search?: string; category?: string }) =>
+    api.get('/expenses/meta/vendors', { params }),
+  /** Get linkable records (shipments, orders, procurements) for pre-fill */
+  getLinkableRecords: (category?: string) =>
+    api.get('/expenses/meta/linkable-records', { params: { category } }),
 };
 
 // ============================================

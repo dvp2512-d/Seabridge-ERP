@@ -50,137 +50,124 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
     const startOfYear = startOfFinancialYear(today);
     const periodLabel = financialYearLabel(today);
 
-    // Parallel queries for performance
+    // ALL queries run in parallel for maximum performance
     const [
-      // Revenue & Orders
+      // Counts
       totalOrders,
       activeOrders,
-      
-      // Pipeline
       openInquiries,
       pendingQuotations,
-      
-      // Shipments
       activeShipments,
-      
-      // Finance
-      
+      totalBuyers,
+      activeBuyers,
       // Recent items
       recentInquiries,
       recentOrders,
       pendingTasks,
-      
-      // Counts
-      totalBuyers,
-      activeBuyers,
-    ] = await Promise.all([
-      
-      // Total orders this year
-      prisma.exportOrder.count({
-        where: { orderDate: { gte: startOfYear } },
-      }),
-      
-      // Active orders
-      prisma.exportOrder.count({
-        where: { status: { in: ['CONFIRMED', 'IN_PRODUCTION', 'READY_TO_SHIP'] } },
-      }),
-      
-      // Open inquiries
-      prisma.inquiry.count({
-        where: { stage: { notIn: ['WON', 'LOST'] } },
-      }),
-      
-      // Pending quotations
-      prisma.quotation.count({
-        where: { status: { in: ['DRAFT', 'SENT'] } },
-      }),
-      
-      // Active shipments
-      prisma.shipment.count({
-        where: { status: { in: ['PENDING', 'BOOKED', 'IN_TRANSIT'] } },
-      }),
-      
-      // Recent inquiries
-      prisma.inquiry.findMany({
-        take: 5,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          buyer: { select: { companyName: true } },
-          salesOwner: { select: { firstName: true, lastName: true } },
-        },
-      }),
-      
-      // Recent orders
-      prisma.exportOrder.findMany({
-        take: 5,
-        orderBy: { createdAt: 'desc' },
-        include: { buyer: { select: { companyName: true } } },
-      }),
-      
-      // Pending tasks
-      prisma.task.findMany({
-        where: { status: { in: ['PENDING', 'IN_PROGRESS'] } },
-        take: 10,
-        orderBy: { dueDate: 'asc' },
-        include: { assignee: { select: { firstName: true, lastName: true } } },
-      }),
-      
-      // Total buyers
-      prisma.buyer.count(),
-      
-      // Active buyers
-      prisma.buyer.count({ where: { status: 'ACTIVE' } }),
-    ]);
-
-    /**
-     * Every monetary column is INR, so these are plain aggregates done in SQL.
-     *
-     * This block previously fetched each row with its currency and converted in
-     * application code, because amounts were stored in mixed currencies and could
-     * not be added directly. Storing INR removes both the conversion and the
-     * possibility of a total that quietly excludes rows whose rate was missing.
-     */
-    const [
+      // Financial aggregates
       monthlyPaymentTotal,
       yearlyPaymentTotal,
       receivableTotal,
       overdueTotal,
       pipelineTotal,
-      /**
-       * Other income, kept apart from Revenue on purpose.
-       *
-       * Drawback, RoDTEP, interest and forex gain are real receipts but they are
-       * not export sales. Folding them into Revenue would flatter sales
-       * performance and stop one period being comparable with another.
-       */
       incomeByStatus,
       incomeByCategory,
       allPaymentTotal,
       allIncomeReceived,
       allExpenseGroups,
+      // Expense data for dashboard widget
+      monthlyExpenseTotal,
+      yearlyExpenseTotal,
+      expensesByCategory,
+      pendingExpenseCount,
+      pendingExpenseTotal,
+      // Base currency
+      base,
     ] = await Promise.all([
+      // Total orders this year
+      prisma.exportOrder.count({
+        where: { orderDate: { gte: startOfYear } },
+      }),
+      // Active orders
+      prisma.exportOrder.count({
+        where: { status: { in: ['CONFIRMED', 'IN_PRODUCTION', 'READY_TO_SHIP'] } },
+      }),
+      // Open inquiries
+      prisma.inquiry.count({
+        where: { stage: { notIn: ['WON', 'LOST'] } },
+      }),
+      // Pending quotations
+      prisma.quotation.count({
+        where: { status: { in: ['DRAFT', 'SENT'] } },
+      }),
+      // Active shipments
+      prisma.shipment.count({
+        where: { status: { in: ['PENDING', 'BOOKED', 'IN_TRANSIT'] } },
+      }),
+      // Total buyers
+      prisma.buyer.count(),
+      // Active buyers
+      prisma.buyer.count({ where: { status: 'ACTIVE' } }),
+      // Recent inquiries (minimal fields)
+      prisma.inquiry.findMany({
+        take: 5,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          inquiryNumber: true,
+          stage: true,
+          createdAt: true,
+          buyer: { select: { companyName: true } },
+          salesOwner: { select: { firstName: true, lastName: true } },
+        },
+      }),
+      // Recent orders (minimal fields)
+      prisma.exportOrder.findMany({
+        take: 5,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          orderNumber: true,
+          status: true,
+          totalValue: true,
+          createdAt: true,
+          buyer: { select: { companyName: true } },
+        },
+      }),
+      // Pending tasks
+      prisma.task.findMany({
+        where: { status: { in: ['PENDING', 'IN_PROGRESS'] } },
+        take: 10,
+        orderBy: { dueDate: 'asc' },
+        select: {
+          id: true,
+          title: true,
+          priority: true,
+          status: true,
+          dueDate: true,
+          assignee: { select: { firstName: true, lastName: true } },
+        },
+      }),
+      // Monthly payments
       prisma.payment.aggregate({
         where: { paymentDate: { gte: startOfMonth } },
         _sum: { amount: true },
       }),
+      // Yearly payments
       prisma.payment.aggregate({
         where: { paymentDate: { gte: startOfYear } },
         _sum: { amount: true },
       }),
+      // Receivables
       prisma.invoice.aggregate({
-        // Proformas and samples are documents, not receivables, so they are excluded from
-        // every money figure here.
         where: {
           type: COMMERCIAL_TYPE_FILTER,
           status: { in: ['SENT', 'PARTIALLY_PAID', 'OVERDUE'] },
         },
         _sum: { balanceAmount: true },
       }),
+      // Overdue receivables
       prisma.invoice.aggregate({
-        // Overdue is derived from the due date, not from the OVERDUE status:
-        // nothing in the system ever transitions an invoice into that status, so
-        // filtering on it reported zero while the alert banner and the aging
-        // chart - which both use the due date - correctly showed arrears.
         where: {
           type: COMMERCIAL_TYPE_FILTER,
           status: { in: ['SENT', 'PARTIALLY_PAID', 'OVERDUE'] },
@@ -189,46 +176,76 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
         },
         _sum: { balanceAmount: true },
       }),
+      // Pipeline value
       prisma.inquiry.aggregate({
         where: { stage: { notIn: ['WON', 'LOST'] } },
         _sum: { expectedValue: true },
       }),
+      // Income by status
       prisma.income.groupBy({
         by: ['status'],
         where: { receivedDate: { gte: startOfYear } },
         _count: { _all: true },
         _sum: { amountINR: true },
       }),
+      // Income by category
       prisma.income.groupBy({
         by: ['category'],
         where: { receivedDate: { gte: startOfYear }, status: 'RECEIVED' },
         _sum: { amountINR: true },
       }),
-      /**
-       * All-time figures for the remaining balance.
-       *
-       * Deliberately not scoped to the financial year. The balance answers "how
-       * much is actually left to use", and money received in a previous year is
-       * still money. Scoping it to April onwards would understate what is
-       * available every April and slowly recover through the year, which is not
-       * what anyone means by a remaining balance.
-       *
-       * The KPI cards stay on the financial year, because revenue performance is
-       * a period question.
-       */
+      // All-time payments
       prisma.payment.aggregate({ _sum: { amount: true } }),
+      // All-time income received
       prisma.income.aggregate({
         where: { status: 'RECEIVED' },
         _sum: { amountINR: true },
       }),
+      // All expenses by status
       prisma.expense.groupBy({
         by: ['status'],
         _count: { _all: true },
         _sum: { amount: true },
       }),
+      // Monthly expenses
+      prisma.expense.aggregate({
+        where: {
+          expenseDate: { gte: startOfMonth },
+          status: { not: 'REJECTED' },
+        },
+        _sum: { amount: true },
+        _count: { _all: true },
+      }),
+      // Yearly expenses
+      prisma.expense.aggregate({
+        where: {
+          expenseDate: { gte: startOfYear },
+          status: { not: 'REJECTED' },
+        },
+        _sum: { amount: true },
+      }),
+      // Expenses by category
+      prisma.expense.groupBy({
+        by: ['category'],
+        where: {
+          expenseDate: { gte: startOfYear },
+          status: { not: 'REJECTED' },
+        },
+        _sum: { amount: true },
+        _count: { _all: true },
+      }),
+      // Pending expense count
+      prisma.expense.count({
+        where: { status: 'PENDING' },
+      }),
+      // Pending expense total
+      prisma.expense.aggregate({
+        where: { status: 'PENDING' },
+        _sum: { amount: true },
+      }),
+      // Base currency (runs in parallel with all other queries)
+      getBaseCurrency(),
     ]);
-
-    const base = await getBaseCurrency();
 
     const monthlyRevenue = Number(monthlyPaymentTotal._sum.amount ?? 0);
     const yearlyRevenue = Number(yearlyPaymentTotal._sum.amount ?? 0);
@@ -337,6 +354,29 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
             .sort((a, b) => b.amountINR - a.amountINR),
         },
         /**
+         * Expense summary for the dashboard widget.
+         * 
+         * Shows this month, year-to-date, pending approval, and category breakdown.
+         * All amounts in INR (base currency).
+         */
+        expenses: {
+          currency: 'INR',
+          thisMonth: round2(Number(monthlyExpenseTotal._sum.amount ?? 0)),
+          thisMonthCount: monthlyExpenseTotal._count?._all ?? 0,
+          yearToDate: round2(Number(yearlyExpenseTotal._sum.amount ?? 0)),
+          pendingApproval: {
+            count: pendingExpenseCount,
+            amount: round2(Number(pendingExpenseTotal._sum.amount ?? 0)),
+          },
+          byCategory: expensesByCategory
+            .map((g) => ({
+              category: g.category,
+              amount: round2(Number(g._sum.amount ?? 0)),
+              count: g._count._all,
+            }))
+            .sort((a, b) => b.amount - a.amount),
+        },
+        /**
          * Remaining balance, all time, in the base currency.
          *
          * Every component is returned so the arithmetic is checkable rather than a
@@ -375,6 +415,7 @@ router.get('/sales', can('DASHBOARD_SALES'), async (req, res, next) => {
       quotationsByStatus,
       topBuyers,
       salesByMonth,
+      baseCurrency,
     ] = await Promise.all([
       // Inquiries by stage. Amounts are INR, so a plain _sum is correct.
       prisma.inquiry.groupBy({
@@ -414,12 +455,14 @@ router.get('/sales', can('DASHBOARD_SALES'), async (req, res, next) => {
         GROUP BY DATE_TRUNC('month', payment_date)
         ORDER BY month
       `,
+      // Base currency in parallel
+      getBaseCurrency(),
     ]);
 
     res.json({
       success: true,
       data: {
-        baseCurrency: await getBaseCurrency(),
+        baseCurrency,
         // Shaped as { key, count, value } to match what the charts consume.
         inquiriesByStage: toChartRows(inquiriesByStage, 'stage', (g) =>
           Number(g._sum.expectedValue ?? 0)
@@ -581,18 +624,35 @@ router.get('/finance', can('DASHBOARD_FINANCE'), async (req, res, next) => {
   }
 });
 
-// Helper function for alerts
+// Helper function for alerts - runs queries in parallel
 async function getAlerts() {
   const alerts: any[] = [];
   const today = new Date();
+  const sevenDaysFromNow = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-  // Overdue follow-ups
-  const overdueFollowUps = await prisma.inquiry.count({
-    where: {
-      nextFollowUp: { lt: today },
-      stage: { notIn: ['WON', 'LOST'] },
-    },
-  });
+  // Run all alert queries in parallel
+  const [overdueFollowUps, expiringQuotations, overdueInvoices] = await Promise.all([
+    prisma.inquiry.count({
+      where: {
+        nextFollowUp: { lt: today },
+        stage: { notIn: ['WON', 'LOST'] },
+      },
+    }),
+    prisma.quotation.count({
+      where: {
+        status: 'SENT',
+        validUntil: { lte: sevenDaysFromNow },
+      },
+    }),
+    prisma.invoice.count({
+      where: { 
+        type: COMMERCIAL_TYPE_FILTER,
+        dueDate: { lt: today },
+        status: { in: ['SENT', 'PARTIALLY_PAID'] },
+      },
+    }),
+  ]);
+
   if (overdueFollowUps > 0) {
     alerts.push({
       type: 'warning',
@@ -601,13 +661,6 @@ async function getAlerts() {
     });
   }
 
-  // Expiring quotations
-  const expiringQuotations = await prisma.quotation.count({
-    where: {
-      status: 'SENT',
-      validUntil: { lte: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
-    },
-  });
   if (expiringQuotations > 0) {
     alerts.push({
       type: 'warning',
@@ -616,14 +669,6 @@ async function getAlerts() {
     });
   }
 
-  // Overdue invoices
-  const overdueInvoices = await prisma.invoice.count({
-    where: { 
-      type: COMMERCIAL_TYPE_FILTER,
-      dueDate: { lt: today },
-      status: { in: ['SENT', 'PARTIALLY_PAID'] },
-    },
-  });
   if (overdueInvoices > 0) {
     alerts.push({
       type: 'error',

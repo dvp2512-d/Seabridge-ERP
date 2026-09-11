@@ -26,6 +26,66 @@ export interface CreateOrderOptions {
   notes?: string;
 }
 
+/** Units in which a quantity is itself a weight, and the factor to kilograms. */
+const MASS_UNITS_IN_KG: Record<string, number> = {
+  KG: 1,
+  KGS: 1,
+  MT: 1000,
+  TON: 1000,
+  TONS: 1000,
+  TONNE: 1000,
+  TONNES: 1000,
+  G: 0.001,
+  GM: 0.001,
+  GRAM: 0.001,
+  GRAMS: 0.001,
+};
+
+/**
+ * Prefill an order line's packing figures from the product's declared packaging.
+ *
+ * These four figures are the Packing List and the weight block on every invoice.
+ * Nothing here is estimated: the package size and its gross weight are the
+ * exporter's own declared specification on the Product record, so the arithmetic
+ * only applies it to the ordered quantity. Where a product has no packaging on
+ * file the fields stay null and the document leaves those cells blank, which is a
+ * visible gap rather than a plausible wrong number on a customs document.
+ *
+ * Operations can correct these per line afterwards; the figures below are a
+ * starting point, not a substitute for weighing the shipment.
+ */
+function packingFromProduct(
+  quantity: number,
+  unit: string,
+  product: { packageType: string | null; packageNetWeight: unknown; packageGrossWeight: unknown }
+) {
+  const perPackageNet = product.packageNetWeight === null ? null : Number(product.packageNetWeight);
+  const perPackageGross =
+    product.packageGrossWeight === null ? null : Number(product.packageGrossWeight);
+
+  // The net weight of goods sold by mass is the quantity itself.
+  const factor = MASS_UNITS_IN_KG[unit.toUpperCase().trim()];
+  const netWeight = factor === undefined ? null : quantity * factor;
+
+  // Part-filled packages are rounded up: half a bag still ships as a bag.
+  const numberOfPackages =
+    perPackageNet && perPackageNet > 0 && netWeight !== null
+      ? Math.ceil(netWeight / perPackageNet)
+      : null;
+
+  const grossWeight =
+    numberOfPackages !== null && perPackageGross && perPackageGross > 0
+      ? Math.round(numberOfPackages * perPackageGross * 1000) / 1000
+      : null;
+
+  return {
+    numberOfPackages,
+    packageWeight: perPackageNet,
+    netWeight,
+    grossWeight,
+  };
+}
+
 /**
  * Convert an accepted quotation into an export order.
  *
@@ -39,7 +99,9 @@ export async function createOrderFromQuotation(
   const quotation = await prisma.quotation.findUnique({
     where: { id: quotationId },
     include: {
-      items: true,
+      // Products come along because their default packaging prefills the order
+      // lines, which is what the Packing List is built from.
+      items: { include: { product: true } },
       costs: true,
     },
   });
@@ -118,6 +180,11 @@ export async function createOrderFromQuotation(
         totalValue: pricing.total,
         paymentTerms: quotation.paymentTerms,
         deliveryTerms: quotation.deliveryTerms,
+        // Printed in the shipment strip of every document raised against this
+        // order. Carried over so an invoice does not have to guess them from the
+        // port type before a shipment has been booked.
+        dispatchMethod: quotation.dispatchMethod,
+        shipmentType: quotation.shipmentType,
         notes: options.notes,
         items: {
           // pricing.lines is built by mapping quotation.items in order, so the
@@ -129,6 +196,7 @@ export async function createOrderFromQuotation(
             unitPrice: pricing.lines[index].unitPrice,
             totalPrice: pricing.lines[index].amount,
             notes: item.specifications,
+            ...packingFromProduct(Number(item.quantity), item.unit, item.product),
           })),
         },
         documents: {

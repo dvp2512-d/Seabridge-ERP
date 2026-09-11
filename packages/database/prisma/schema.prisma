@@ -175,6 +175,13 @@ model Product {
   categoryId  String   @map("category_id")
   hsnCode     String?  @map("hsn_code")
   unit        String   @default("KG") // KG, MT, PCS, CTN, etc.
+  // Default packaging, used to prefill an order line so a packing list does not
+  // have to be filled in by hand for a repeat product. Declared here because
+  // migration 20260816000000_export_documents creates these columns; they were
+  // missing from this model, so the client could not read them.
+  packageType        String?  @map("package_type") // BAG, CARTON, DRUM, BOX
+  packageNetWeight   Decimal? @map("package_net_weight") @db.Decimal(12, 3)
+  packageGrossWeight Decimal? @map("package_gross_weight") @db.Decimal(12, 3)
   isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -642,6 +649,12 @@ model ExportOrder {
   poNumber          String?     @map("po_number")
   orderDate         DateTime    @map("order_date")
   expectedDate      DateTime?   @map("expected_date")
+  // Header fields printed on every document raised against this order, carried
+  // over from the quotation. Created by migration 20260816000000_export_documents.
+  dispatchMethod    String?     @map("dispatch_method") // SEA, AIR, ROAD
+  shipmentType      String?     @map("shipment_type")   // FCL, LCL
+  /// Quantity tolerance stated on a proforma invoice, in percent.
+  variationPercent  Decimal?    @map("variation_percent") @db.Decimal(5, 2)
   // INR, like every monetary column in this schema.
   totalValue        Decimal     @map("total_value") @db.Decimal(15, 2)
   paymentTerms      String?     @map("payment_terms")
@@ -673,6 +686,18 @@ model OrderItem {
   unit        String   @default("KG")
   unitPrice   Decimal  @map("unit_price") @db.Decimal(12, 2)
   totalPrice  Decimal  @map("total_price") @db.Decimal(15, 2)
+  // Packing figures for this line. These are the four columns of the Packing List
+  // and the weight block on every invoice, so they are declared rather than
+  // derived: gross weight depends on the packaging used and the number of packages
+  // on how it was filled, and neither can be inferred from a quantity.
+  //
+  // Created by migration 20260816000000_export_documents. Nullable, because an
+  // order is priced before it is packed.
+  numberOfPackages Int?     @map("number_of_packages")
+  /// Net weight carried by one package, i.e. the "Bag / Carton Per KGs" column.
+  packageWeight    Decimal? @map("package_weight") @db.Decimal(12, 3)
+  netWeight        Decimal? @map("net_weight") @db.Decimal(12, 3)
+  grossWeight      Decimal? @map("gross_weight") @db.Decimal(12, 3)
   notes       String?
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -777,7 +802,7 @@ model Invoice {
   invoiceNumber  String        @unique @map("invoice_number")
   orderId        String        @map("order_id")
   buyerId        String        @map("buyer_id")
-  type           String        @default("EXPORT") // EXPORT, PROFORMA, SAMPLE - see apps/api/src/utils/invoiceTypes.ts
+  type           String        @default("COMMERCIAL") // COMMERCIAL, PROFORMA, SAMPLE, PACKING_LIST - see apps/api/src/utils/invoiceTypes.ts
   status         InvoiceStatus @default(DRAFT)
   invoiceDate    DateTime      @map("invoice_date")
   dueDate        DateTime      @map("due_date")

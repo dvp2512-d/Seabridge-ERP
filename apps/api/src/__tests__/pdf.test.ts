@@ -95,7 +95,7 @@ function activeUser(role: string = 'FINANCE') {
 }
 
 /** Full invoice object including relations, as returned by findUnique with includes */
-function fullInvoice(type: 'EXPORT' | 'PROFORMA' | 'SAMPLE' = 'EXPORT') {
+function fullInvoice(type: 'COMMERCIAL' | 'PROFORMA' | 'SAMPLE' = 'COMMERCIAL') {
   return {
     id: INVOICE_ID,
     invoiceNumber: 'INV-2026-0001',
@@ -185,7 +185,7 @@ describe('GET /api/invoices/:id/pdf', () => {
     mockBuildSampleInvoice.mockResolvedValue(FAKE_PDF_BUFFER);
 
     // Default invoice and company
-    prisma.invoice.findUnique.mockResolvedValue(fullInvoice('EXPORT'));
+    prisma.invoice.findUnique.mockResolvedValue(fullInvoice('COMMERCIAL'));
     prisma.companyProfile.findFirst.mockResolvedValue(COMPANY_PROFILE);
 
     // Import the app fresh
@@ -276,9 +276,9 @@ describe('GET /api/invoices/:id/pdf', () => {
   });
 
   describe('routes to correct builder by invoice type', () => {
-    it('EXPORT type uses buildCommercialInvoiceDocument', async () => {
+    it('COMMERCIAL type uses buildCommercialInvoiceDocument', async () => {
       const token = createTestJwt(TEST_USER_ID, 'FINANCE');
-      prisma.invoice.findUnique.mockResolvedValue(fullInvoice('EXPORT'));
+      prisma.invoice.findUnique.mockResolvedValue(fullInvoice('COMMERCIAL'));
 
       await request(app)
         .get(`/api/invoices/${INVOICE_ID}/pdf`)
@@ -344,7 +344,7 @@ describe('GET /api/invoices/:id/pdf', () => {
 
   it('builder receives the invoice object and company profile', async () => {
     const token = createTestJwt(TEST_USER_ID, 'FINANCE');
-    const invoice = fullInvoice('EXPORT');
+    const invoice = fullInvoice('COMMERCIAL');
     prisma.invoice.findUnique.mockResolvedValue(invoice);
     prisma.companyProfile.findFirst.mockResolvedValue(COMPANY_PROFILE);
 

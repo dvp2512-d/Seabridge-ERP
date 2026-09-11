@@ -83,7 +83,7 @@ const MOCK_INVOICE = {
   orderId: 'order-1',
   buyerId: 'buyer-1',
   currencyId: 'cur-usd',
-  type: 'EXPORT',
+  type: 'COMMERCIAL',
   status: 'SENT',
   totalAmount: 10000,
   paidAmount: 0,

@@ -292,4 +292,205 @@ router.get('/meta/options', can('FINANCE_VIEW'), async (_req, res) => {
   });
 });
 
+/**
+ * Search vendors across Suppliers, CHAs, and Transporters for auto-complete.
+ * Returns a unified list with the source type so the UI can display it.
+ */
+router.get('/meta/vendors', can('FINANCE_VIEW'), async (req, res, next) => {
+  try {
+    const { search, category } = req.query;
+    const searchFilter = search
+      ? { name: { contains: String(search), mode: 'insensitive' as const } }
+      : {};
+
+    // Fetch based on category for smarter suggestions
+    const results: { id: string; name: string; type: string; contactPerson?: string }[] = [];
+
+    // For CHA category, prioritize CHA agents
+    if (!category || category === 'CHA') {
+      const chas = await prisma.cHA.findMany({
+        where: { isActive: true, ...searchFilter },
+        select: { id: true, name: true, contactPerson: true },
+        take: 10,
+      });
+      results.push(...chas.map(c => ({ id: c.id, name: c.name, type: 'CHA', contactPerson: c.contactPerson || undefined })));
+    }
+
+    // For TRANSPORT category, prioritize Transporters
+    if (!category || category === 'TRANSPORT' || category === 'FREIGHT') {
+      const transporters = await prisma.transporter.findMany({
+        where: { isActive: true, ...searchFilter },
+        select: { id: true, name: true, contactPerson: true },
+        take: 10,
+      });
+      results.push(...transporters.map(t => ({ id: t.id, name: t.name, type: 'TRANSPORTER', contactPerson: t.contactPerson || undefined })));
+    }
+
+    // For other categories or general search, include Suppliers
+    if (!category || !['CHA', 'TRANSPORT'].includes(String(category))) {
+      const suppliers = await prisma.supplier.findMany({
+        where: { isActive: true, ...searchFilter },
+        select: { id: true, name: true, contactPerson: true },
+        take: 10,
+      });
+      results.push(...suppliers.map(s => ({ id: s.id, name: s.name, type: 'SUPPLIER', contactPerson: s.contactPerson || undefined })));
+    }
+
+    // Sort by name and limit
+    results.sort((a, b) => a.name.localeCompare(b.name));
+
+    res.json({ success: true, data: results.slice(0, 20) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Get linkable records (shipments, orders) that can be associated with an expense.
+ * Used to pre-fill expense details from existing business records.
+ */
+router.get('/meta/linkable-records', can('FINANCE_VIEW'), async (req, res, next) => {
+  try {
+    const { category } = req.query;
+
+    // For FREIGHT, CHA, TRANSPORT - fetch recent shipments with cost data
+    const shipments = await prisma.shipment.findMany({
+      where: {
+        status: { notIn: ['DELIVERED'] },
+      },
+      select: {
+        id: true,
+        shipmentNumber: true,
+        freightCost: true,
+        status: true,
+        cha: { select: { id: true, name: true } },
+        transporter: { select: { id: true, name: true } },
+        order: {
+          select: {
+            id: true,
+            orderNumber: true,
+            buyer: { select: { companyName: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+
+    // Fetch recent orders for general expense linking
+    const orders = await prisma.exportOrder.findMany({
+      where: {
+        status: { notIn: ['DELIVERED', 'CANCELLED'] },
+      },
+      select: {
+        id: true,
+        orderNumber: true,
+        totalValue: true,
+        status: true,
+        buyer: { select: { companyName: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+
+    // Fetch recent procurements for supplier-related expenses
+    const procurements = await prisma.procurement.findMany({
+      where: {
+        status: { notIn: ['RECEIVED'] },
+      },
+      select: {
+        id: true,
+        poNumber: true,
+        totalAmount: true,
+        status: true,
+        supplier: { select: { id: true, name: true } },
+        order: { select: { orderNumber: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+
+    // Build suggestions based on category
+    const suggestions: any[] = [];
+
+    if (category === 'FREIGHT') {
+      shipments.forEach(s => {
+        if (s.freightCost) {
+          suggestions.push({
+            type: 'SHIPMENT',
+            id: s.id,
+            reference: s.shipmentNumber,
+            description: `Freight for ${s.order?.orderNumber} - ${s.order?.buyer?.companyName}`,
+            amount: Number(s.freightCost),
+            vendorName: s.transporter?.name,
+            vendorId: s.transporter?.id,
+            vendorType: 'TRANSPORTER',
+          });
+        }
+      });
+    } else if (category === 'CHA') {
+      shipments.forEach(s => {
+        if (s.cha) {
+          suggestions.push({
+            type: 'SHIPMENT',
+            id: s.id,
+            reference: s.shipmentNumber,
+            description: `CHA charges for ${s.order?.orderNumber} - ${s.order?.buyer?.companyName}`,
+            amount: null, // CHA rates would need to be looked up
+            vendorName: s.cha.name,
+            vendorId: s.cha.id,
+            vendorType: 'CHA',
+          });
+        }
+      });
+    } else if (category === 'TRANSPORT') {
+      shipments.forEach(s => {
+        if (s.transporter) {
+          suggestions.push({
+            type: 'SHIPMENT',
+            id: s.id,
+            reference: s.shipmentNumber,
+            description: `Transport for ${s.order?.orderNumber} - ${s.order?.buyer?.companyName}`,
+            amount: null,
+            vendorName: s.transporter.name,
+            vendorId: s.transporter.id,
+            vendorType: 'TRANSPORTER',
+          });
+        }
+      });
+    }
+
+    // Always include orders and procurements as linkable
+    orders.forEach(o => {
+      suggestions.push({
+        type: 'ORDER',
+        id: o.id,
+        reference: o.orderNumber,
+        description: `Order for ${o.buyer?.companyName}`,
+        amount: null,
+        status: o.status,
+      });
+    });
+
+    procurements.forEach(p => {
+      if (p.poNumber) {
+        suggestions.push({
+          type: 'PROCUREMENT',
+          id: p.id,
+          reference: p.poNumber,
+          description: `PO ${p.poNumber} - ${p.supplier?.name} (${p.order?.orderNumber})`,
+          amount: Number(p.totalAmount),
+          vendorName: p.supplier?.name,
+          vendorId: p.supplier?.id,
+          vendorType: 'SUPPLIER',
+        });
+      }
+    });
+
+    res.json({ success: true, data: { shipments, orders, procurements, suggestions } });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export { router as expenseRouter };

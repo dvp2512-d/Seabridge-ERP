@@ -29,7 +29,7 @@ export default function NewInvoice() {
   const preselectedOrderId = searchParams.get('orderId');
 
   const [orderId, setOrderId] = useState(preselectedOrderId || '');
-  const [type, setType] = useState<InvoiceType>('EXPORT');
+  const [type, setType] = useState<InvoiceType>('COMMERCIAL');
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState(() => {
     const date = new Date();

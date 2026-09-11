@@ -17,7 +17,7 @@
     "typecheck": "npm run typecheck -w apps/api && npm run typecheck -w apps/web",
     "verify": "npm run typecheck && npm run verify:contract && npm run verify:pdf && npm run verify:logic",
     "verify:contract": "node scripts/check-api-contract.mjs",
-    "verify:pdf": "node scripts/verify-pdf.mjs",
+    "verify:pdf": "npx tsx scripts/verify-pdf.ts",
     "verify:logic": "npx tsx scripts/verify-logic.ts",
     "db:generate": "npm run generate -w packages/database",
     "db:migrate": "npm run migrate -w packages/database",

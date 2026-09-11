@@ -53,6 +53,8 @@ COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/packages/database ./packages/database
 COPY --from=builder /app/apps/api/dist ./apps/api/dist
 COPY --from=builder /app/apps/api/package*.json ./apps/api/
+# Copy public folder with logo for PDF generation
+COPY --from=builder /app/apps/api/public ./apps/api/public
 
 WORKDIR /app/apps/api
 

@@ -93,7 +93,7 @@ function makeInvoice(overrides: Partial<{
   return {
     id,
     invoiceNumber: overrides.invoiceNumber ?? `INV-${id.slice(4)}`,
-    type: 'EXPORT',
+    type: 'COMMERCIAL',
     status: overrides.status ?? 'SENT',
     currencyId: overrides.currencyId ?? CUR_INR.id,
     currency: overrides.currency ?? CUR_INR,

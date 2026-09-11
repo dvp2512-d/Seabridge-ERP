@@ -31,6 +31,7 @@ import {
   FileCheck,
   ClipboardList,
   Receipt,
+  Download,
 } from 'lucide-react';
 
 const ORDER_STAGES = ['CONFIRMED', 'IN_PRODUCTION', 'READY_TO_SHIP', 'SHIPPED', 'DELIVERED'];
@@ -583,6 +584,22 @@ function ProcurementTab({
   onAdd: () => void;
 }) {
   const procurements = order.procurements || [];
+
+  const handleDownloadPdf = async (po: any) => {
+    try {
+      const response = await ordersApi.downloadProcurementPdf(order.id, po.id);
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${po.poNumber || 'PO-DRAFT'}.pdf`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success('Purchase Order PDF downloaded');
+    } catch (error) {
+      toast.error('Failed to download PDF');
+    }
+  };
   
   return (
     <div>
@@ -612,9 +629,18 @@ function ProcurementTab({
                   <div className="font-medium">{po.poNumber}</div>
                   <div className="text-sm text-gray-500">{po.supplier?.name}</div>
                 </div>
-                <div className="text-right">
-                  <div className="font-semibold">{formatCurrency(po.totalAmount, po.currency || currency)}</div>
-                  <span className={`badge ${getStatusColor(po.status)}`}>{po.status}</span>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => handleDownloadPdf(po)}
+                    className="btn btn-secondary py-1 px-2 text-sm"
+                    title="Download PDF"
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
+                  <div className="text-right">
+                    <div className="font-semibold">{formatCurrency(po.totalAmount, po.currency || currency)}</div>
+                    <span className={`badge ${getStatusColor(po.status)}`}>{po.status}</span>
+                  </div>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4 mt-3 text-sm text-gray-500">
@@ -893,7 +919,10 @@ function ProcurementModal({
       toast.success('Procurement order created');
       onSuccess();
     },
-    onError: () => toast.error('Failed to create procurement order'),
+    onError: (error: any) => {
+      const message = error?.response?.data?.message || error?.message || 'Failed to create procurement order';
+      toast.error(message);
+    },
   });
 
   const handleSubmit = () => {
@@ -902,9 +931,11 @@ function ProcurementModal({
       return;
     }
     mutation.mutate({
-      ...formData,
+      supplierId: formData.supplierId,
       totalAmount: parseFloat(formData.totalAmount),
       currency,
+      expectedDate: formData.expectedDate || undefined,
+      notes: formData.notes || undefined,
     });
   };
 
@@ -996,16 +1027,23 @@ function ShipmentModal({
       toast.success('Shipment created');
       onSuccess();
     },
-    onError: () => toast.error('Failed to create shipment'),
+    onError: (error: any) => {
+      const message = error?.response?.data?.message || error?.message || 'Failed to create shipment';
+      toast.error(message);
+    },
   });
 
   const handleSubmit = () => {
     mutation.mutate({
-      ...formData,
       chaId: formData.chaId || undefined,
       transporterId: formData.transporterId || undefined,
       originPortId: formData.originPortId || undefined,
       destinationPortId: formData.destinationPortId || undefined,
+      containerNumber: formData.containerNumber || undefined,
+      containerType: formData.containerType || undefined,
+      etd: formData.etd || undefined,
+      eta: formData.eta || undefined,
+      notes: formData.notes || undefined,
     });
   };
 

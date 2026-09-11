@@ -7,6 +7,7 @@ import { generateCode } from '../utils/helpers';
 import { createOrderFromQuotation } from '../services/orderService';
 import { getBaseCurrency } from '../services/exchangeRateService';
 import { emitEvent } from '../services/eventService';
+import { generatePurchaseOrderPDF } from '../services/pdfService';
 
 const router: Router = Router();
 
@@ -138,9 +139,15 @@ router.post('/', can('OPERATIONS_MANAGE'), async (req, res, next) => {
 // Update order status
 router.put('/:id', can('OPERATIONS_MANAGE'), async (req, res, next) => {
   try {
+    // Helper to transform date strings, treating empty strings as undefined
+    const dateString = z.preprocess(
+      (val) => (val === '' ? undefined : val),
+      z.string().transform(s => new Date(s)).optional()
+    );
+
     const schema = z.object({
       status: z.enum(['CONFIRMED', 'IN_PRODUCTION', 'READY_TO_SHIP', 'SHIPPED', 'DELIVERED', 'CANCELLED']).optional(),
-      expectedDate: z.string().transform(s => new Date(s)).optional(),
+      expectedDate: dateString,
       poNumber: z.string().optional(),
       notes: z.string().optional(),
     });
@@ -172,16 +179,36 @@ router.put('/:id', can('OPERATIONS_MANAGE'), async (req, res, next) => {
 // Add procurement
 router.post('/:id/procurements', can('OPERATIONS_MANAGE'), async (req, res, next) => {
   try {
+    // Helper to transform date strings, treating empty strings as undefined
+    const dateString = z.preprocess(
+      (val) => (val === '' ? undefined : val),
+      z.string().transform(s => new Date(s)).optional()
+    );
+
     const schema = z.object({
       supplierId: z.string().min(1),
       totalAmount: z.number().positive(),
       currency: z.string().optional(),
-      expectedDate: z.string().transform(s => new Date(s)).optional(),
+      expectedDate: dateString,
       notes: z.string().optional(),
     });
 
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
+
+    // Verify order exists
+    const order = await prisma.exportOrder.findUnique({
+      where: { id: req.params.id },
+      select: { id: true },
+    });
+    if (!order) throw new NotFoundError('Order');
+
+    // Verify supplier exists
+    const supplier = await prisma.supplier.findUnique({
+      where: { id: validation.data.supplierId },
+      select: { id: true },
+    });
+    if (!supplier) throw new NotFoundError('Supplier');
 
     const poNumber = await generateCode('PROCUREMENT', 'PO');
 
@@ -204,6 +231,12 @@ router.post('/:id/procurements', can('OPERATIONS_MANAGE'), async (req, res, next
 // Add shipment
 router.post('/:id/shipments', can('OPERATIONS_MANAGE'), async (req, res, next) => {
   try {
+    // Helper to transform date strings, treating empty strings as undefined
+    const dateString = z.preprocess(
+      (val) => (val === '' ? undefined : val),
+      z.string().transform(s => new Date(s)).optional()
+    );
+
     const schema = z.object({
       chaId: z.string().optional(),
       transporterId: z.string().optional(),
@@ -211,13 +244,20 @@ router.post('/:id/shipments', can('OPERATIONS_MANAGE'), async (req, res, next) =
       destinationPortId: z.string().optional(),
       containerNumber: z.string().optional(),
       containerType: z.string().optional(),
-      etd: z.string().transform(s => new Date(s)).optional(),
-      eta: z.string().transform(s => new Date(s)).optional(),
+      etd: dateString,
+      eta: dateString,
       notes: z.string().optional(),
     });
 
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
+
+    // Verify order exists
+    const order = await prisma.exportOrder.findUnique({
+      where: { id: req.params.id },
+      select: { id: true },
+    });
+    if (!order) throw new NotFoundError('Order');
 
     const shipmentNumber = await generateCode('SHIPMENT', 'SHP');
 
@@ -259,6 +299,45 @@ router.put('/:orderId/documents/:docId', can('OPERATIONS_MANAGE'), async (req, r
     });
 
     res.json({ success: true, data: document });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Download Purchase Order PDF
+router.get('/:orderId/procurements/:procId/pdf', can('OPERATIONS_VIEW'), async (req, res, next) => {
+  try {
+    const procurement = await prisma.procurement.findUnique({
+      where: { id: req.params.procId },
+      include: {
+        supplier: { include: { country: true } },
+        // The PO lists the goods ordered, so the order's items and their products
+        // are needed - selecting only the order number left the table empty.
+        order: {
+          select: {
+            id: true,
+            orderNumber: true,
+            items: { include: { product: true } },
+          },
+        },
+      },
+    });
+
+    if (!procurement) throw new NotFoundError('Procurement');
+    if (procurement.orderId !== req.params.orderId) {
+      throw new NotFoundError('Procurement not found for this order');
+    }
+
+    const companyProfile = await prisma.companyProfile.findFirst();
+
+    const pdfBuffer = await generatePurchaseOrderPDF(procurement, { companyProfile });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${procurement.poNumber || 'PO-DRAFT'}.pdf"`
+    );
+    res.send(pdfBuffer);
   } catch (error) {
     next(error);
   }

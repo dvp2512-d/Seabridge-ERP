@@ -449,7 +449,7 @@ describe('Invoices', () => {
         orderId: 'order-1',
         buyerId: 'buyer-1',
         currencyId: 'cur-usd',
-        type: 'EXPORT',
+        type: 'COMMERCIAL',
         status: 'DRAFT',
         totalAmount: 5000,
         balanceAmount: 5000,
@@ -470,7 +470,7 @@ describe('Invoices', () => {
         .send({
           orderId: 'order-1',
           dueDate: '2025-03-01',
-          type: 'EXPORT',
+          type: 'COMMERCIAL',
         });
 
       expect(res.status).toBe(201);
@@ -479,7 +479,7 @@ describe('Invoices', () => {
         id: 'inv-1',
         invoiceNumber: 'INV-00001',
         orderId: 'order-1',
-        type: 'EXPORT',
+        type: 'COMMERCIAL',
       });
 
       // Verify prisma.invoice.create was called with correct data
@@ -489,7 +489,7 @@ describe('Invoices', () => {
             orderId: 'order-1',
             buyerId: 'buyer-1',
             currencyId: 'cur-usd',
-            type: 'EXPORT',
+            type: 'COMMERCIAL',
             totalAmount: 5000,
             balanceAmount: 5000,
           }),
@@ -508,7 +508,7 @@ describe('Invoices', () => {
         orderId: 'order-1',
         buyerId: 'buyer-1',
         currencyId: 'cur-usd',
-        type: 'EXPORT',
+        type: 'COMMERCIAL',
         status: 'PARTIALLY_PAID',
         totalAmount: 10000,
         paidAmount: 3000,

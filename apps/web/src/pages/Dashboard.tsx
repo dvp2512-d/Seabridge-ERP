@@ -26,6 +26,7 @@ import {
   Activity,
   ArrowUpRight,
   ArrowDownRight,
+  Wallet,
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -337,6 +338,22 @@ export default function Dashboard() {
 
       {/* Bottom Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Expenses Summary */}
+        <div className="card">
+          <div className="card-header flex items-center justify-between">
+            <h2 className="font-semibold flex items-center gap-2">
+              <Wallet className="w-5 h-5 text-navy-600" />
+              Expenses Overview
+            </h2>
+            <Link to="/expenses" className="text-sm text-navy-600 hover:underline flex items-center gap-1">
+              View all <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+          <div className="card-body">
+            <ExpensesWidget data={dashboard?.expenses} currency={baseCode} />
+          </div>
+        </div>
+
         {/* Top Buyers */}
         <div className="card">
           <div className="card-header flex items-center justify-between">
@@ -382,7 +399,10 @@ export default function Dashboard() {
             </table>
           </div>
         </div>
+      </div>
 
+      {/* Tasks Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Pending Tasks */}
         <div className="card">
           <div className="card-header flex items-center justify-between">
@@ -753,6 +773,107 @@ function ScopedDashboard({
         <div className="card p-8 text-center text-gray-500">
           <Activity className="w-10 h-10 mx-auto mb-3 text-gray-300" />
           <p>Use the navigation on the left to get started.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Expenses Widget for Dashboard
+function ExpensesWidget({ data, currency }: { data: any; currency?: string }) {
+  if (!data) {
+    return (
+      <div className="text-center py-4 text-gray-500 text-sm">
+        No expense data available
+      </div>
+    );
+  }
+
+  const categoryColors: Record<string, string> = {
+    FREIGHT: 'bg-blue-500',
+    CHA: 'bg-purple-500',
+    PACKAGING: 'bg-green-500',
+    TRANSPORT: 'bg-yellow-500',
+    INSPECTION: 'bg-orange-500',
+    CERTIFICATION: 'bg-pink-500',
+    TRAVEL: 'bg-indigo-500',
+    OFFICE: 'bg-gray-500',
+    BANK_CHARGES: 'bg-red-400',
+    OTHER: 'bg-gray-400',
+  };
+
+  const formatCategory = (cat: string) =>
+    cat.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const topCategories = (data.byCategory || []).slice(0, 5);
+  const totalYTD = data.yearToDate || 0;
+
+  return (
+    <div className="space-y-4">
+      {/* Summary KPIs */}
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-gray-50 rounded-lg p-3">
+          <div className="text-xs text-gray-500">This Month</div>
+          <div className="text-lg font-bold text-gray-900">
+            {formatCurrency(data.thisMonth || 0, currency)}
+          </div>
+          <div className="text-xs text-gray-400">
+            {data.thisMonthCount || 0} expenses
+          </div>
+        </div>
+        <div className="bg-gray-50 rounded-lg p-3">
+          <div className="text-xs text-gray-500">Year to Date</div>
+          <div className="text-lg font-bold text-gray-900">
+            {formatCurrency(data.yearToDate || 0, currency)}
+          </div>
+        </div>
+      </div>
+
+      {/* Pending Approval Alert */}
+      {data.pendingApproval?.count > 0 && (
+        <div className="flex items-center gap-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+          <AlertCircle className="w-4 h-4 text-yellow-600" />
+          <div className="flex-1">
+            <span className="text-sm text-yellow-800 font-medium">
+              {data.pendingApproval.count} expense{data.pendingApproval.count > 1 ? 's' : ''} pending approval
+            </span>
+            <span className="text-sm text-yellow-600 ml-2">
+              ({formatCurrency(data.pendingApproval.amount || 0, currency)})
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Category Breakdown */}
+      {topCategories.length > 0 && (
+        <div className="space-y-2">
+          <div className="text-xs text-gray-500 font-medium uppercase">By Category (YTD)</div>
+          {topCategories.map((cat: any) => {
+            const percentage = totalYTD > 0 ? (cat.amount / totalYTD) * 100 : 0;
+            return (
+              <div key={cat.category} className="flex items-center gap-2">
+                <div className="w-24 text-xs text-gray-600 truncate">
+                  {formatCategory(cat.category)}
+                </div>
+                <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
+                  <div
+                    className={cn('h-full rounded-full', categoryColors[cat.category] || 'bg-gray-400')}
+                    style={{ width: `${Math.max(percentage, cat.count > 0 ? 5 : 0)}%` }}
+                  />
+                </div>
+                <div className="w-20 text-right text-xs font-medium text-gray-700">
+                  {formatCurrency(cat.amount, currency)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {topCategories.length === 0 && (
+        <div className="text-center py-4 text-gray-500 text-sm">
+          <CheckCircle className="w-8 h-8 mx-auto mb-2 text-green-500" />
+          No expenses recorded this year
         </div>
       )}
     </div>

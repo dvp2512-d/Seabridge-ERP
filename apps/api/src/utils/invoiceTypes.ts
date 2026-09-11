@@ -8,7 +8,14 @@
  * follow automatically rather than silently counting a new document as revenue.
  */
 
-export const INVOICE_TYPES = ['EXPORT', 'PROFORMA', 'SAMPLE'] as const;
+/**
+ * The permitted values are exactly the invoice-family sheets in MASTER DRAFT.xlsx:
+ * Commercial Invoice, Proforma Invoice, Sample Invoice and Packing List. There is
+ * no separate "Export Invoice" - on an Indian export shipment the commercial
+ * invoice IS the export invoice, and having both meant two names for one document
+ * and a default that produced neither of the master formats.
+ */
+export const INVOICE_TYPES = ['COMMERCIAL', 'PROFORMA', 'SAMPLE', 'PACKING_LIST'] as const;
 
 export type InvoiceType = (typeof INVOICE_TYPES)[number];
 
@@ -22,7 +29,7 @@ export type InvoiceType = (typeof INVOICE_TYPES)[number];
  *   for assessment purposes only - the goods are supplied free of charge, so
  *   treating that value as a receivable would invent revenue that will never arrive.
  */
-export const DOCUMENT_ONLY_INVOICE_TYPES = ['PROFORMA', 'SAMPLE'] as const;
+export const DOCUMENT_ONLY_INVOICE_TYPES = ['PROFORMA', 'SAMPLE', 'PACKING_LIST'] as const;
 
 /** Types that represent a genuine demand for payment. */
 export const COMMERCIAL_INVOICE_TYPES = INVOICE_TYPES.filter(
@@ -55,16 +62,23 @@ export function isDocumentOnlyInvoice(type: string | null | undefined): boolean 
 }
 
 export const INVOICE_TYPE_LABELS: Record<string, string> = {
-  EXPORT: 'Export Invoice',
+  COMMERCIAL: 'Commercial Invoice',
   PROFORMA: 'Proforma Invoice',
   SAMPLE: 'Sample Invoice',
+  PACKING_LIST: 'Packing List',
 };
 
-/** Heading printed at the top of the PDF. */
+/**
+ * Heading printed at the top of the PDF, character for character as the master
+ * sheet has it - including the double space inside the invoice headings, which is
+ * consistent across all three invoice sheets and is how the heading is letter-spaced,
+ * and the title case of "Packing List", which is not an all-caps heading there.
+ */
 export const INVOICE_TYPE_DOCUMENT_TITLES: Record<string, string> = {
-  EXPORT: 'INVOICE',
-  PROFORMA: 'PROFORMA INVOICE',
-  SAMPLE: 'SAMPLE INVOICE',
+  COMMERCIAL: 'COMMERCIAL  INVOICE',
+  PROFORMA: 'PROFORMA  INVOICE',
+  SAMPLE: 'SAMPLE  INVOICE',
+  PACKING_LIST: 'Packing List',
 };
 
 /**

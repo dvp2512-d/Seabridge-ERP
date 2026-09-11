@@ -4,7 +4,7 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
-import { generateInvoicePDF } from '../services/pdfService';
+import { generateInvoicePDF, generatePackingListPDF } from '../services/pdfService';
 import {
   BASE_CURRENCY_CODE,
   getBaseCurrency,
@@ -219,7 +219,7 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
         invoiceNumber,
         orderId: order.id,
         buyerId: order.buyerId,
-        type: validation.data.type || 'EXPORT',
+        type: validation.data.type || 'COMMERCIAL',
         invoiceDate,
         dueDate: validation.data.dueDate,
         subtotal,
@@ -489,7 +489,22 @@ router.get('/:id/pdf', can('FINANCE_VIEW'), async (req, res, next) => {
       where: { id: req.params.id },
       include: {
         buyer: { include: { country: true } },
-        order: { include: { items: { include: { product: true } } } },
+        order: {
+          include: {
+            items: { include: { product: true } },
+            incoterm: true,
+            portOfLoading: true,
+            portOfDischarge: true,
+            shipments: {
+              include: {
+                originPort: true,
+                destinationPort: true,
+              },
+              take: 1,
+              orderBy: { createdAt: 'desc' },
+            },
+          },
+        },
       },
     });
 
@@ -516,18 +531,38 @@ router.get('/:id/pdf', can('FINANCE_VIEW'), async (req, res, next) => {
       },
       include: {
         buyer: { include: { country: true } },
-        order: { include: { items: { include: { product: true } } } },
+        order: {
+          include: {
+            items: { include: { product: true } },
+            incoterm: true,
+            portOfLoading: true,
+            portOfDischarge: true,
+            shipments: {
+              include: {
+                originPort: true,
+                destinationPort: true,
+              },
+              take: 1,
+              orderBy: { createdAt: 'desc' },
+            },
+          },
+        },
       },
     });
 
     const companyProfile = await prisma.companyProfile.findFirst();
 
-    const pdfBuffer = await generateInvoicePDF(updated, {
+    // Use the appropriate PDF generator based on invoice type
+    const pdfOptions = {
       currencyCode: currency.code,
       currencySymbol: currency.symbol,
       rate: requestedRate,
       companyProfile,
-    });
+    };
+    
+    const pdfBuffer = updated.type === 'PACKING_LIST'
+      ? await generatePackingListPDF(updated, pdfOptions)
+      : await generateInvoicePDF(updated, pdfOptions);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${invoice.invoiceNumber}.pdf"`);
