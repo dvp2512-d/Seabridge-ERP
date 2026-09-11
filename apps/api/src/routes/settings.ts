@@ -51,6 +51,7 @@ const profileSchema = z.object({
   bankIfscCode: z.string().optional().nullable(),
   bankChargesNote: z.string().optional().nullable(),
   quotationTerms: z.string().optional().nullable(),
+  purchaseOrderTerms: z.string().optional().nullable(),
   invoiceDeclaration: z.string().optional().nullable(),
 });
 

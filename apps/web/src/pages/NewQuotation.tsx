@@ -63,6 +63,10 @@ export default function NewQuotation() {
   const [incotermId, setIncotermId] = useState('');
   const [portOfLoadingId, setPortOfLoadingId] = useState('');
   const [portOfDischargeId, setPortOfDischargeId] = useState('');
+  // Printed in rows 6 and 7 of the quotation and carried across to the order, so
+  // every document raised later states the same thing.
+  const [dispatchMethod, setDispatchMethod] = useState('');
+  const [shipmentType, setShipmentType] = useState('');
   const [validUntil, setValidUntil] = useState(() => {
     const date = new Date();
     date.setDate(date.getDate() + 30);
@@ -213,6 +217,8 @@ export default function NewQuotation() {
       incotermId,
       portOfLoadingId: portOfLoadingId || undefined,
       portOfDischargeId: portOfDischargeId || undefined,
+      dispatchMethod: dispatchMethod || undefined,
+      shipmentType: shipmentType || undefined,
       validUntil,
       paymentTerms,
       deliveryTerms,
@@ -305,6 +311,29 @@ export default function NewQuotation() {
                     label: `${p.name} (${p.code})`,
                   }))}
                   placeholder="Select Port of Discharge"
+                />
+                <SelectField
+                  label="Method of Dispatch"
+                  value={dispatchMethod}
+                  onChange={(e) => setDispatchMethod(e.target.value)}
+                  placeholder="Not set"
+                  options={[
+                    { value: 'SEA', label: 'Sea' },
+                    { value: 'AIR', label: 'Air' },
+                    { value: 'ROAD', label: 'Road' },
+                  ]}
+                />
+                <SelectField
+                  label="Type of Shipment"
+                  value={shipmentType}
+                  onChange={(e) => setShipmentType(e.target.value)}
+                  placeholder="Not set"
+                  options={[
+                    { value: 'FCL', label: 'FCL - Full Container Load' },
+                    { value: 'LCL', label: 'LCL - Less than Container Load' },
+                    { value: 'BREAK_BULK', label: 'Break Bulk' },
+                    { value: 'AIR_CARGO', label: 'Air Cargo' },
+                  ]}
                 />
                 <FormField
                   label="Valid Until"

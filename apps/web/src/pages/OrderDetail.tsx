@@ -3,7 +3,9 @@ import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { ordersApi, chaApi, transportersApi, suppliersApi, masterApi } from '@/lib/api';
+import { ordersApi, chaApi, transportersApi, suppliersApi, masterApi, buyersApi } from '@/lib/api';
+import { useAuthStore } from '@/store/authStore';
+import { can } from '@/lib/permissions';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import DeleteRecordButton from '@/components/DeleteRecordButton';
@@ -28,6 +30,7 @@ import {
   Plus,
   Edit,
   AlertTriangle,
+  AlertCircle,
   FileCheck,
   ClipboardList,
   Receipt,
@@ -56,6 +59,8 @@ export default function OrderDetail() {
 
   const [activeTab, setActiveTab] = useState<'items' | 'procurement' | 'documents' | 'shipments' | 'invoices'>('items');
   const [showStatusModal, setShowStatusModal] = useState(false);
+  /** The header fields every document raised against this order prints. */
+  const [showDocumentDetails, setShowDocumentDetails] = useState(false);
   const [showProcurementModal, setShowProcurementModal] = useState(false);
   const [showShipmentModal, setShowShipmentModal] = useState(false);
   const [showDocumentModal, setShowDocumentModal] = useState(false);
@@ -146,6 +151,10 @@ export default function OrderDetail() {
             recordName={`Order ${order.orderNumber}`}
             redirectTo="/orders"
           />
+          <button onClick={() => setShowDocumentDetails(true)} className="btn btn-secondary">
+            <FileText className="w-4 h-4 mr-2" />
+            Document Details
+          </button>
           <button onClick={() => setShowStatusModal(true)} className="btn btn-secondary">
             <Edit className="w-4 h-4 mr-2" />
             Update Status
@@ -487,6 +496,17 @@ export default function OrderDetail() {
         />
       )}
 
+      {showDocumentDetails && (
+        <DocumentDetailsModal
+          order={order}
+          onClose={() => setShowDocumentDetails(false)}
+          onSaved={() => {
+            setShowDocumentDetails(false);
+            queryClient.invalidateQueries({ queryKey: ['order', id] });
+          }}
+        />
+      )}
+
       {showProcurementModal && (
         <ProcurementModal
           orderId={id!}
@@ -533,43 +553,458 @@ export default function OrderDetail() {
 
 // Order Items Tab
 function OrderItemsTab({ order, currency }: { order: any; currency: string }) {
+  const queryClient = useQueryClient();
+  const { user } = useAuthStore();
+  const canManage = can(user?.role as any, 'OPERATIONS_MANAGE');
+  const [editingItem, setEditingItem] = useState<any>(null);
+
+  const items: any[] = order.items ?? [];
+
+  /**
+   * Column totals for the packing figures.
+   *
+   * Null rather than zero when no line carries a figure, so an unweighed order reads
+   * "—" instead of a confident 0.00 kg. These are the same totals the weight block
+   * on the invoice prints.
+   */
+  const totals = {
+    packages: items.some((i) => i.numberOfPackages != null)
+      ? items.reduce((sum, i) => sum + Number(i.numberOfPackages ?? 0), 0)
+      : null,
+    net: items.some((i) => i.netWeight != null)
+      ? items.reduce((sum, i) => sum + Number(i.netWeight ?? 0), 0)
+      : null,
+    gross: items.some((i) => i.grossWeight != null)
+      ? items.reduce((sum, i) => sum + Number(i.grossWeight ?? 0), 0)
+      : null,
+  };
+
+  const incomplete = items.filter((i) => i.netWeight == null || i.grossWeight == null).length;
+
   return (
-    <div className="overflow-x-auto">
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Product</th>
-            <th className="text-right">Quantity</th>
-            <th className="text-right">Unit Price</th>
-            <th className="text-right">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {order.items?.map((item: any) => (
-            <tr key={item.id}>
-              <td>
-                <div className="font-medium">{item.product?.name}</div>
-                <div className="text-xs text-gray-500">{item.product?.code}</div>
-                {item.specifications && (
-                  <div className="text-xs text-gray-400 mt-1">{item.specifications}</div>
-                )}
-              </td>
-              <td className="text-right">{item.quantity} {item.unit}</td>
-              <td className="text-right">{formatCurrency(item.unitPrice, currency)}</td>
-              <td className="text-right font-semibold">{formatCurrency(item.totalPrice, currency)}</td>
+    <div className="space-y-4">
+      <div className="overflow-x-auto">
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th className="text-right">Quantity</th>
+              <th className="text-right">Unit Price</th>
+              <th className="text-right">Total</th>
+              {/* The four packing figures are the Packing List, and they fill the
+                  weight block on every invoice. Shown here because they belong to
+                  the line, not to the shipment. */}
+              <th className="text-right">Packages</th>
+              <th className="text-right">Per Pack</th>
+              <th className="text-right">Net Wt</th>
+              <th className="text-right">Gross Wt</th>
+              <th></th>
             </tr>
-          ))}
-        </tbody>
-        <tfoot>
-          <tr className="bg-gray-50">
-            <td colSpan={3} className="text-right font-semibold">Order Total</td>
-            <td className="text-right font-bold text-lg">
-              {formatCurrency(order.totalValue || order.grandTotal, currency)}
-            </td>
-          </tr>
-        </tfoot>
-      </table>
+          </thead>
+          <tbody>
+            {order.items?.map((item: any) => (
+              <tr key={item.id}>
+                <td>
+                  <div className="font-medium">{item.product?.name}</div>
+                  <div className="text-xs text-gray-500">{item.product?.code}</div>
+                  {item.specifications && (
+                    <div className="text-xs text-gray-400 mt-1">{item.specifications}</div>
+                  )}
+                </td>
+                <td className="text-right">{item.quantity} {item.unit}</td>
+                <td className="text-right">{formatCurrency(item.unitPrice, currency)}</td>
+                <td className="text-right font-semibold">
+                  {formatCurrency(item.totalPrice, currency)}
+                </td>
+                <td className="text-right text-sm">
+                  {item.numberOfPackages ?? <span className="text-amber-600">—</span>}
+                </td>
+                <td className="text-right text-sm">
+                  {item.packageWeight ? `${Number(item.packageWeight)} kg` : <span className="text-amber-600">—</span>}
+                </td>
+                <td className="text-right text-sm">
+                  {item.netWeight ? `${Number(item.netWeight)} kg` : <span className="text-amber-600">—</span>}
+                </td>
+                <td className="text-right text-sm">
+                  {item.grossWeight ? `${Number(item.grossWeight)} kg` : <span className="text-amber-600">—</span>}
+                </td>
+                <td className="text-right">
+                  {canManage && (
+                    <button
+                      onClick={() => setEditingItem(item)}
+                      className="btn btn-ghost btn-sm"
+                      title="Edit packing figures"
+                    >
+                      <Package className="w-4 h-4" />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="bg-gray-50">
+              <td colSpan={3} className="text-right font-semibold">Order Total</td>
+              <td className="text-right font-bold text-lg">
+                {formatCurrency(order.totalValue || order.grandTotal, currency)}
+              </td>
+              <td className="text-right font-semibold text-sm">{totals.packages ?? '—'}</td>
+              <td></td>
+              <td className="text-right font-semibold text-sm">
+                {totals.net === null ? '—' : `${totals.net.toFixed(2)} kg`}
+              </td>
+              <td className="text-right font-semibold text-sm">
+                {totals.gross === null ? '—' : `${totals.gross.toFixed(2)} kg`}
+              </td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      {/* A packing list with blank weights is refused at the port, so the gap is
+          stated here rather than discovered when the document is sent. */}
+      {incomplete > 0 && (
+        <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <span>
+            {incomplete} of {order.items?.length ?? 0} lines have no packing figures. The
+            Packing List and the weight block on invoices will print blank for those
+            lines. Set a default pack on the product to have these filled in
+            automatically on future orders.
+          </span>
+        </div>
+      )}
+
+      {editingItem && (
+        <PackingModal
+          orderId={order.id}
+          item={editingItem}
+          onClose={() => setEditingItem(null)}
+          onSaved={() => {
+            setEditingItem(null);
+            queryClient.invalidateQueries({ queryKey: ['order', order.id] });
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Edit one line's packing figures.
+ *
+ * Quantity and price are not editable here: they came from the accepted quotation
+ * and changing them would put the order total, the invoice and the quotation out of
+ * step. The API refuses them too.
+ */
+function PackingModal({
+  orderId,
+  item,
+  onClose,
+  onSaved,
+}: {
+  orderId: string;
+  item: any;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState({
+    numberOfPackages: item.numberOfPackages ? String(item.numberOfPackages) : '',
+    packageWeight: item.packageWeight ? String(Number(item.packageWeight)) : '',
+    netWeight: item.netWeight ? String(Number(item.netWeight)) : '',
+    grossWeight: item.grossWeight ? String(Number(item.grossWeight)) : '',
+  });
+
+  const mutation = useMutation({
+    mutationFn: (data: any) => ordersApi.updateOrderItem(orderId, item.id, data),
+    onSuccess: () => {
+      toast.success('Packing figures saved');
+      onSaved();
+    },
+    onError: (error: any) =>
+      toast.error(error?.response?.data?.message || 'Could not save the packing figures'),
+  });
+
+  /** Blank clears the figure: "not yet weighed" is different from zero. */
+  const numberOrNull = (value: string) => {
+    if (value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const net = numberOrNull(form.netWeight);
+  const gross = numberOrNull(form.grossWeight);
+  const grossTooLow = net !== null && gross !== null && gross < net;
+
+  /**
+   * Suggest the packages and gross weight from the net weight and the pack size,
+   * so entering two figures fills in the other two. Part packs round up: half a bag
+   * still ships as a bag.
+   */
+  const suggest = () => {
+    const perPack = numberOrNull(form.packageWeight) ?? Number(item.product?.packageNetWeight ?? 0);
+    const netKg = net ?? Number(item.quantity ?? 0);
+    if (!perPack || perPack <= 0 || !netKg) return;
+
+    const packages = Math.ceil(netKg / perPack);
+    const perPackGross = Number(item.product?.packageGrossWeight ?? 0);
+
+    setForm({
+      numberOfPackages: String(packages),
+      packageWeight: String(perPack),
+      netWeight: String(netKg),
+      grossWeight: perPackGross > 0 ? String(Math.round(packages * perPackGross * 1000) / 1000) : form.grossWeight,
+    });
+  };
+
+  return (
+    <Modal isOpen onClose={onClose} title={`Packing - ${item.product?.name ?? 'line'}`} size="md">
+      <div className="p-6 space-y-4">
+        <div className="rounded-lg bg-gray-50 p-3 text-sm flex justify-between">
+          <span className="text-gray-500">Ordered</span>
+          <span className="font-medium">
+            {item.quantity} {item.unit}
+          </span>
+        </div>
+
+        {item.product?.packageNetWeight && (
+          <button onClick={suggest} className="btn btn-secondary btn-sm w-full">
+            Fill from product default ({Number(item.product.packageNetWeight)} kg per{' '}
+            {(item.product.packageType || 'pack').toLowerCase()})
+          </button>
+        )}
+
+        <div className="grid grid-cols-2 gap-4">
+          <FormField
+            label="No. of Packages"
+            type="number"
+            min="0"
+            step="1"
+            value={form.numberOfPackages}
+            onChange={(e: any) => setForm({ ...form, numberOfPackages: e.target.value })}
+          />
+          <FormField
+            label="Weight per Package (KG)"
+            type="number"
+            min="0"
+            step="0.001"
+            value={form.packageWeight}
+            onChange={(e: any) => setForm({ ...form, packageWeight: e.target.value })}
+          />
+          <FormField
+            label="Net Weight (KG)"
+            type="number"
+            min="0"
+            step="0.001"
+            value={form.netWeight}
+            onChange={(e: any) => setForm({ ...form, netWeight: e.target.value })}
+          />
+          <FormField
+            label="Gross Weight (KG)"
+            type="number"
+            min="0"
+            step="0.001"
+            value={form.grossWeight}
+            onChange={(e: any) => setForm({ ...form, grossWeight: e.target.value })}
+          />
+        </div>
+
+        {grossTooLow && (
+          <p className="text-xs text-red-600">
+            Gross weight cannot be less than net weight — gross includes the packaging.
+          </p>
+        )}
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button className="btn btn-secondary" onClick={onClose} disabled={mutation.isPending}>
+            Cancel
+          </button>
+          <button
+            className="btn btn-primary"
+            disabled={grossTooLow || mutation.isPending}
+            onClick={() =>
+              mutation.mutate({
+                numberOfPackages:
+                  form.numberOfPackages === '' ? null : Number(form.numberOfPackages),
+                packageWeight: numberOrNull(form.packageWeight),
+                netWeight: net,
+                grossWeight: gross,
+              })
+            }
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * The header fields every document raised against this order prints.
+ *
+ * They live on the order rather than on each document because they describe the
+ * shipment, not the paperwork: a commercial invoice, a packing list and a proforma
+ * for the same order must all state the same dispatch method and destination. The
+ * columns existed and the PDFs read them, but nothing could set them, so these
+ * boxes printed whatever could be inferred from the port - or empty.
+ */
+function DocumentDetailsModal({
+  order,
+  onClose,
+  onSaved,
+}: {
+  order: any;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState({
+    dispatchMethod: order.dispatchMethod || '',
+    shipmentType: order.shipmentType || '',
+    variationPercent: order.variationPercent != null ? String(Number(order.variationPercent)) : '',
+    billToBuyerId: order.billToBuyerId || '',
+    paymentTerms: order.paymentTerms || '',
+    deliveryTerms: order.deliveryTerms || '',
+    portOfLoadingId: order.portOfLoadingId || '',
+    portOfDischargeId: order.portOfDischargeId || '',
+  });
+
+  const { data: buyersData } = useQuery({
+    queryKey: ['buyers-list'],
+    queryFn: () => buyersApi.list({ limit: 200 }),
+  });
+
+  const { data: portsData } = useQuery({
+    queryKey: ['ports'],
+    queryFn: () => masterApi.getPorts({ limit: 200 }),
+  });
+
+  const mutation = useMutation({
+    mutationFn: (data: any) => ordersApi.update(order.id, data),
+    onSuccess: () => {
+      toast.success('Document details saved');
+      onSaved();
+    },
+    onError: (error: any) =>
+      toast.error(error?.response?.data?.message || 'Could not save the document details'),
+  });
+
+  const ports = portsData?.data?.data || [];
+  // The consignee cannot also be the bill-to party; leaving it empty is how "same
+  // party" is expressed, which is what the master draft shows.
+  const buyers = (buyersData?.data?.data || []).filter((b: any) => b.id !== order.buyerId);
+
+  return (
+    <Modal isOpen onClose={onClose} title="Document Details" size="lg">
+      <div className="p-6 space-y-4">
+        <p className="text-sm text-gray-500">
+          Printed on the quotation, invoices and packing list raised against this order.
+        </p>
+
+        <div className="grid grid-cols-2 gap-4">
+          <SelectField
+            label="Method of Dispatch"
+            value={form.dispatchMethod}
+            onChange={(e: any) => setForm({ ...form, dispatchMethod: e.target.value })}
+            placeholder="Not set"
+            options={[
+              { value: 'SEA', label: 'Sea' },
+              { value: 'AIR', label: 'Air' },
+              { value: 'ROAD', label: 'Road' },
+            ]}
+          />
+          <SelectField
+            label="Type of Shipment"
+            value={form.shipmentType}
+            onChange={(e: any) => setForm({ ...form, shipmentType: e.target.value })}
+            placeholder="Not set"
+            options={[
+              { value: 'FCL', label: 'FCL - Full Container Load' },
+              { value: 'LCL', label: 'LCL - Less than Container Load' },
+              { value: 'BREAK_BULK', label: 'Break Bulk' },
+              { value: 'AIR_CARGO', label: 'Air Cargo' },
+            ]}
+          />
+          <SelectField
+            label="Port of Loading"
+            value={form.portOfLoadingId}
+            onChange={(e: any) => setForm({ ...form, portOfLoadingId: e.target.value })}
+            placeholder="Not set"
+            options={ports.map((p: any) => ({ value: p.id, label: `${p.name} (${p.code})` }))}
+          />
+          <SelectField
+            label="Port of Discharge"
+            value={form.portOfDischargeId}
+            onChange={(e: any) => setForm({ ...form, portOfDischargeId: e.target.value })}
+            placeholder="Not set"
+            options={ports.map((p: any) => ({ value: p.id, label: `${p.name} (${p.code})` }))}
+          />
+        </div>
+
+        <SelectField
+          label="Buyer (if other than consignee)"
+          value={form.billToBuyerId}
+          onChange={(e: any) => setForm({ ...form, billToBuyerId: e.target.value })}
+          placeholder="Same as consignee"
+          options={buyers.map((b: any) => ({ value: b.id, label: b.companyName }))}
+        />
+        <p className="-mt-2 text-xs text-gray-500">
+          Set only when the goods are consigned to one party and invoiced to another.
+        </p>
+
+        <FormField
+          label="Variation % +/- (proforma invoice)"
+          type="number"
+          min="0"
+          max="100"
+          step="0.01"
+          value={form.variationPercent}
+          onChange={(e: any) => setForm({ ...form, variationPercent: e.target.value })}
+          placeholder="e.g. 10"
+        />
+
+        <TextareaField
+          label="Payment Terms"
+          rows={2}
+          value={form.paymentTerms}
+          onChange={(e: any) => setForm({ ...form, paymentTerms: e.target.value })}
+          placeholder="e.g. 30% advance, balance against BL copy"
+        />
+        <TextareaField
+          label="Delivery Terms"
+          rows={2}
+          value={form.deliveryTerms}
+          onChange={(e: any) => setForm({ ...form, deliveryTerms: e.target.value })}
+        />
+
+        <div className="flex justify-end gap-2 pt-2 border-t">
+          <button className="btn btn-secondary" onClick={onClose} disabled={mutation.isPending}>
+            Cancel
+          </button>
+          <button
+            className="btn btn-primary"
+            disabled={mutation.isPending}
+            onClick={() =>
+              mutation.mutate({
+                // Empty string clears the field rather than leaving the old value.
+                dispatchMethod: form.dispatchMethod || null,
+                shipmentType: form.shipmentType || null,
+                variationPercent:
+                  form.variationPercent === '' ? null : Number(form.variationPercent),
+                billToBuyerId: form.billToBuyerId || null,
+                paymentTerms: form.paymentTerms || null,
+                deliveryTerms: form.deliveryTerms || null,
+                portOfLoadingId: form.portOfLoadingId || null,
+                portOfDischargeId: form.portOfDischargeId || null,
+              })
+            }
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -678,8 +1113,14 @@ function DocumentsTab({
   };
   
   return (
-    <div className="divide-y">
-      {documents.map((doc: any) => (
+    <div>
+      {/* What each printable document would contain if generated now. Shown above
+          the checklist because the checklist tracks whether a document has been
+          obtained, while this tracks whether ours would print complete. */}
+      <DocumentReadinessPanel orderId={order.id} />
+
+      <div className="divide-y border-t">
+        {documents.map((doc: any) => (
         <div key={doc.id} className="p-4 flex items-center justify-between hover:bg-gray-50">
           <div className="flex items-center gap-3">
             <div className={cn(
@@ -713,7 +1154,112 @@ function DocumentsTab({
             </button>
           </div>
         </div>
-      ))}
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Per-document readiness.
+ *
+ * A document with an empty box still renders and downloads, so the gap is otherwise
+ * found by whoever receives it - a bank rejecting an LC presentation, or customs
+ * holding a consignment over a missing gross weight. Each row says how many of the
+ * printed boxes would be filled, and expands to name the ones that would not be and
+ * where to enter them.
+ *
+ * Fetched from the server rather than computed here, because the rules have to move
+ * together with the PDF renderer; see services/documentReadiness.ts.
+ */
+function DocumentReadinessPanel({ orderId }: { orderId: string }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['document-readiness', orderId],
+    queryFn: () => ordersApi.documentReadiness(orderId).then((r: any) => r.data),
+  });
+
+  if (isLoading) {
+    return <div className="p-4 text-sm text-gray-500">Checking document readiness...</div>;
+  }
+
+  const documents = data?.data?.documents ?? [];
+  if (documents.length === 0) return null;
+
+  return (
+    <div className="p-4 space-y-2">
+      <div className="flex items-baseline justify-between">
+        <h3 className="text-sm font-medium text-navy-900">Document Readiness</h3>
+        <span className="text-xs text-gray-500">
+          What would print if generated now
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        {documents.map((doc: any) => {
+          const isOpen = expanded === doc.document;
+          const missing = doc.fields.filter((f: any) => !f.ready);
+
+          return (
+            <div
+              key={doc.document}
+              className={cn(
+                'rounded-lg border text-sm',
+                doc.complete ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'
+              )}
+            >
+              <button
+                className="w-full flex items-center justify-between gap-2 p-3 text-left"
+                onClick={() => setExpanded(isOpen ? null : doc.document)}
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  {doc.complete ? (
+                    <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                  )}
+                  <span className="font-medium truncate">{doc.label}</span>
+                </span>
+                <span
+                  className={cn(
+                    'text-xs whitespace-nowrap',
+                    doc.complete ? 'text-green-700' : 'text-amber-700'
+                  )}
+                >
+                  {doc.readyCount} of {doc.totalCount} ready
+                </span>
+              </button>
+
+              {/* Recorded on every generation but never shown before, so there was
+                  no way to tell whether the copy a buyer holds is the current one. */}
+              {doc.lastGeneratedAt && (
+                <div className="px-3 pb-2 -mt-1 text-xs text-gray-500">
+                  Last generated {formatDate(doc.lastGeneratedAt)}
+                  {doc.lastCurrency ? ` in ${doc.lastCurrency}` : ''}
+                </div>
+              )}
+
+              {isOpen && (
+                <div className="px-3 pb-3 space-y-1 border-t border-white/60 pt-2">
+                  {missing.length === 0 ? (
+                    <p className="text-xs text-green-700">
+                      Every printed field has a value.
+                    </p>
+                  ) : (
+                    missing.map((f: any) => (
+                      <div key={f.label} className="flex items-baseline justify-between gap-2 text-xs">
+                        <span className="text-amber-900">{f.label}</span>
+                        <span className="text-gray-500 whitespace-nowrap">{f.where}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -906,6 +1452,15 @@ function ProcurementModal({
     totalAmount: '',
     expectedDate: '',
     notes: '',
+    // The PO sheet boxes that had no field behind them.
+    deliveryAddress: '',
+    modeOfDelivery: '',
+    paymentMode: '',
+    pickupLocation: '',
+    destination: '',
+    packingInstructions: '',
+    qualityRequirement: '',
+    variationPercent: '',
   });
 
   const { data: suppliersData } = useQuery({
@@ -915,8 +1470,15 @@ function ProcurementModal({
 
   const mutation = useMutation({
     mutationFn: (data: any) => ordersApi.addProcurement(orderId, data),
-    onSuccess: () => {
-      toast.success('Procurement order created');
+    onSuccess: (response: any) => {
+      // The payable is raised with the order, so say so - otherwise a new row in
+      // Expenses looks like it appeared from nowhere.
+      const raised = response?.data?.expenseSync?.action === 'created';
+      toast.success(
+        raised
+          ? 'Purchase order created. Supplier payment added to Expenses.'
+          : 'Procurement order created'
+      );
       onSuccess();
     },
     onError: (error: any) => {
@@ -936,11 +1498,22 @@ function ProcurementModal({
       currency,
       expectedDate: formData.expectedDate || undefined,
       notes: formData.notes || undefined,
+      // The PO sheet boxes. Sent only when filled, so an untouched box stays empty
+      // on the printed order rather than writing an empty string.
+      deliveryAddress: formData.deliveryAddress || undefined,
+      modeOfDelivery: formData.modeOfDelivery || undefined,
+      paymentMode: formData.paymentMode || undefined,
+      pickupLocation: formData.pickupLocation || undefined,
+      destination: formData.destination || undefined,
+      packingInstructions: formData.packingInstructions || undefined,
+      qualityRequirement: formData.qualityRequirement || undefined,
+      variationPercent:
+        formData.variationPercent === '' ? undefined : Number(formData.variationPercent),
     });
   };
 
   return (
-    <Modal isOpen onClose={onClose} title="Create Purchase Order" size="md">
+    <Modal isOpen onClose={onClose} title="Create Purchase Order" size="lg">
       <div className="p-6 space-y-4">
         <SelectField
           label="Supplier"
@@ -967,6 +1540,81 @@ function ProcurementModal({
           value={formData.expectedDate}
           onChange={(e) => setFormData({ ...formData, expectedDate: e.target.value })}
         />
+
+        {/*
+          The boxes printed on the purchase order sheet. Each was blank on every PO
+          before, so a supplier received an order without a delivery point, packing
+          specification or quality clause. All optional - a repeat local pickup needs
+          few of them.
+        */}
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+          <div>
+            <h4 className="text-sm font-medium text-navy-900">Delivery &amp; Payment</h4>
+            <p className="text-xs text-gray-500 mt-0.5">Printed on the purchase order.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <FormField
+              label="Mode of Delivery"
+              value={formData.modeOfDelivery}
+              onChange={(e) => setFormData({ ...formData, modeOfDelivery: e.target.value })}
+              placeholder="Road / Ex-factory pickup"
+            />
+            <FormField
+              label="Expected Mode of Payment"
+              value={formData.paymentMode}
+              onChange={(e) => setFormData({ ...formData, paymentMode: e.target.value })}
+              placeholder="50% advance, 50% on delivery"
+            />
+            <FormField
+              label="Pickup Location"
+              value={formData.pickupLocation}
+              onChange={(e) => setFormData({ ...formData, pickupLocation: e.target.value })}
+              placeholder="Factory, Unjha"
+            />
+            <FormField
+              label="Destination"
+              value={formData.destination}
+              onChange={(e) => setFormData({ ...formData, destination: e.target.value })}
+              placeholder="Warehouse / Mundra Port ICD"
+            />
+          </div>
+          <TextareaField
+            label="Delivery / Consignment Address"
+            rows={2}
+            value={formData.deliveryAddress}
+            onChange={(e) => setFormData({ ...formData, deliveryAddress: e.target.value })}
+            placeholder="Only if goods go somewhere other than your own address"
+          />
+        </div>
+
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+          <h4 className="text-sm font-medium text-navy-900">Packing &amp; Quality</h4>
+          <TextareaField
+            label="Packing Instructions"
+            rows={2}
+            value={formData.packingInstructions}
+            onChange={(e) => setFormData({ ...formData, packingInstructions: e.target.value })}
+            placeholder="e.g. 25kg HDPE bags with inner liner"
+          />
+          <TextareaField
+            label="Quality Requirement"
+            rows={2}
+            value={formData.qualityRequirement}
+            onChange={(e) => setFormData({ ...formData, qualityRequirement: e.target.value })}
+            placeholder="e.g. Batch-wise COA required with delivery (purity, moisture, microbial)"
+          />
+          <FormField
+            label="Variation % +/-"
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            value={formData.variationPercent}
+            onChange={(e) => setFormData({ ...formData, variationPercent: e.target.value })}
+            placeholder="e.g. 5"
+          />
+        </div>
+
         <TextareaField
           label="Notes"
           value={formData.notes}
@@ -1001,6 +1649,14 @@ function ShipmentModal({
     destinationPortId: '',
     containerNumber: '',
     containerType: '20FT',
+    // Printed on the invoice and packing list.
+    vesselName: '',
+    blNumber: '',
+    // Costs. Each one entered raises the matching expense automatically, so these
+    // are the fields that populate the Expenses module.
+    freightCost: '',
+    chaCharges: '',
+    transportCharges: '',
     etd: '',
     eta: '',
     notes: '',
@@ -1023,8 +1679,17 @@ function ShipmentModal({
 
   const mutation = useMutation({
     mutationFn: (data: any) => ordersApi.addShipment(orderId, data),
-    onSuccess: () => {
-      toast.success('Shipment created');
+    onSuccess: (response: any) => {
+      // Say so when costs were entered, otherwise the expenses appearing in the
+      // finance section looks like something nobody asked for.
+      const raised = (response?.data?.expenseSync ?? []).filter(
+        (r: any) => r?.action === 'created'
+      ).length;
+      toast.success(
+        raised > 0
+          ? `Shipment created. ${raised} expense${raised === 1 ? '' : 's'} added to Expenses.`
+          : 'Shipment created'
+      );
       onSuccess();
     },
     onError: (error: any) => {
@@ -1032,6 +1697,13 @@ function ShipmentModal({
       toast.error(message);
     },
   });
+
+  /** Blank stays blank: an empty cost is unknown, not zero. */
+  const numberOrUndefined = (value: string) => {
+    if (value === '' || value === null) return undefined;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : undefined;
+  };
 
   const handleSubmit = () => {
     mutation.mutate({
@@ -1041,6 +1713,11 @@ function ShipmentModal({
       destinationPortId: formData.destinationPortId || undefined,
       containerNumber: formData.containerNumber || undefined,
       containerType: formData.containerType || undefined,
+      vesselName: formData.vesselName || undefined,
+      blNumber: formData.blNumber || undefined,
+      freightCost: numberOrUndefined(formData.freightCost),
+      chaCharges: numberOrUndefined(formData.chaCharges),
+      transportCharges: numberOrUndefined(formData.transportCharges),
       etd: formData.etd || undefined,
       eta: formData.eta || undefined,
       notes: formData.notes || undefined,
@@ -1135,12 +1812,67 @@ function ShipmentModal({
           />
         </div>
 
+        <div className="grid grid-cols-2 gap-4">
+          <FormField
+            label="Vessel / Flight No"
+            value={formData.vesselName}
+            onChange={(e) => setFormData({ ...formData, vesselName: e.target.value })}
+            placeholder="MV Maersk Cabinda"
+          />
+          <FormField
+            label="BL / AWB Number"
+            value={formData.blNumber}
+            onChange={(e) => setFormData({ ...formData, blNumber: e.target.value })}
+          />
+        </div>
+
+        {/*
+          Costs. Each figure entered here raises a matching expense in the Expenses
+          section, against the CHA or transporter named above, so the payable does
+          not have to be typed a second time. Leave one blank if it is not yet known
+          and fill it in later - blank means unknown, not zero.
+        */}
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3">
+          <div>
+            <h4 className="text-sm font-medium text-navy-900">Costs</h4>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Each amount entered is added to Expenses automatically and tracked until paid.
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <FormField
+              label="Freight (₹)"
+              type="number"
+              step="0.01"
+              min="0"
+              value={formData.freightCost}
+              onChange={(e) => setFormData({ ...formData, freightCost: e.target.value })}
+            />
+            <FormField
+              label="CHA Charges (₹)"
+              type="number"
+              step="0.01"
+              min="0"
+              value={formData.chaCharges}
+              onChange={(e) => setFormData({ ...formData, chaCharges: e.target.value })}
+            />
+            <FormField
+              label="Transport (₹)"
+              type="number"
+              step="0.01"
+              min="0"
+              value={formData.transportCharges}
+              onChange={(e) => setFormData({ ...formData, transportCharges: e.target.value })}
+            />
+          </div>
+        </div>
+
         <TextareaField
           label="Notes"
           value={formData.notes}
           onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
           rows={2}
-          placeholder="Shipping line, vessel name, booking reference..."
+          placeholder="Shipping line, booking reference..."
         />
 
         <div className="flex justify-end gap-3 pt-4 border-t">

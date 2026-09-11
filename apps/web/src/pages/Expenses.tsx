@@ -11,9 +11,22 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { refreshAggregates } from '@/lib/queryKeys';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
-import { Plus, Receipt, Search, Check, X, Trash2, Edit, Link2, Loader2 } from 'lucide-react';
+import {
+  Plus,
+  Receipt,
+  Search,
+  Check,
+  X,
+  Trash2,
+  Edit,
+  Link2,
+  Loader2,
+  RefreshCw,
+  Wallet,
+} from 'lucide-react';
 
 const CATEGORY_LABELS: Record<string, string> = {
+  SUPPLIER_PAYMENT: 'Supplier Payment',
   FREIGHT: 'Freight',
   CHA: 'CHA / Customs',
   PACKAGING: 'Packaging',
@@ -24,6 +37,20 @@ const CATEGORY_LABELS: Record<string, string> = {
   OFFICE: 'Office',
   BANK_CHARGES: 'Bank Charges',
   OTHER: 'Other',
+};
+
+/**
+ * Where a generated expense came from, for the badge on its row.
+ *
+ * These are raised automatically when the underlying record is filled in - a
+ * supplier purchase order, or the freight, CHA and transport costs on a shipment -
+ * so the badge explains why a row nobody typed is in the list.
+ */
+const SOURCE_LABELS: Record<string, string> = {
+  PROCUREMENT: 'From purchase order',
+  SHIPMENT_FREIGHT: 'From shipment freight',
+  SHIPMENT_CHA: 'From shipment CHA',
+  SHIPMENT_TRANSPORT: 'From shipment transport',
 };
 
 const STATUS_STYLES: Record<string, string> = {
@@ -51,6 +78,10 @@ export default function Expenses() {
   const [status, setStatus] = useState('');
   const [editing, setEditing] = useState<any>(null);
   const [showForm, setShowForm] = useState(false);
+  /** The expense a payment is being recorded against. */
+  const [paying, setPaying] = useState<any>(null);
+  /** '', 'generated' or 'manual' - where the expenses in the list came from. */
+  const [origin, setOrigin] = useState('');
   // Held while the confirmation is open, so the row is only removed once the
   // backend confirms the delete succeeded.
   const [pendingDelete, setPendingDelete] = useState<any>(null);
@@ -62,13 +93,14 @@ export default function Expenses() {
   }, 350);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['expenses', search, category, status, page],
+    queryKey: ['expenses', search, category, status, origin, page],
     queryFn: () =>
       expensesApi
         .list({
           search: search || undefined,
           category: category || undefined,
           status: status || undefined,
+          origin: origin || undefined,
           page,
         })
         .then((r: any) => r.data),
@@ -100,45 +132,116 @@ export default function Expenses() {
     onError: (error: any) => toast.error(error.response?.data?.message || 'Could not delete'),
   });
 
+  /**
+   * Record money paid out.
+   *
+   * The status is not sent: it follows the payments on the server, so a part
+   * payment leaves the expense approved with a balance and the final one settles it.
+   */
+  const addPayment = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: any }) => expensesApi.addPayment(id, data),
+    onSuccess: (response: any) => {
+      const expense = response?.data?.data?.expense;
+      toast.success(
+        Number(expense?.balanceAmount ?? 0) <= 0
+          ? 'Payment recorded. Expense settled in full.'
+          : `Payment recorded. ${formatCurrency(Number(expense?.balanceAmount ?? 0))} still to pay.`
+      );
+      setPaying(null);
+      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      refreshAggregates(queryClient);
+    },
+    onError: (error: any) =>
+      toast.error(error.response?.data?.message || 'Could not record the payment'),
+  });
+
+  /**
+   * Generate expenses for purchase orders and shipments recorded before the
+   * automatic sync existed. Idempotent, so pressing it twice is harmless.
+   */
+  const syncSources = useMutation({
+    mutationFn: () => expensesApi.syncFromSources(),
+    onSuccess: (response: any) => {
+      const r = response?.data?.data;
+      const created = r?.created ?? 0;
+      toast.success(
+        created > 0
+          ? `${created} expense${created === 1 ? '' : 's'} added from purchase orders and shipments`
+          : 'Everything is already up to date'
+      );
+      if (r?.locked > 0) {
+        toast.error(
+          `${r.locked} could not be updated because payments are already recorded against them`
+        );
+      }
+      queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      refreshAggregates(queryClient);
+    },
+    onError: (error: any) => toast.error(error.response?.data?.message || 'Sync failed'),
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-navy-900">Expenses</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Freight, CHA, packaging and other costs, in rupees.
+            Supplier payments, freight, CHA and transport are added automatically from
+            purchase orders and shipments. All amounts in rupees.
           </p>
         </div>
         {canManage && (
-          <button
-            onClick={() => {
-              setEditing(null);
-              setShowForm(true);
-            }}
-            className="btn btn-primary"
-          >
-            <Plus className="w-4 h-4" />
-            Record Expense
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => syncSources.mutate()}
+              disabled={syncSources.isPending}
+              className="btn btn-secondary"
+              title="Add expenses for purchase orders and shipments recorded earlier"
+            >
+              {syncSources.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4" />
+              )}
+              Sync From Records
+            </button>
+            <button
+              onClick={() => {
+                setEditing(null);
+                setShowForm(true);
+              }}
+              className="btn btn-primary"
+            >
+              <Plus className="w-4 h-4" />
+              Record Expense
+            </button>
+          </div>
         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <SummaryCard
           label="Total Spend"
           value={formatCurrency(summary?.totalSpend ?? 0)}
           hint="Excludes rejected"
+        />
+        {/* The payables figure: what is still to go out, after part payments. */}
+        <SummaryCard
+          label="Still To Pay"
+          value={formatCurrency(summary?.outstanding ?? 0)}
+          hint="Outstanding balance"
+          emphasis={(summary?.outstanding ?? 0) > 0}
+        />
+        <SummaryCard
+          label="Paid Out"
+          value={formatCurrency(summary?.paid ?? 0)}
+          hint={`${summary?.countByStatus?.PAID ?? 0} settled in full`}
         />
         <SummaryCard
           label="Awaiting Approval"
           value={formatCurrency(summary?.pendingApproval ?? 0)}
           hint={`${summary?.countByStatus?.PENDING ?? 0} pending`}
           emphasis={(summary?.countByStatus?.PENDING ?? 0) > 0}
-        />
-        <SummaryCard
-          label="Paid"
-          value={String(summary?.countByStatus?.PAID ?? 0)}
-          hint="Cannot be edited or deleted"
         />
       </div>
 
@@ -176,6 +279,19 @@ export default function Expenses() {
               label: s.charAt(0) + s.slice(1).toLowerCase(),
             }))}
           />
+          {/* Separates the rows raised from purchase orders and shipments from the
+              ones somebody typed, which is the first question asked of a list that
+              fills itself. */}
+          <SelectField
+            label="Source"
+            value={origin}
+            onChange={(e) => { setOrigin(e.target.value); setPage(1); }}
+            placeholder="All sources"
+            options={[
+              { value: 'generated', label: 'From records' },
+              { value: 'manual', label: 'Entered by hand' },
+            ]}
+          />
         </div>
       </div>
 
@@ -198,6 +314,8 @@ export default function Expenses() {
                   <th>Description</th>
                   <th>Vendor</th>
                   <th className="text-right">Amount</th>
+                  <th className="text-right">Paid</th>
+                  <th className="text-right">Balance</th>
                   <th>Status</th>
                   <th></th>
                 </tr>
@@ -205,7 +323,20 @@ export default function Expenses() {
               <tbody>
                 {expenses.map((e: any) => (
                   <tr key={e.id}>
-                    <td className="font-mono text-xs">{e.expenseNumber}</td>
+                    <td className="font-mono text-xs">
+                      {e.expenseNumber}
+                      {/* Explains why a row nobody typed is in the list, and links
+                          the cost back to the record that produced it. */}
+                      {e.isGenerated && (
+                        <span
+                          className="mt-1 flex items-center gap-1 text-[10px] font-normal text-gray-500"
+                          title={`Maintained by ${SOURCE_LABELS[e.sourceType] ?? 'a linked record'}. Change the amount there.`}
+                        >
+                          <Link2 className="w-3 h-3 flex-shrink-0" />
+                          {SOURCE_LABELS[e.sourceType] ?? 'Auto'}
+                        </span>
+                      )}
+                    </td>
                     <td className="text-sm">{formatDate(e.expenseDate)}</td>
                     <td className="text-sm">{CATEGORY_LABELS[e.category] ?? e.category}</td>
                     <td className="max-w-[240px] truncate" title={e.description}>
@@ -214,6 +345,18 @@ export default function Expenses() {
                     <td className="text-sm text-gray-500">{e.vendorName || '-'}</td>
                     <td className="text-right font-medium">
                       {formatCurrency(e.amount)}
+                    </td>
+                    <td className="text-right text-sm text-gray-600">
+                      {Number(e.paidAmount ?? 0) > 0 ? formatCurrency(e.paidAmount) : '-'}
+                    </td>
+                    <td
+                      className={`text-right text-sm font-medium ${
+                        Number(e.balanceAmount ?? 0) > 0 ? 'text-amber-700' : 'text-gray-400'
+                      }`}
+                    >
+                      {Number(e.balanceAmount ?? 0) > 0
+                        ? formatCurrency(e.balanceAmount)
+                        : 'Settled'}
                     </td>
                     <td>
                       <span
@@ -231,7 +374,9 @@ export default function Expenses() {
                           canDelete={canDelete}
                           onApprove={() => setStatusMutation.mutate({ id: e.id, next: 'APPROVED' })}
                           onReject={() => setStatusMutation.mutate({ id: e.id, next: 'REJECTED' })}
-                          onPay={() => setStatusMutation.mutate({ id: e.id, next: 'PAID' })}
+                          // Paying means recording a payment now, not flipping a
+                          // flag: the status follows the money on the server.
+                          onPay={() => setPaying(e)}
                           onEdit={() => {
                             setEditing(e);
                             setShowForm(true);
@@ -279,6 +424,15 @@ export default function Expenses() {
         />
       )}
 
+      {paying && (
+        <PaymentModal
+          expense={paying}
+          isPending={addPayment.isPending}
+          onClose={() => setPaying(null)}
+          onSubmit={(data) => addPayment.mutate({ id: paying.id, data })}
+        />
+      )}
+
       {/* Uses the shared dialog rather than window.confirm, so the wording
           matches every other section. The row is only removed after the backend
           confirms, so a failed delete leaves the list untouched. */}
@@ -298,6 +452,142 @@ export default function Expenses() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * Record a payment against an expense.
+ *
+ * Defaults to the full outstanding balance, because paying in full is the common
+ * case and a supplier advance is the exception. The amount is capped at the
+ * balance: the server refuses an overpayment, and letting one be typed only to be
+ * rejected wastes the operator's time.
+ */
+function PaymentModal({
+  expense,
+  isPending,
+  onClose,
+  onSubmit,
+}: {
+  expense: any;
+  isPending: boolean;
+  onClose: () => void;
+  onSubmit: (data: any) => void;
+}) {
+  const outstanding = Number(expense.balanceAmount ?? expense.amount ?? 0);
+  const alreadyPaid = Number(expense.paidAmount ?? 0);
+
+  const [form, setForm] = useState({
+    amount: String(outstanding),
+    paymentDate: new Date().toISOString().slice(0, 10),
+    method: 'BANK_TRANSFER',
+    reference: '',
+    notes: '',
+  });
+
+  const amount = Number(form.amount);
+  const invalid = !Number.isFinite(amount) || amount <= 0 || amount > outstanding + 0.005;
+  const remainingAfter = Math.max(0, Math.round((outstanding - amount) * 100) / 100);
+
+  return (
+    <Modal isOpen title={`Record payment - ${expense.expenseNumber}`} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="rounded-lg bg-gray-50 p-3 text-sm space-y-1">
+          <div className="flex justify-between">
+            <span className="text-gray-500">Expense total</span>
+            <span className="font-medium">{formatCurrency(expense.amount)}</span>
+          </div>
+          {alreadyPaid > 0 && (
+            <div className="flex justify-between">
+              <span className="text-gray-500">Already paid</span>
+              <span>{formatCurrency(alreadyPaid)}</span>
+            </div>
+          )}
+          <div className="flex justify-between">
+            <span className="text-gray-500">Outstanding</span>
+            <span className="font-medium text-amber-700">{formatCurrency(outstanding)}</span>
+          </div>
+          {expense.vendorName && (
+            <div className="flex justify-between pt-1 border-t border-gray-200">
+              <span className="text-gray-500">Paying</span>
+              <span>{expense.vendorName}</span>
+            </div>
+          )}
+        </div>
+
+        <FormField
+          label="Amount"
+          type="number"
+          step="0.01"
+          value={form.amount}
+          onChange={(e: any) => setForm({ ...form, amount: e.target.value })}
+          required
+        />
+        {!invalid && remainingAfter > 0 && (
+          <p className="-mt-2 text-xs text-gray-500">
+            {formatCurrency(remainingAfter)} will still be outstanding after this payment.
+          </p>
+        )}
+        {invalid && amount > outstanding && (
+          <p className="-mt-2 text-xs text-red-600">
+            That is more than the {formatCurrency(outstanding)} outstanding.
+          </p>
+        )}
+
+        <FormField
+          label="Payment Date"
+          type="date"
+          value={form.paymentDate}
+          onChange={(e: any) => setForm({ ...form, paymentDate: e.target.value })}
+          required
+        />
+        <SelectField
+          label="Method"
+          value={form.method}
+          onChange={(e: any) => setForm({ ...form, method: e.target.value })}
+          options={[
+            { value: 'BANK_TRANSFER', label: 'Bank Transfer' },
+            { value: 'CHEQUE', label: 'Cheque' },
+            { value: 'CASH', label: 'Cash' },
+            { value: 'UPI', label: 'UPI' },
+            { value: 'CARD', label: 'Card' },
+          ]}
+        />
+        <FormField
+          label="Reference"
+          value={form.reference}
+          onChange={(e: any) => setForm({ ...form, reference: e.target.value })}
+          placeholder="UTR, cheque number..."
+        />
+        <TextareaField
+          label="Notes"
+          value={form.notes}
+          onChange={(e: any) => setForm({ ...form, notes: e.target.value })}
+        />
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button className="btn btn-secondary" onClick={onClose} disabled={isPending}>
+            Cancel
+          </button>
+          <button
+            className="btn btn-primary"
+            disabled={invalid || isPending}
+            onClick={() =>
+              onSubmit({
+                amount,
+                paymentDate: form.paymentDate,
+                method: form.method,
+                reference: form.reference || undefined,
+                notes: form.notes || undefined,
+              })
+            }
+          >
+            {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wallet className="w-4 h-4" />}
+            Record Payment
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -378,12 +668,24 @@ function ExpenseActions({
         </>
       )}
       {expense.status === 'APPROVED' && (
-        <button onClick={onPay} className="btn btn-ghost btn-sm text-green-600" title="Mark paid">
-          <Check className="w-4 h-4" />
+        <button
+          onClick={onPay}
+          className="btn btn-ghost btn-sm text-green-600"
+          title={`Record a payment. ${formatCurrency(Number(expense.balanceAmount ?? 0))} outstanding.`}
+        >
+          <Wallet className="w-4 h-4" />
           Pay
         </button>
       )}
-      <button onClick={onEdit} className="btn btn-ghost btn-sm" title="Edit">
+      <button
+        onClick={onEdit}
+        className="btn btn-ghost btn-sm"
+        title={
+          expense.isGenerated
+            ? 'Edit description and notes. The amount is maintained on the linked record.'
+            : 'Edit'
+        }
+      >
         <Edit className="w-4 h-4" />
       </button>
       {/* Hidden for non-founders. The API also refuses, so this is presentation
@@ -570,15 +872,29 @@ function ExpenseFormModal({
               placeholder="e.g. Ocean freight Nhava Sheva to Jebel Ali"
             />
           </div>
-          <FormField
-            label="Amount (₹)"
-            required
-            type="number"
-            step="0.01"
-            min="0"
-            value={form.amount}
-            onChange={(e) => setForm({ ...form, amount: e.target.value })}
-          />
+          {/* A generated expense mirrors a purchase order or shipment, so its
+              amount belongs there. Editing it here would be silently overwritten
+              the next time that record is saved, so the field is read-only and says
+              where to make the change. The API refuses it too. */}
+          <div>
+            <FormField
+              label="Amount (₹)"
+              required
+              type="number"
+              step="0.01"
+              min="0"
+              value={form.amount}
+              disabled={Boolean(expense?.isGenerated)}
+              onChange={(e) => setForm({ ...form, amount: e.target.value })}
+            />
+            {expense?.isGenerated && (
+              <p className="mt-1 text-xs text-gray-500">
+                Maintained on the{' '}
+                {expense.sourceType === 'PROCUREMENT' ? 'supplier purchase order' : 'shipment'}.
+                Change the cost there and this expense follows.
+              </p>
+            )}
+          </div>
           
           {/* Enhanced Vendor field with auto-complete */}
           <div className="relative">

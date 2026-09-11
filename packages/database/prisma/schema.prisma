@@ -386,6 +386,8 @@ model Buyer {
   inquiries      Inquiry[]
   quotations     Quotation[]
   orders         ExportOrder[]
+  /// Orders where this buyer is invoiced but the goods go to another consignee.
+  billedOrders   ExportOrder[]   @relation("OrderBillToBuyer")
   invoices       Invoice[]
 
   @@map("buyers")
@@ -655,6 +657,12 @@ model ExportOrder {
   shipmentType      String?     @map("shipment_type")   // FCL, LCL
   /// Quantity tolerance stated on a proforma invoice, in percent.
   variationPercent  Decimal?    @map("variation_percent") @db.Decimal(5, 2)
+  // The party invoiced, when it is not the consignee receiving the goods.
+  //
+  // Prints in the "Buyer ( If Other than Consinee )" box of every invoice-family
+  // document. Null is the normal case - the buyer and the consignee are the same -
+  // and the box prints empty, which is what the master draft shows.
+  billToBuyerId     String?     @map("bill_to_buyer_id")
   // INR, like every monetary column in this schema.
   totalValue        Decimal     @map("total_value") @db.Decimal(15, 2)
   paymentTerms      String?     @map("payment_terms")
@@ -666,6 +674,8 @@ model ExportOrder {
   // Relations
   quotation       Quotation     @relation(fields: [quotationId], references: [id])
   buyer           Buyer         @relation(fields: [buyerId], references: [id])
+  /// The party invoiced when it differs from the consignee.
+  billToBuyer     Buyer?        @relation("OrderBillToBuyer", fields: [billToBuyerId], references: [id])
   incoterm        Incoterm      @relation(fields: [incotermId], references: [id])
   portOfLoading   Port?         @relation("OrderLoadingPort", fields: [portOfLoadingId], references: [id])
   portOfDischarge Port?         @relation("OrderDischargePort", fields: [portOfDischargeId], references: [id])
@@ -675,6 +685,7 @@ model ExportOrder {
   shipments       Shipment[]
   invoices        Invoice[]
 
+  @@index([billToBuyerId])
   @@map("export_orders")
 }
 
@@ -720,6 +731,27 @@ model Procurement {
   receivedDate DateTime? @map("received_date")
   totalAmount  Decimal   @map("total_amount") @db.Decimal(15, 2)
   currency     String    @default("INR")
+
+  // The boxes on the PO sheet that had no field behind them, so a purchase order
+  // printed blank where the supplier needs an instruction. All optional: a PO for
+  // a repeat local pickup needs few of them.
+  /// Where goods are to be delivered, when not the purchaser's own address.
+  deliveryAddress    String? @map("delivery_address")
+  /// Road, rail, ex-factory pickup.
+  modeOfDelivery     String? @map("mode_of_delivery")
+  /// Expected payment terms, e.g. "50% advance, 50% on delivery".
+  paymentMode        String? @map("payment_mode")
+  /// Where the goods are collected from.
+  pickupLocation     String? @map("pickup_location")
+  /// Where they are going - warehouse, port, ICD.
+  destination        String? @map("destination")
+  /// Packing specification placed on the supplier, e.g. "25kg HDPE bags with liner".
+  packingInstructions String? @map("packing_instructions")
+  /// Quality specification, e.g. batch-wise COA with stated parameters.
+  qualityRequirement String? @map("quality_requirement")
+  /// Quantity tolerance allowed against the ordered quantity, in percent.
+  variationPercent   Decimal? @map("variation_percent") @db.Decimal(5, 2)
+
   notes        String?
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
@@ -768,6 +800,14 @@ model Shipment {
   actualDeparture   DateTime?   @map("actual_departure")
   actualArrival     DateTime?   @map("actual_arrival")
   freightCost       Decimal?    @map("freight_cost") @db.Decimal(12, 2)
+  // What the CHA and the transporter actually charged for this shipment, in INR.
+  //
+  // Distinct from CHARate and TransportRate, which are rate cards used to price a
+  // quotation, and from QuotationCost, which is the estimate quoted to the buyer.
+  // These are the amounts owed, and entering one produces the matching expense -
+  // see services/expenseSyncService.ts.
+  chaCharges        Decimal?    @map("cha_charges") @db.Decimal(12, 2)
+  transportCharges  Decimal?    @map("transport_charges") @db.Decimal(12, 2)
   notes             String?
   createdAt         DateTime    @default(now()) @map("created_at")
   updatedAt         DateTime    @updatedAt @map("updated_at")
@@ -816,6 +856,11 @@ model Invoice {
   pdfExchangeRate Decimal?     @map("pdf_exchange_rate") @db.Decimal(12, 6)
   pdfGeneratedAt  DateTime?    @map("pdf_generated_at")
   notes          String?
+  // Why a sample shipment carries a declared value but no payment. Prints in the
+  // Purpose box of the sample invoice, which customs reads to understand why duty
+  // is being assessed on goods nobody is paying for. Null falls back to the
+  // standard wording rather than printing an empty box.
+  purpose        String?
   termsConditions String?      @map("terms_conditions")
   pdfPath        String?       @map("pdf_path")
   sentAt         DateTime?     @map("sent_at")
@@ -863,19 +908,82 @@ model Payment {
 model Expense {
   id           String   @id @default(cuid())
   expenseNumber String  @unique @map("expense_number")
-  category     String   // FREIGHT, CHA, PACKAGING, TRAVEL, OFFICE, OTHER
+  category     String   // SUPPLIER_PAYMENT, FREIGHT, CHA, TRANSPORT, PACKAGING, TRAVEL, OFFICE, OTHER
   description  String
   // INR.
   amount       Decimal  @db.Decimal(12, 2)
   expenseDate  DateTime @map("expense_date")
   vendorName   String?  @map("vendor_name")
   invoiceRef   String?  @map("invoice_ref")
-  status       String   @default("PENDING") // PENDING, APPROVED, PAID
+  status       String   @default("PENDING") // PENDING, APPROVED, PAID, REJECTED
+
+  // Where this expense came from.
+  //
+  // MANUAL is typed in by hand. Everything else was generated from an operational
+  // record - a supplier procurement, or the freight, CHA and transport costs on a
+  // shipment - so that filling those in produces the payable without anyone
+  // re-entering it.
+  //
+  // (sourceType, sourceId) is unique: it is what makes generation idempotent.
+  // Saving a shipment twice updates the one expense rather than creating a second,
+  // and the guarantee is the database's rather than the calling code's. sourceId is
+  // null for MANUAL rows, and Postgres treats nulls as distinct in a unique index,
+  // so any number of manual expenses coexist.
+  sourceType   String   @default("MANUAL") @map("source_type")
+  sourceId     String?  @map("source_id")
+
+  /// Set when the expense was generated, so the UI can lock the amount.
+  isGenerated  Boolean  @default(false) @map("is_generated")
+
+  // Money actually paid out, and what is still owed.
+  //
+  // Mirrors Invoice.paidAmount / balanceAmount so that money leaving the business
+  // is tracked the same way as money arriving. `status` is derived from these by
+  // the payment route rather than set by hand: an expense with a nil balance is
+  // PAID, and one part paid stays APPROVED with a balance showing.
+  paidAmount    Decimal @default(0) @map("paid_amount") @db.Decimal(12, 2)
+  balanceAmount Decimal @default(0) @map("balance_amount") @db.Decimal(12, 2)
+
   notes        String?
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
+  // Relations
+  payments ExpensePayment[]
+
+  @@unique([sourceType, sourceId])
+  @@index([category])
+  @@index([status])
+  @@index([expenseDate])
   @@map("expenses")
+}
+
+// A payment made against an expense.
+//
+// The outgoing counterpart of Payment. Suppliers are routinely paid in parts - an
+// advance against the purchase order and the balance on delivery - so a single
+// paid flag on the expense cannot represent what is actually owed.
+//
+// Amounts are INR, like every monetary column in this schema.
+model ExpensePayment {
+  id          String   @id @default(cuid())
+  expenseId   String   @map("expense_id")
+  amount      Decimal  @db.Decimal(12, 2)
+  paymentDate DateTime @map("payment_date")
+  /// BANK_TRANSFER, CHEQUE, CASH, UPI, CARD
+  method      String   @default("BANK_TRANSFER")
+  /// UTR, cheque number or other proof the money left the account.
+  reference   String?
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  @@index([expenseId])
+  @@index([paymentDate])
+  @@map("expense_payments")
 }
 
 model Income {
@@ -928,6 +1036,10 @@ model CompanyProfile {
   bankIfscCode       String?  @map("bank_ifsc_code")
   bankChargesNote    String?  @map("bank_charges_note")
   quotationTerms     String?  @map("quotation_terms")
+  // Terms printed on a purchase order sent to a supplier. Editable for the same
+  // reason quotationTerms is: they are the exporter's own trading conditions, and
+  // hardcoding them meant a change needed a deployment.
+  purchaseOrderTerms String?  @map("purchase_order_terms")
   invoiceDeclaration String?  @map("invoice_declaration")
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")

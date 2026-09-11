@@ -68,6 +68,12 @@ router.post('/', can('MASTER_MANAGE'), async (req, res, next) => {
       categoryId: z.string().min(1),
       hsnCode: z.string().optional(),
       unit: z.string().optional(),
+      // Default packaging. Entered once here and used to prefill the packing
+      // figures on every order line for this product, which is what fills the
+      // Packing List without anyone typing weights per order.
+      packageType: z.string().optional(),
+      packageNetWeight: z.number().positive().optional(),
+      packageGrossWeight: z.number().positive().optional(),
     });
 
     const validation = schema.safeParse(req.body);
@@ -95,6 +101,11 @@ router.put('/:id', can('MASTER_MANAGE'), async (req, res, next) => {
       categoryId: z.string().optional(),
       hsnCode: z.string().optional(),
       unit: z.string().optional(),
+      // Nullable so packaging entered by mistake can be cleared, rather than being
+      // stuck at a wrong weight that then prefills every future order line.
+      packageType: z.string().nullable().optional(),
+      packageNetWeight: z.number().positive().nullable().optional(),
+      packageGrossWeight: z.number().positive().nullable().optional(),
       isActive: z.boolean().optional(),
     });
 

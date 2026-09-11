@@ -745,7 +745,8 @@ function shipmentBands(
   buyer: any,
   companyProfile: any,
   shipment: any,
-  lastPortCell: 'container' | 'purpose' | 'none'
+  lastPortCell: 'container' | 'purpose' | 'none',
+  purpose?: string | null
 ): number {
   y = bandRow(doc, y, [
     { width: 0.25, label: 'Mathod Of Dispatch:', value: dispatchMethod(order, shipment) },
@@ -766,7 +767,13 @@ function shipmentBands(
     lastPortCell === 'container'
       ? { width: 0.25, label: 'Container No :', value: shipment?.containerNumber || '' }
       : lastPortCell === 'purpose'
-        ? { width: 0.25, label: 'Purpose:', value: DECLARATIONS.samplePurpose }
+        ? {
+            width: 0.25,
+            label: 'Purpose:',
+            // The reason entered on the invoice, falling back to the standard
+            // wording so an untouched sample invoice still states one.
+            value: purpose || DECLARATIONS.samplePurpose,
+          }
         : { width: 0.25, value: '' };
 
   return bandRow(doc, y, [
@@ -1079,10 +1086,15 @@ export async function generateInvoicePDF(
       { width: 0.5, label: 'Consignee', lines: partyLines(invoice.buyer), minHeight: 86 },
       // "Consinee" is the spelling on every master sheet; it is reproduced so the
       // printed document matches the approved draft rather than quietly differing.
+      //
+      // Filled from the order's bill-to party when the goods are consigned to one
+      // address and invoiced to another. Empty otherwise, which is the normal case
+      // and what the draft shows.
       {
         width: 0.5,
         label: 'Buyer ( If Other than Consinee ) :',
-        value: sheet.otherBuyer,
+        lines: order?.billToBuyer ? partyLines(order.billToBuyer) : undefined,
+        value: order?.billToBuyer ? undefined : sheet.otherBuyer,
       },
     ]);
 
@@ -1093,7 +1105,8 @@ export async function generateInvoicePDF(
       invoice.buyer,
       companyProfile,
       shipment,
-      sheet.lastPortCell
+      sheet.lastPortCell,
+      invoice.purpose
     );
 
     y = bannerRow(doc, y, 'PRODUCT DISCRIPTION', { fontSize: 11, fill: DOC_COLORS.headFill });
@@ -1252,6 +1265,18 @@ export async function generatePackingListPDF(
   const order = invoice.order;
   const items: any[] = order?.items ?? [];
   const shipment = order?.shipments?.[0];
+  /**
+   * The commercial invoice this packing list goes with.
+   *
+   * Resolved from the other invoices on the same order rather than stored as a
+   * link, because there is one commercial invoice per order in practice and a
+   * stored link would be another thing to keep correct. Blank when the packing list
+   * was produced before the invoice, which is a legitimate order of events.
+   */
+  const relatedInvoiceNumber: string | null =
+    (order?.invoices ?? []).find(
+      (i: any) => i.id !== invoice.id && !isDocumentOnlyInvoice(i.type)
+    )?.invoiceNumber ?? null;
 
   try {
     const columns = PACKING_COLUMNS;
@@ -1273,13 +1298,22 @@ export async function generatePackingListPDF(
           {
             width: 0.5,
             label: 'Packing List No :',
-            // The packing list accompanies its invoice, so it is numbered from it.
-            value: invoice.invoiceNumber ? `PL-${invoice.invoiceNumber}` : '',
+            // The document's own number. Packing lists are numbered in their own
+            // series, so this is the number a customs officer or shipping line
+            // quotes back. Older records created before that had an invoice number
+            // here, which is why it falls back rather than printing blank.
+            value: invoice.invoiceNumber || '',
           },
           { width: 0.5, label: 'Date:', value: dateText(invoice.invoiceDate) },
         ],
         [
-          { width: 0.5, label: 'Invoice No:', value: invoice.invoiceNumber || '' },
+          {
+            width: 0.5,
+            label: 'Invoice No:',
+            // The commercial invoice this packing list accompanies, which is what
+            // the two documents are matched on at the port.
+            value: relatedInvoiceNumber || '',
+          },
           { width: 0.5, label: 'IEC No:', value: companyProfile?.iecCode || '' },
         ],
       ]
@@ -1395,6 +1429,12 @@ export async function generatePurchaseOrderPDF(
 
   const items: any[] = procurement.order?.items ?? [];
 
+  /** Terms saved on the company profile, one clause per line. */
+  const savedPoTerms: string[] = (companyProfile?.purchaseOrderTerms || '')
+    .split('\n')
+    .map((line: string) => line.trim())
+    .filter(Boolean);
+
   try {
     const columns = invoiceColumns('Product Code', `Rate (${currencyCode})`);
     let y = titleBand(doc, LAYOUT.continuationTop, 'PURCHASE ORDER');
@@ -1440,20 +1480,34 @@ export async function generatePurchaseOrderPDF(
       {
         width: 0.5,
         label: 'Delivery / Consignment Address (if different from Purchaser):',
-        value: '',
+        value: procurement.deliveryAddress || '',
       },
     ]);
 
     y = bandRow(doc, y, [
-      { width: 0.34, label: 'Mode of Delivery:', value: '' },
-      { width: 0.33, label: 'Expected Mode of Payment:', value: '' },
+      { width: 0.34, label: 'Mode of Delivery:', value: procurement.modeOfDelivery || '' },
+      {
+        width: 0.33,
+        label: 'Expected Mode of Payment:',
+        // Falls back to the supplier's standing terms, which is what applies when
+        // nothing specific was agreed for this order.
+        value: procurement.paymentMode || procurement.supplier?.paymentTerms || '',
+      },
       { width: 0.33, label: 'Order Currency:', value: currencyCode },
     ]);
 
     y = bandRow(doc, y, [
-      { width: 0.34, label: 'Delivery / Pickup Location:', value: '' },
-      { width: 0.33, label: 'Destination:', value: '' },
-      { width: 0.33, label: 'Required By:', value: dateText(procurement.expectedDate) },
+      {
+        width: 0.34,
+        label: 'Delivery / Pickup Location:',
+        value: procurement.pickupLocation || '',
+      },
+      { width: 0.33, label: 'Destination:', value: procurement.destination || '' },
+      {
+        width: 0.33,
+        label: 'Required By:',
+        value: dateText(procurement.expectedDate),
+      },
     ]);
 
     y = bannerRow(doc, y, 'PRODUCT / MATERIAL ORDERED', {
@@ -1478,9 +1532,22 @@ export async function generatePurchaseOrderPDF(
     // total. Procurement carries one free-text `notes` field, which is where an
     // operator writes packing instructions today.
     y = bandRow(doc, y, [
-      { width: 0.5, label: 'Packing Instructions:', value: procurement.notes || '' },
-      { width: 0.3, label: 'Quality Requirement:', value: '' },
-      { width: 0.2, label: 'Variation % +/- :', value: '' },
+      {
+        width: 0.5,
+        label: 'Packing Instructions:',
+        // Falls back to notes, which is where packing instructions had to be
+        // written before this field existed.
+        value: procurement.packingInstructions || procurement.notes || '',
+      },
+      { width: 0.3, label: 'Quality Requirement:', value: procurement.qualityRequirement || '' },
+      {
+        width: 0.2,
+        label: 'Variation % +/- :',
+        value:
+          procurement.variationPercent === null || procurement.variationPercent === undefined
+            ? ''
+            : `${Number(procurement.variationPercent)}%`,
+      },
     ]);
 
     // The order total is what was agreed with the supplier, which is the figure on
@@ -1500,7 +1567,12 @@ export async function generatePurchaseOrderPDF(
       {
         width: 1,
         label: 'Terms & Conditions:',
-        lines: PO_TERMS(companyProfile?.legalName || FALLBACK_EXPORTER),
+        // Saved terms win; the master sheet's clauses are the fallback so a PO is
+        // never sent without terms on it.
+        lines:
+          savedPoTerms.length > 0
+            ? savedPoTerms
+            : PO_TERMS(companyProfile?.legalName || FALLBACK_EXPORTER),
         minHeight: 96,
         fontSize: 7,
       },
@@ -1509,7 +1581,7 @@ export async function generatePurchaseOrderPDF(
           {
             width: 0.75,
             label: 'Terms of Delivery and Payment :',
-            value: procurement.supplier?.paymentTerms || '',
+            value: procurement.paymentMode || procurement.supplier?.paymentTerms || '',
           },
           { width: 0.25, label: 'Currency:', value: currencyCode },
         ],

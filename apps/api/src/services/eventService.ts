@@ -34,7 +34,10 @@ export type DomainEvent =
   | 'invoice.created'
   | 'invoice.paid'
   | 'payment.recorded'
-  | 'expense.approved';
+  | 'expense.approved'
+  // Raised when payments against an expense settle it in full, so an integration
+  // can reconcile an outgoing payment the same way it does an incoming one.
+  | 'expense.paid';
 
 const TIMEOUT_MS = 10_000;
 

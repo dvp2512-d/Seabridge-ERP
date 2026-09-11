@@ -195,11 +195,16 @@ function ProductModal({
     categoryId: product?.categoryId || '',
     hsnCode: product?.hsnCode || '',
     unit: product?.unit || 'KG',
+    // Default packaging. Entered once per product and used to prefill the packing
+    // figures on every order line, which is what fills the Packing List.
+    packageType: product?.packageType || '',
+    packageNetWeight: product?.packageNetWeight ? String(product.packageNetWeight) : '',
+    packageGrossWeight: product?.packageGrossWeight ? String(product.packageGrossWeight) : '',
     isActive: product?.isActive ?? true,
   });
 
   const mutation = useMutation({
-    mutationFn: (data: any) => 
+    mutationFn: (data: any) =>
       product ? productsApi.update(product.id, data) : productsApi.create(data),
     onSuccess: () => {
       toast.success(product ? 'Product updated' : 'Product created');
@@ -210,9 +215,21 @@ function ProductModal({
     },
   });
 
+  /** Blank means "no default packaging", which is different from zero. */
+  const numberOrNull = (value: string) => {
+    if (value === '') return product ? null : undefined;
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    mutation.mutate(formData);
+    mutation.mutate({
+      ...formData,
+      packageType: formData.packageType || (product ? null : undefined),
+      packageNetWeight: numberOrNull(formData.packageNetWeight),
+      packageGrossWeight: numberOrNull(formData.packageGrossWeight),
+    });
   };
 
   return (
@@ -257,6 +274,55 @@ function ProductModal({
             onChange={(e) => setFormData({ ...formData, unit: e.target.value })}
             options={units.map((u) => ({ value: u, label: u }))}
           />
+
+          {/*
+            Default packaging. Filled in once here, it prefills the packing figures
+            on every order line for this product - packages, weight per package, net
+            and gross - which is what makes the Packing List print complete without
+            weights being typed per order. Optional: leave blank for a product sold
+            loose or in varying packs.
+          */}
+          <div className="col-span-2 rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <h4 className="text-sm font-medium text-navy-900">Default Packaging</h4>
+            <p className="text-xs text-gray-500 mt-0.5 mb-3">
+              Used to prefill the packing list figures on new order lines. Leave blank if
+              this product has no standard pack.
+            </p>
+            <div className="grid grid-cols-3 gap-4">
+              <SelectField
+                label="Package Type"
+                value={formData.packageType}
+                onChange={(e) => setFormData({ ...formData, packageType: e.target.value })}
+                placeholder="Not set"
+                options={[
+                  { value: 'BAG', label: 'Bag' },
+                  { value: 'CARTON', label: 'Carton' },
+                  { value: 'BOX', label: 'Box' },
+                  { value: 'DRUM', label: 'Drum' },
+                  { value: 'JUMBO_BAG', label: 'Jumbo Bag' },
+                  { value: 'PALLET', label: 'Pallet' },
+                ]}
+              />
+              <FormField
+                label="Net Weight per Pack (KG)"
+                type="number"
+                step="0.001"
+                min="0"
+                value={formData.packageNetWeight}
+                onChange={(e) => setFormData({ ...formData, packageNetWeight: e.target.value })}
+                placeholder="25"
+              />
+              <FormField
+                label="Gross Weight per Pack (KG)"
+                type="number"
+                step="0.001"
+                min="0"
+                value={formData.packageGrossWeight}
+                onChange={(e) => setFormData({ ...formData, packageGrossWeight: e.target.value })}
+                placeholder="25.4"
+              />
+            </div>
+          </div>
 
           {product && (
             <div className="flex items-center gap-2 self-end pb-2">

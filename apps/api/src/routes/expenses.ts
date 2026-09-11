@@ -16,16 +16,30 @@ import { AppError, ValidationError, NotFoundError } from '../middleware/errorHan
 import { generateCode } from '../utils/helpers';
 import { getBaseCurrency } from '../services/exchangeRateService';
 import { emitEvent } from '../services/eventService';
+import {
+  EXPENSE_SOURCE_TYPES,
+  recalculateExpensePayment,
+  syncProcurementExpense,
+  syncShipmentExpenses,
+} from '../services/expenseSyncService';
 
 const router: Router = Router();
 
 router.use(authenticate);
 
+/**
+ * Expense categories.
+ *
+ * The first four are also produced automatically from operational records - a
+ * supplier purchase order, and the freight, CHA and transport costs on a shipment -
+ * by services/expenseSyncService.ts. The rest are entered by hand.
+ */
 const CATEGORIES = [
+  'SUPPLIER_PAYMENT',
   'FREIGHT',
   'CHA',
-  'PACKAGING',
   'TRANSPORT',
+  'PACKAGING',
   'INSPECTION',
   'CERTIFICATION',
   'TRAVEL',
@@ -40,11 +54,27 @@ const STATUSES = ['PENDING', 'APPROVED', 'PAID', 'REJECTED'] as const;
 
 router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
   try {
-    const { category, status, search, from, to, page = 1, limit = 50 } = req.query;
+    const {
+      category,
+      status,
+      search,
+      from,
+      to,
+      sourceType,
+      // "generated" or "manual": which expenses came from an operational record.
+      origin,
+      page = 1,
+      limit = 50,
+    } = req.query;
 
     const where: any = {};
     if (category) where.category = String(category);
     if (status) where.status = String(status);
+    if (sourceType && EXPENSE_SOURCE_TYPES.includes(String(sourceType) as any)) {
+      where.sourceType = String(sourceType);
+    }
+    if (origin === 'generated') where.isGenerated = true;
+    if (origin === 'manual') where.isGenerated = false;
     if (from || to) {
       where.expenseDate = {};
       if (from) where.expenseDate.gte = new Date(String(from));
@@ -73,7 +103,7 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
         by: ['status'],
         where,
         _count: { _all: true },
-        _sum: { amount: true },
+        _sum: { amount: true, paidAmount: true, balanceAmount: true },
       }),
       prisma.expense.groupBy({
         by: ['category'],
@@ -88,12 +118,20 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
     const countByStatus: Record<string, number> = {};
     let totalSpend = 0;
     let pendingApproval = 0;
+    // What is still owed, across everything the filter matched. Distinct from
+    // totalSpend, which is the whole cost whether paid or not.
+    let outstanding = 0;
+    let paid = 0;
 
     for (const group of statusGroups) {
       countByStatus[group.status] = group._count._all;
       const amount = Number(group._sum.amount ?? 0);
       // Rejected expenses are not spend.
-      if (group.status !== 'REJECTED') totalSpend += amount;
+      if (group.status !== 'REJECTED') {
+        totalSpend += amount;
+        outstanding += Number(group._sum.balanceAmount ?? 0);
+        paid += Number(group._sum.paidAmount ?? 0);
+      }
       if (group.status === 'PENDING') pendingApproval += amount;
     }
 
@@ -114,6 +152,9 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
         countByStatus,
         totalSpend: round2(totalSpend),
         pendingApproval: round2(pendingApproval),
+        /** Still owed on everything matched. This is the payables figure. */
+        outstanding: round2(outstanding),
+        paid: round2(paid),
         byCategory: [...byCategory.entries()]
           .map(([category, value]) => ({ category, value: round2(value) }))
           .sort((a, b) => b.value - a.value),
@@ -126,7 +167,11 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
 
 router.get('/:id', can('FINANCE_VIEW'), async (req, res, next) => {
   try {
-    const expense = await prisma.expense.findUnique({ where: { id: req.params.id } });
+    const expense = await prisma.expense.findUnique({
+      where: { id: req.params.id },
+      // The payment history is what the detail view is for, so it comes with it.
+      include: { payments: { orderBy: { paymentDate: 'desc' } } },
+    });
     if (!expense) throw new NotFoundError('Expense');
     res.json({ success: true, data: expense });
   } catch (error) {
@@ -166,6 +211,10 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
         vendorName: data.vendorName,
         invoiceRef: data.invoiceRef,
         notes: data.notes,
+        // Nothing paid yet, so the whole amount is outstanding. Without this the
+        // payables total would read zero for every newly recorded expense.
+        paidAmount: 0,
+        balanceAmount: data.amount,
       },
     });
 
@@ -203,6 +252,27 @@ router.put('/:id', can('FINANCE_MANAGE'), async (req, res, next) => {
       );
     }
 
+    /**
+     * A generated expense mirrors an operational record, so its amount belongs to
+     * that record. Editing it here would be overwritten the next time the shipment
+     * or procurement is saved, which looks like the edit silently failing. The
+     * source is the place to change it.
+     *
+     * Descriptive fields are still editable - a note explaining a charge is useful
+     * and nothing regenerates it.
+     */
+    if (existing.isGenerated && validation.data.amount !== undefined) {
+      const source =
+        existing.sourceType === 'PROCUREMENT'
+          ? 'the supplier purchase order'
+          : 'the shipment';
+      throw new AppError(
+        `${existing.expenseNumber} was generated from ${source}, so its amount is maintained there. ` +
+          `Change the cost on ${source} and this expense follows.`,
+        400
+      );
+    }
+
     const { expenseDate, ...rest } = validation.data;
 
     const expense = await prisma.expense.update({
@@ -210,6 +280,13 @@ router.put('/:id', can('FINANCE_MANAGE'), async (req, res, next) => {
       data: {
         ...rest,
         ...(expenseDate ? { expenseDate: new Date(expenseDate) } : {}),
+        // The outstanding balance follows a changed amount, less anything paid.
+        ...(rest.amount !== undefined
+          ? {
+              balanceAmount:
+                Math.round((rest.amount - Number(existing.paidAmount) + Number.EPSILON) * 100) / 100,
+            }
+          : {}),
       },
     });
 
@@ -252,6 +329,20 @@ router.put('/:id/status', can('FINANCE_MANAGE'), async (req, res, next) => {
       );
     }
 
+    /**
+     * PAID is no longer a flag someone sets: it is what the payment records add up
+     * to. Allowing it here would produce an expense marked paid with a full balance
+     * still outstanding, which would then understate payables and contradict its own
+     * payment history.
+     */
+    if (validation.data.status === 'PAID') {
+      throw new AppError(
+        `Record a payment against ${existing.expenseNumber} instead. It becomes PAID once ` +
+          'the payments add up to the full amount, so the status always matches the money.',
+        400
+      );
+    }
+
     const expense = await prisma.expense.update({
       where: { id: req.params.id },
       data: { status: validation.data.status },
@@ -279,6 +370,207 @@ router.delete('/:id', can('RECORD_DELETE'), async (req, res, next) => {
     // deleted it and when.
     await prisma.expense.delete({ where: { id: req.params.id } });
     res.json({ success: true, data: { id: existing.id } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ---------------------------------------------------------------- payments
+
+/**
+ * Payments made against an expense.
+ *
+ * The outgoing counterpart of invoice payments. Suppliers are routinely paid in
+ * parts - an advance against the purchase order, the balance on delivery - so a
+ * single paid flag could not represent what is actually still owed.
+ *
+ * The expense's paidAmount, balanceAmount and status are recalculated from the
+ * payment rows rather than set here, so the three can never disagree with the
+ * history. See recalculateExpensePayment.
+ */
+const paymentSchema = z.object({
+  amount: z.number().positive('A payment must be greater than zero'),
+  paymentDate: z.string(),
+  method: z.enum(['BANK_TRANSFER', 'CHEQUE', 'CASH', 'UPI', 'CARD']).optional(),
+  reference: z.string().optional(),
+  notes: z.string().optional(),
+});
+
+router.get('/:id/payments', can('FINANCE_VIEW'), async (req, res, next) => {
+  try {
+    const expense = await prisma.expense.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, amount: true, paidAmount: true, balanceAmount: true },
+    });
+    if (!expense) throw new NotFoundError('Expense');
+
+    const payments = await prisma.expensePayment.findMany({
+      where: { expenseId: req.params.id },
+      orderBy: { paymentDate: 'desc' },
+    });
+
+    res.json({ success: true, data: { expense, payments } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
+  try {
+    const validation = paymentSchema.safeParse(req.body);
+    if (!validation.success) throw new ValidationError(validation.error.errors);
+
+    const data = validation.data;
+
+    const expense = await prisma.expense.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        expenseNumber: true,
+        amount: true,
+        paidAmount: true,
+        status: true,
+      },
+    });
+    if (!expense) throw new NotFoundError('Expense');
+
+    if (expense.status === 'REJECTED') {
+      throw new AppError(
+        `${expense.expenseNumber} was rejected. Reopen it before recording a payment.`,
+        400
+      );
+    }
+
+    const amount = Number(expense.amount);
+    const alreadyPaid = Number(expense.paidAmount);
+    const outstanding = Math.round((amount - alreadyPaid + Number.EPSILON) * 100) / 100;
+
+    // Overpaying is refused rather than allowed to produce a negative balance,
+    // which would understate payables elsewhere and is almost always a typo.
+    if (data.amount > outstanding + 0.005) {
+      throw new AppError(
+        `That is more than is outstanding. ${expense.expenseNumber} has ` +
+          `INR ${outstanding.toFixed(2)} left to pay of INR ${amount.toFixed(2)}.`,
+        400
+      );
+    }
+
+    // One transaction: the payment and the recalculated totals must not part company.
+    const payment = await prisma.$transaction(async (tx) => {
+      const created = await tx.expensePayment.create({
+        data: {
+          expenseId: expense.id,
+          amount: data.amount,
+          paymentDate: new Date(data.paymentDate),
+          method: data.method ?? 'BANK_TRANSFER',
+          reference: data.reference,
+          notes: data.notes,
+        },
+      });
+
+      await recalculateExpensePayment(expense.id, tx as any);
+      return created;
+    });
+
+    const updated = await prisma.expense.findUnique({ where: { id: expense.id } });
+
+    if (updated?.status === 'PAID') emitEvent('expense.paid', updated);
+
+    res.status(201).json({ success: true, data: { payment, expense: updated } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Reverse a payment - a cheque bounced, or the entry was wrong.
+ *
+ * Deletes rather than negates, because an expense payment carries no downstream
+ * record that a reversal row would need to match, and the audit log already holds
+ * what was removed and by whom. The expense's totals and status are recalculated,
+ * so a fully paid expense correctly returns to part paid.
+ */
+router.delete('/:id/payments/:paymentId', can('FINANCE_MANAGE'), async (req, res, next) => {
+  try {
+    const payment = await prisma.expensePayment.findUnique({
+      where: { id: req.params.paymentId },
+      select: { id: true, expenseId: true },
+    });
+    if (!payment) throw new NotFoundError('Payment');
+    if (payment.expenseId !== req.params.id) {
+      throw new NotFoundError('Payment not found for this expense');
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.expensePayment.delete({ where: { id: payment.id } });
+      await recalculateExpensePayment(payment.expenseId, tx as any);
+    });
+
+    const updated = await prisma.expense.findUnique({ where: { id: payment.expenseId } });
+    res.json({ success: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Generate expenses for procurements and shipments that already exist.
+ *
+ * Records created before the sync existed have no expense behind them, so the
+ * payables figure would only be right for new work. This walks the existing rows
+ * once and raises what is missing.
+ *
+ * Safe to run repeatedly: every expense is keyed on its source record by a unique
+ * index, so a second run updates rather than duplicates. Reported per record so a
+ * partial result is visible rather than silent.
+ *
+ * Restricted to FINANCE_MANAGE because it writes to the ledger, even though it
+ * writes nothing that saving each source record would not have written anyway.
+ */
+router.post('/sync', can('FINANCE_MANAGE'), async (_req, res, next) => {
+  try {
+    const [procurements, shipments] = await Promise.all([
+      prisma.procurement.findMany({ select: { id: true } }),
+      prisma.shipment.findMany({
+        // Only shipments carrying at least one cost can produce an expense.
+        where: {
+          OR: [
+            { freightCost: { not: null } },
+            { chaCharges: { not: null } },
+            { transportCharges: { not: null } },
+          ],
+        },
+        select: { id: true },
+      }),
+    ]);
+
+    const tally = { created: 0, updated: 0, deleted: 0, locked: 0, unchanged: 0 };
+    const conflicts: string[] = [];
+
+    const record = (result: { action: keyof typeof tally; conflict?: string }) => {
+      tally[result.action] += 1;
+      if (result.conflict) conflicts.push(result.conflict);
+    };
+
+    for (const procurement of procurements) {
+      record(await syncProcurementExpense(procurement.id));
+    }
+
+    for (const shipment of shipments) {
+      for (const result of await syncShipmentExpenses(shipment.id)) {
+        record(result);
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        procurementsScanned: procurements.length,
+        shipmentsScanned: shipments.length,
+        ...tally,
+        conflicts,
+      },
+    });
   } catch (error) {
     next(error);
   }

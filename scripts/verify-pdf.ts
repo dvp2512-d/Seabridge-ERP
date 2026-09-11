@@ -137,6 +137,21 @@ const order = {
   dispatchMethod: 'SEA',
   shipmentType: 'FCL',
   variationPercent: 10,
+  // Goods consigned to one party, invoiced to another - the "Buyer ( If Other than
+  // Consinee )" box.
+  billToBuyer: {
+    companyName: 'Gulf Commodities FZE',
+    address: 'Office 1204, JAFZA One Tower A',
+    city: 'Jebel Ali Free Zone',
+    postalCode: '18500',
+    taxId: '100555444300003',
+    country: { name: 'United Arab Emirates' },
+  },
+  // Sibling invoices, so the packing list can name the commercial invoice.
+  invoices: [
+    { id: 'inv-1', invoiceNumber: 'VL/INV/26-0088', type: 'COMMERCIAL' },
+    { id: 'pl-1', invoiceNumber: 'PL-00007', type: 'PACKING_LIST' },
+  ],
   incoterm: { code: 'CIF', name: 'Cost, Insurance and Freight' },
   portOfLoading: { name: 'Mundra', code: 'INMUN', type: 'SEA' },
   portOfDischarge: { name: 'Jebel Ali', code: 'AEJEA', type: 'SEA' },
@@ -155,6 +170,9 @@ const order = {
 
 function invoice(type: string, invoiceNumber: string) {
   return {
+    // Matches the sibling entries on the order, so the packing list can identify
+    // itself and name the commercial invoice it accompanies.
+    id: type === 'PACKING_LIST' ? 'pl-1' : 'inv-1',
     invoiceNumber,
     type,
     invoiceDate: new Date('2026-09-01'),
@@ -163,6 +181,11 @@ function invoice(type: string, invoiceNumber: string) {
     taxAmount: 0,
     totalAmount: 962125,
     termsConditions: 'Payment by irrevocable LC at sight',
+    // Only printed on the sample invoice.
+    purpose:
+      type === 'SAMPLE'
+        ? 'Free Sample \u2013 Buyer Evaluation \u2013 No Commercial Value'
+        : null,
     buyer,
     order,
   };
@@ -198,6 +221,16 @@ const procurement = {
   expectedDate: new Date('2026-09-05'),
   totalAmount: 742300,
   notes: 'Deliver to Mundra ICD. Fumigation certificate required with each lot.',
+  // The PO sheet boxes.
+  deliveryAddress: 'SeaBridge Warehouse, Plot 42, Mundra Port ICD, Kutch, Gujarat',
+  modeOfDelivery: 'Road - Ex-factory pickup',
+  paymentMode: '50% advance on PO confirmation, 50% on delivery against COA',
+  pickupLocation: 'Factory, Unjha, Mehsana',
+  destination: 'Mundra Port ICD',
+  packingInstructions: '25kg HDPE bags with inner liner, palletised',
+  qualityRequirement:
+    'Batch-wise COA required with delivery (purity, swelling index, moisture, microbial parameters)',
+  variationPercent: 5,
   supplier: {
     name: 'Shree Unjha Psyllium Industries',
     address: 'Survey 214, GIDC Phase II, Unjha, Mehsana, Gujarat 384170',
@@ -236,7 +269,7 @@ async function main() {
     ['CommercialInvoice.pdf', generateInvoicePDF(invoice('COMMERCIAL', 'VL/INV/26-0088'), usd)],
     ['ProformaInvoice.pdf', generateInvoicePDF(invoice('PROFORMA', 'VL/PI/26-0031'), usd)],
     ['SampleInvoice.pdf', generateInvoicePDF(invoice('SAMPLE', 'VL/SI/26-0007'), usd)],
-    ['PackingList.pdf', generatePackingListPDF(invoice('PACKING_LIST', 'VL/INV/26-0088'), usd)],
+    ['PackingList.pdf', generatePackingListPDF(invoice('PACKING_LIST', 'PL-00007'), usd)],
     ['PurchaseOrder.pdf', generatePurchaseOrderPDF(procurement, { companyProfile })],
   ];
 

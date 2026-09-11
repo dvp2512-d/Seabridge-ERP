@@ -201,11 +201,13 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
         where: { status: 'RECEIVED' },
         _sum: { amountINR: true },
       }),
-      // All expenses by status
+      // All expenses by status, with what has actually been paid against each.
+      // paidAmount and balanceAmount come from the expense payment records, so the
+      // cash figures below follow money that moved rather than a status flag.
       prisma.expense.groupBy({
         by: ['status'],
         _count: { _all: true },
-        _sum: { amount: true },
+        _sum: { amount: true, paidAmount: true, balanceAmount: true },
       }),
       // Monthly expenses
       prisma.expense.aggregate({
@@ -285,10 +287,25 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
      */
     let expensesPaid = 0;
     let expensesCommitted = 0;
+    /**
+     * Still owed to suppliers, CHAs, transporters and everyone else - the outgoing
+     * counterpart of receivables.
+     *
+     * Taken from the expense balances, which are maintained from the payment
+     * records, so a supplier paid a 50% advance contributes only the unpaid half.
+     * A status flag could not express that.
+     */
+    let payablesOutstanding = 0;
 
     for (const group of allExpenseGroups) {
       const amount = Number(group._sum.amount ?? 0);
-      if (group.status === 'PAID') expensesPaid += amount;
+      if (group.status === 'REJECTED') continue;
+
+      // Cash out is what payments record, not what the status claims. A part-paid
+      // expense contributes its paid portion here and its balance to payables.
+      expensesPaid += Number(group._sum.paidAmount ?? 0);
+      payablesOutstanding += Number(group._sum.balanceAmount ?? 0);
+
       // Approved but not yet paid: an obligation, not yet an outflow.
       if (group.status === 'APPROVED') expensesCommitted += amount;
     }
@@ -397,6 +414,13 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
           // mistaken for the whole picture.
           expensesCommitted: round2(expensesCommitted),
           incomePending: round2(otherIncomePending),
+          /**
+           * Still to pay out: supplier purchase orders, freight, CHA and transport
+           * charges, and hand-entered costs, less anything already paid against
+           * them. The outgoing counterpart of receivables, and the figure that
+           * answers what the cash balance is committed to.
+           */
+          payablesOutstanding: round2(payablesOutstanding),
         },
         pendingTasks,
         alerts: await getAlerts(),

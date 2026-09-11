@@ -232,6 +232,29 @@ export const ordersApi = {
   update: (id: string, data: any) => api.put(`/orders/${id}`, data),
   addProcurement: (id: string, data: any) => api.post(`/orders/${id}/procurements`, data),
   addShipment: (id: string, data: any) => api.post(`/orders/${id}/shipments`, data),
+  /**
+   * Per-document readiness: which printed boxes would be blank if each document
+   * were generated now, and when each was last produced.
+   */
+  documentReadiness: (id: string) => api.get(`/orders/${id}/document-readiness`),
+  /**
+   * Update a line's packing figures - packages, weight per package, net and gross.
+   * These four are the Packing List and the weight block on every invoice.
+   */
+  updateOrderItem: (orderId: string, itemId: string, data: any) =>
+    api.put(`/orders/${orderId}/items/${itemId}`, data),
+  /**
+   * Update a supplier purchase order. Changing the amount moves the matching
+   * expense with it, unless that expense has already been part paid.
+   */
+  updateProcurement: (orderId: string, procId: string, data: any) =>
+    api.put(`/orders/${orderId}/procurements/${procId}`, data),
+  /**
+   * Update a shipment. Entering freight, CHA or transport charges raises the
+   * matching expenses automatically.
+   */
+  updateShipment: (orderId: string, shipmentId: string, data: any) =>
+    api.put(`/orders/${orderId}/shipments/${shipmentId}`, data),
   updateDocument: (orderId: string, docId: string, data: any) => 
     api.put(`/orders/${orderId}/documents/${docId}`, data),
   downloadProcurementPdf: (orderId: string, procId: string) =>
@@ -327,6 +350,33 @@ export const expensesApi = {
   /** Get linkable records (shipments, orders, procurements) for pre-fill */
   getLinkableRecords: (category?: string) =>
     api.get('/expenses/meta/linkable-records', { params: { category } }),
+
+  // ---- Outgoing payment tracking ----
+  /** Payments recorded against an expense, with its paid and outstanding totals. */
+  listPayments: (id: string) => api.get(`/expenses/${id}/payments`),
+  /**
+   * Record money paid out. The expense's status follows the payments, so there is
+   * no separate "mark as paid" call.
+   */
+  addPayment: (
+    id: string,
+    data: {
+      amount: number;
+      paymentDate: string;
+      method?: string;
+      reference?: string;
+      notes?: string;
+    }
+  ) => api.post(`/expenses/${id}/payments`, data),
+  /** Reverse a payment - a bounced cheque or a wrong entry. */
+  deletePayment: (id: string, paymentId: string) =>
+    api.delete(`/expenses/${id}/payments/${paymentId}`),
+
+  /**
+   * Generate expenses for procurements and shipments recorded before the automatic
+   * sync existed. Safe to run more than once.
+   */
+  syncFromSources: () => api.post('/expenses/sync'),
 };
 
 // ============================================

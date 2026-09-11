@@ -57,6 +57,7 @@ const PROFILE_FIELDS = [
   'bankIfscCode',
   'bankChargesNote',
   'quotationTerms',
+  'purchaseOrderTerms',
   'invoiceDeclaration',
 ] as const;
 
@@ -430,6 +431,20 @@ function CompanySettings() {
               rows={3}
               value={form.quotationTerms ?? ''}
               onChange={set('quotationTerms')}
+            />
+            {/* Printed on every purchase order sent to a supplier. One clause per
+                line. Left empty, the standard clauses from the approved draft are
+                used, so a PO is never sent without terms. */}
+            <TextareaField
+              label="Default Purchase Order Terms"
+              rows={4}
+              value={form.purchaseOrderTerms ?? ''}
+              onChange={set('purchaseOrderTerms')}
+              placeholder={
+                'One clause per line, e.g.\n' +
+                '\u2022 Goods must be accompanied by a batch-wise Certificate of Analysis\n' +
+                '\u2022 All disputes subject to Ahmedabad (Gujarat) jurisdiction only'
+              }
             />
             <TextareaField
               label="Invoice Declaration"

@@ -183,6 +183,9 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
       dueDate: z.string().transform(s => new Date(s)),
       taxAmount: z.number().min(0).optional(),
       notes: z.string().optional(),
+      // Why a sample carries a declared value but no payment. Shown for SAMPLE
+      // documents; ignored on the others, which have no Purpose box.
+      purpose: z.string().optional(),
       termsConditions: z.string().optional(),
     });
 
@@ -197,7 +200,19 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
 
     if (!order) throw new NotFoundError('Order');
 
-    const invoiceNumber = await generateCode('INVOICE', 'INV');
+    /**
+     * A packing list is numbered in its own series.
+     *
+     * It is a different document from the invoice it accompanies, and a customs
+     * officer or shipping line refers to it by its own number. It used to print
+     * "PL-" prefixed onto the invoice number, which meant it had no number of its
+     * own to be referred to or traced by.
+     */
+    const type = validation.data.type || 'COMMERCIAL';
+    const invoiceNumber =
+      type === 'PACKING_LIST'
+        ? await generateCode('PACKING_LIST', 'PL')
+        : await generateCode('INVOICE', 'INV');
     const subtotal = Number(order.totalValue);
     const taxAmount = validation.data.taxAmount || 0;
     const totalAmount = subtotal + taxAmount;
@@ -229,6 +244,7 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
         pdfCurrency: quotation?.pdfCurrency ?? null,
         pdfExchangeRate: quotation?.pdfExchangeRate ?? null,
         notes: validation.data.notes,
+        purpose: validation.data.purpose,
         termsConditions: validation.data.termsConditions,
       },
       include: {
@@ -251,6 +267,10 @@ router.put('/:id', can('FINANCE_MANAGE'), async (req, res, next) => {
       status: z.enum(['DRAFT', 'SENT', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED']).optional(),
       dueDate: z.string().transform(s => new Date(s)).optional(),
       notes: z.string().optional(),
+      // The Purpose box on a sample invoice, and the delivery/payment terms box.
+      // Both are printed, so both need to be correctable after the fact.
+      purpose: z.string().nullable().optional(),
+      termsConditions: z.string().nullable().optional(),
     });
 
     const validation = schema.safeParse(req.body);
@@ -495,6 +515,11 @@ router.get('/:id/pdf', can('FINANCE_VIEW'), async (req, res, next) => {
             incoterm: true,
             portOfLoading: true,
             portOfDischarge: true,
+            // The party invoiced when it differs from the consignee.
+            billToBuyer: { include: { country: true } },
+            // Sibling invoices, so a packing list can name the commercial invoice
+            // it accompanies.
+            invoices: { select: { id: true, invoiceNumber: true, type: true } },
             shipments: {
               include: {
                 originPort: true,
@@ -537,6 +562,11 @@ router.get('/:id/pdf', can('FINANCE_VIEW'), async (req, res, next) => {
             incoterm: true,
             portOfLoading: true,
             portOfDischarge: true,
+            // The party invoiced when it differs from the consignee.
+            billToBuyer: { include: { country: true } },
+            // Sibling invoices, so a packing list can name the commercial invoice
+            // it accompanies.
+            invoices: { select: { id: true, invoiceNumber: true, type: true } },
             shipments: {
               include: {
                 originPort: true,

@@ -51,7 +51,7 @@ export default function NetPositionPanel({ net, periodLabel }: { net: any; perio
 
         <Row
           label="Total expenses"
-          hint="Expenses marked paid"
+          hint="Payments actually made against expenses"
           value={`- ${formatCurrency(net.totalExpenses ?? 0, currency)}`}
           negative
         />
@@ -76,11 +76,20 @@ export default function NetPositionPanel({ net, periodLabel }: { net: any; perio
 
         {/* Stated outside the calculation so the net is not mistaken for the
             complete picture. */}
-        {(net.expensesCommitted > 0 || net.incomePending > 0) && (
+        {(net.expensesCommitted > 0 || net.incomePending > 0 || net.payablesOutstanding > 0) && (
           <div className="flex items-start gap-2 pt-2 text-xs text-gray-500 border-t">
             <Info className="w-3 h-3 mt-0.5 flex-shrink-0" />
             <div className="space-y-0.5">
               <div>Not included above:</div>
+              {/* The payables figure: supplier payments, freight, CHA and transport
+                  raised from purchase orders and shipments, less what has been paid
+                  against them. The outgoing counterpart of receivables. */}
+              {net.payablesOutstanding > 0 && (
+                <div>
+                  {formatCurrency(net.payablesOutstanding, currency)} still to pay out
+                  (suppliers, freight, CHA, transport)
+                </div>
+              )}
               {net.expensesCommitted > 0 && (
                 <div>
                   {formatCurrency(net.expensesCommitted, currency)} approved but not yet paid

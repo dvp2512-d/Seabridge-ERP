@@ -115,6 +115,11 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
       validUntil: z.string().transform(s => new Date(s)),
       deliveryTerms: z.string().optional(),
       paymentTerms: z.string().optional(),
+      // Printed in rows 6 and 7 of the quotation, and carried across to the order
+      // so every document raised later states the same thing. The columns existed
+      // but nothing could set them.
+      dispatchMethod: z.enum(['SEA', 'AIR', 'ROAD']).optional(),
+      shipmentType: z.string().optional(),
       notes: z.string().optional(),
       termsConditions: z.string().optional(),
       items: z.array(z.object({
@@ -227,6 +232,10 @@ router.put('/:id', can('SALES_MANAGE'), async (req, res, next) => {
       validUntil: z.string().transform(s => new Date(s)).optional(),
       deliveryTerms: z.string().optional(),
       paymentTerms: z.string().optional(),
+      dispatchMethod: z.enum(['SEA', 'AIR', 'ROAD']).nullable().optional(),
+      shipmentType: z.string().nullable().optional(),
+      portOfLoadingId: z.string().nullable().optional().transform((v) => (v === '' ? null : v)),
+      portOfDischargeId: z.string().nullable().optional().transform((v) => (v === '' ? null : v)),
       notes: z.string().optional(),
       termsConditions: z.string().optional(),
     });

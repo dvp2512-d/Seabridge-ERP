@@ -38,6 +38,14 @@ export default function NewInvoice() {
   });
   const [taxAmount, setTaxAmount] = useState('0');
   const [notes, setNotes] = useState('');
+  /**
+   * Why a sample shipment carries a declared value but no payment. Prefilled with
+   * the standard wording, which is what customs expects to see, and editable when a
+   * shipment goes out for a different reason.
+   */
+  const [purpose, setPurpose] = useState(
+    'Free Sample \u2013 No Commercial Value \u2013 For Testing Only'
+  );
   const [termsConditions, setTermsConditions] = useState(
     '1. Payment should be made within the due date.\n' +
     '2. Bank charges to be borne by the remitter.\n' +
@@ -103,6 +111,9 @@ export default function NewInvoice() {
       dueDate,
       taxAmount: parseFloat(taxAmount) || 0,
       notes,
+      // Only the sample invoice has a Purpose box; sending it for other types would
+      // store a value that never prints.
+      purpose: type === 'SAMPLE' ? purpose || undefined : undefined,
       termsConditions,
     });
   };
@@ -229,6 +240,18 @@ export default function NewInvoice() {
                   onChange={(e) => setType(e.target.value as InvoiceType)}
                   options={INVOICE_TYPE_OPTIONS}
                 />
+                {/* The Purpose box on the sample invoice sheet. Customs reads it to
+                    understand why duty is assessed on goods nobody is paying for. */}
+                {type === 'SAMPLE' && (
+                  <div className="col-span-2">
+                    <FormField
+                      label="Purpose (printed on the sample invoice)"
+                      value={purpose}
+                      onChange={(e) => setPurpose(e.target.value)}
+                      placeholder="Free Sample - No Commercial Value - For Testing Only"
+                    />
+                  </div>
+                )}
                 {/* Stated up front, because the choice changes whether this document
                     can ever be paid - not just how it is titled. */}
                 {isDocumentOnlyInvoice(type) && (
