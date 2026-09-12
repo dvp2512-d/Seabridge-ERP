@@ -42,12 +42,13 @@ const MASS_UNITS_IN_KG: Record<string, number> = {
 };
 
 /**
- * Prefill an order line's packing figures from the quotation.
+ * Prefill an order line's packing figures from the quotation or product defaults.
  *
  * These four figures are the Packing List and the weight block on every invoice.
- * Where packaging details aren't specified on the quotation, the fields stay null
- * and the document leaves those cells blank, which is a visible gap rather than
- * a plausible wrong number on a customs document.
+ * The priority chain is:
+ *   1. Packing agreed on the quotation (buyer-specific)
+ *   2. Product's default packaging (company standard)
+ *   3. Null (must be entered manually)
  *
  * Operations can correct these per line afterwards; the figures below are a
  * starting point, not a substitute for weighing the shipment.
@@ -55,16 +56,27 @@ const MASS_UNITS_IN_KG: Record<string, number> = {
 function packingFromProduct(
   quantity: number,
   unit: string,
-  _product: unknown,
+  product: { defaultPackageType?: string | null; defaultPackageWeight?: unknown } | null,
   quoted: { packageType?: string | null; packageWeight?: unknown } = {}
 ) {
+  // Priority: quotation > product default > null
+  const packageType =
+    quoted.packageType ??
+    product?.defaultPackageType ??
+    null;
+
   const quotedWeight =
     quoted.packageWeight === null || quoted.packageWeight === undefined
       ? null
       : Number(quoted.packageWeight);
 
-  const packageType = quoted.packageType ?? null;
-  const perPackageNet = quotedWeight;
+  const productDefaultWeight =
+    product?.defaultPackageWeight === null || product?.defaultPackageWeight === undefined
+      ? null
+      : Number(product.defaultPackageWeight);
+
+  // Priority: quotation > product default > null
+  const perPackageNet = quotedWeight ?? productDefaultWeight ?? null;
 
   // The net weight of goods sold by mass is the quantity itself.
   const factor = MASS_UNITS_IN_KG[unit.toUpperCase().trim()];

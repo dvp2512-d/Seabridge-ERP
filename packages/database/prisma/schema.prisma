@@ -187,6 +187,14 @@ model Product {
   // Null means unknown rather than zero: an unknown rate leaves the line's tax
   // blank for someone to fill in, where zero would silently understate the total.
   gstRate     Decimal? @map("gst_rate") @db.Decimal(5, 2)
+  // Default packaging for this product. Prefills the packing on a quotation line
+  // when no buyer-specific packing was requested at inquiry stage, and serves as
+  // the fallback for fillOrderPacking when the quotation itself had no packing set.
+  //
+  // Null means no default: the packing must be specified per order, which is
+  // appropriate for products that are always sold to the buyer's own spec.
+  defaultPackageType   String?  @map("default_package_type")
+  defaultPackageWeight Decimal? @map("default_package_weight") @db.Decimal(12, 3)
   isActive    Boolean  @default(true) @map("is_active")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")

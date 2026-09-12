@@ -8,6 +8,7 @@ import { ErrorState } from '@/components/ui/ErrorState';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import DeleteRecordButton from '@/components/DeleteRecordButton';
+import { PACKAGE_TYPE_OPTIONS } from '@/lib/packageTypes';
 import { Plus, Search, Edit2, Package } from 'lucide-react';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 
@@ -219,6 +220,10 @@ function ProductModal({
     hsnCode: product?.hsnCode || '',
     unit: product?.unit || 'KG',
     gstRate: product?.gstRate != null ? String(product.gstRate) : '',
+    // Default packaging: prefills quotation lines when no buyer-specific packing
+    // was requested, and serves as fallback for fillOrderPacking.
+    defaultPackageType: product?.defaultPackageType || '',
+    defaultPackageWeight: product?.defaultPackageWeight != null ? String(product.defaultPackageWeight) : '',
     isActive: product?.isActive ?? true,
   });
 
@@ -252,6 +257,10 @@ function ProductModal({
     mutation.mutate({
       ...formData,
       gstRate: rateOrNull(formData.gstRate),
+      defaultPackageType: formData.defaultPackageType || (product ? null : undefined),
+      defaultPackageWeight: formData.defaultPackageWeight
+        ? Number(formData.defaultPackageWeight)
+        : (product ? null : undefined),
     });
   };
 
@@ -326,6 +335,36 @@ function ProductModal({
               <label htmlFor="isActive" className="text-sm">Active</label>
             </div>
           )}
+        </div>
+
+        {/* Default Packaging - prefills quotation lines and order packing when no
+            buyer-specific packing was specified. */}
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <h4 className="text-sm font-medium text-navy-900 flex items-center gap-2">
+            <Package className="w-4 h-4" />
+            Default Packaging
+          </h4>
+          <p className="text-xs text-gray-500 mt-0.5 mb-3">
+            Prefills quotation and order packing when no buyer-specific packing is requested.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <SelectField
+              label="Package Type"
+              value={formData.defaultPackageType}
+              onChange={(e) => setFormData({ ...formData, defaultPackageType: e.target.value })}
+              options={PACKAGE_TYPE_OPTIONS}
+              placeholder="Not set"
+            />
+            <FormField
+              label="Weight per Package (KG)"
+              type="number"
+              step="0.001"
+              min="0"
+              value={formData.defaultPackageWeight}
+              onChange={(e) => setFormData({ ...formData, defaultPackageWeight: e.target.value })}
+              placeholder="e.g. 25"
+            />
+          </div>
         </div>
 
         <div className="flex justify-end gap-3 pt-4 border-t">

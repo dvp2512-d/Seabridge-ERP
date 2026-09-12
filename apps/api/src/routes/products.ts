@@ -4,6 +4,7 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
+import { PACKAGE_TYPES } from '../utils/packageTypes';
 
 const router: Router = Router();
 
@@ -70,6 +71,10 @@ router.post('/', can('MASTER_MANAGE'), async (req, res, next) => {
       unit: z.string().optional(),
       // GST percent for domestic purchases, which prefills purchase order lines.
       gstRate: z.number().min(0).max(100).optional(),
+      // Default packaging: prefills quotation lines and serves as fallback when
+      // no buyer-specific packing was agreed.
+      defaultPackageType: z.enum(PACKAGE_TYPES).optional(),
+      defaultPackageWeight: z.number().positive().optional(),
     });
 
     const validation = schema.safeParse(req.body);
@@ -98,6 +103,9 @@ router.put('/:id', can('MASTER_MANAGE'), async (req, res, next) => {
       hsnCode: z.string().optional(),
       unit: z.string().optional(),
       gstRate: z.number().min(0).max(100).nullable().optional(),
+      // Default packaging - nullable so it can be cleared.
+      defaultPackageType: z.enum(PACKAGE_TYPES).nullable().optional(),
+      defaultPackageWeight: z.number().positive().nullable().optional(),
       isActive: z.boolean().optional(),
     });
 
