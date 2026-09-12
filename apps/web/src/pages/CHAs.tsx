@@ -6,6 +6,7 @@ import { chaApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
+import DeleteRecordButton from '@/components/DeleteRecordButton';
 import { Plus, Search, Edit2, Star, Eye, Anchor, IndianRupee } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
@@ -92,8 +93,16 @@ export default function CHAs() {
                   <td><span className={`badge ${cha.isActive ? 'badge-success' : 'badge-gray'}`}>{cha.isActive ? 'Active' : 'Inactive'}</span></td>
                   <td>
                     <div className="flex gap-2">
-                      <button onClick={() => { setSelectedCha(cha); setShowDetailModal(true); }} className="text-navy-600"><Eye className="w-4 h-4" /></button>
-                      <button onClick={() => { setEditCha(cha); setShowModal(true); }} className="text-gray-400"><Edit2 className="w-4 h-4" /></button>
+                      <button onClick={() => { setSelectedCha(cha); setShowDetailModal(true); }} className="text-navy-600" aria-label="View CHA details"><Eye className="w-4 h-4" /></button>
+                      <button onClick={() => { setEditCha(cha); setShowModal(true); }} className="text-gray-400" aria-label="Edit CHA"><Edit2 className="w-4 h-4" /></button>
+                      <DeleteRecordButton
+                        resourceType="cha"
+                        recordId={cha.id}
+                        recordName={cha.name}
+                        redirectTo=""
+                        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['chas'] })}
+                        iconOnly
+                      />
                     </div>
                   </td>
                 </tr>

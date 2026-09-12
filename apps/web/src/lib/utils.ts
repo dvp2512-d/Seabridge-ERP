@@ -48,12 +48,6 @@ export function formatCurrency(
   }
 }
 
-// Format number
-export function formatNumber(num: number | string): string {
-  const n = typeof num === 'string' ? parseFloat(num) : num;
-  return new Intl.NumberFormat('en-US').format(n || 0);
-}
-
 // Format date
 export function formatDate(date: string | Date, format: string = 'DD MMM YYYY'): string {
   if (!date) return '-';
@@ -64,20 +58,6 @@ export function formatDate(date: string | Date, format: string = 'DD MMM YYYY'):
 export function formatDateTime(date: string | Date): string {
   if (!date) return '-';
   return dayjs(date).format('DD MMM YYYY, HH:mm');
-}
-
-// Format relative time
-export function formatRelativeTime(date: string | Date): string {
-  if (!date) return '-';
-  const d = dayjs(date);
-  const now = dayjs();
-  const diffDays = now.diff(d, 'day');
-  
-  if (diffDays === 0) return 'Today';
-  if (diffDays === 1) return 'Yesterday';
-  if (diffDays < 7) return `${diffDays} days ago`;
-  if (diffDays < 30) return `${Math.floor(diffDays / 7)} weeks ago`;
-  return d.format('DD MMM YYYY');
 }
 
 /**
@@ -92,14 +72,6 @@ export function isPastDue(date: string | Date | null | undefined): boolean {
   const d = dayjs(date);
   if (!d.isValid()) return false;
   return d.endOf('day').isBefore(dayjs());
-}
-
-/** Number of days until `date` (negative when already past). */
-export function daysUntil(date: string | Date | null | undefined): number | null {
-  if (!date) return null;
-  const d = dayjs(date);
-  if (!d.isValid()) return null;
-  return d.endOf('day').diff(dayjs(), 'day');
 }
 
 // Get status color
@@ -163,12 +135,6 @@ export function getPriorityColor(priority: string): string {
   return colors[priority] || 'badge-gray';
 }
 
-// Truncate text
-export function truncate(text: string, length: number = 50): string {
-  if (!text) return '';
-  return text.length > length ? `${text.substring(0, length)}...` : text;
-}
-
 // Download file
 export function downloadFile(blob: Blob, filename: string) {
   const url = window.URL.createObjectURL(blob);
@@ -179,18 +145,6 @@ export function downloadFile(blob: Blob, filename: string) {
   link.click();
   document.body.removeChild(link);
   window.URL.revokeObjectURL(url);
-}
-
-// Debounce function
-export function debounce<T extends (...args: any[]) => any>(
-  func: T,
-  wait: number
-): (...args: Parameters<T>) => void {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  return (...args: Parameters<T>) => {
-    if (timeout) clearTimeout(timeout);
-    timeout = setTimeout(() => func(...args), wait);
-  };
 }
 
 // Generate initials from name

@@ -1,5 +1,7 @@
-// Enhanced Inquiries Page with Pipeline Viewimport { useState } from 'react';import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';import { useNavigate } from 'react-router-dom';import toast from 'react-hot-toast';import { inquiriesApi, buyersApi, masterApi, productsApi } from '@/lib/api';import PageHeader from '@/components/ui/PageHeader';import Modal from '@/components/ui/Modal';import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';import { formatCurrency, formatDate, getStatusColor, getPriorityColor, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
+// Enhanced Inquiries Page with Pipeline Viewimport { useState } from 'react';import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';import { useNavigate } from 'react-router-dom';import toast from 'react-hot-toast';import { inquiriesApi, buyersApi, masterApi, productsApi } from '@/lib/api';import PageHeader from '@/components/ui/PageHeader';import Modal from '@/components/ui/Modal';import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';import { PACKAGE_TYPE_OPTIONS, PACKAGE_TYPE_LABELS } from '@/lib/packageTypes';
+import { formatCurrency, formatDate, getStatusColor, getPriorityColor, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
 import { refreshAggregates } from '@/lib/queryKeys';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';import {
   Plus,
   Search,
@@ -34,7 +36,7 @@ export default function Inquiries() {
   const [showModal, setShowModal] = useState(false);
   const [page, setPage] = useState(1);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['inquiries', search, stageFilter, priorityFilter, page],
     queryFn: () => inquiriesApi.list({
       search: search || undefined,
@@ -59,6 +61,15 @@ export default function Inquiries() {
     setSearch(value);
     setPage(1);
   }, 300);
+
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Inquiries" subtitle="Sales Pipeline" />
+        <ErrorState error={error} onRetry={refetch} />
+      </div>
+    );
+  }
 
   // Stage counts and values come from the API, computed over the whole pipeline
   // rather than the current page. Computing them client-side meant selecting one
@@ -385,9 +396,27 @@ function NewInquiryModal({ dropdowns, onClose, onSuccess }: { dropdowns: any; on
     expectedDate: '',
     requirements: '',
     notes: '',
-    items: [] as { productId: string; quantity: string; unit: string; targetPrice: string; specifications: string }[],
+    items: [] as {
+      productId: string;
+      quantity: string;
+      unit: string;
+      targetPrice: string;
+      // What the buyer wants the goods packed in. Travels to the quotation, the
+      // order and the packing list.
+      packageType: string;
+      packageWeight: string;
+      specifications: string;
+    }[],
   });
-  const [newItem, setNewItem] = useState({ productId: '', quantity: '', unit: 'KG', targetPrice: '', specifications: '' });
+  const [newItem, setNewItem] = useState({
+    productId: '',
+    quantity: '',
+    unit: 'KG',
+    targetPrice: '',
+    packageType: '',
+    packageWeight: '',
+    specifications: '',
+  });
 
   const { data: buyersData } = useQuery({
     queryKey: ['buyers-dropdown'],
@@ -410,6 +439,10 @@ function NewInquiryModal({ dropdowns, onClose, onSuccess }: { dropdowns: any; on
         ...item,
         quantity: parseFloat(item.quantity),
         targetPrice: item.targetPrice ? parseFloat(item.targetPrice) : undefined,
+        // How the buyer wants it packed. Sent only when stated, so a blank leaves the
+        // product's own packaging to apply.
+        packageType: item.packageType || undefined,
+        packageWeight: item.packageWeight ? parseFloat(item.packageWeight) : undefined,
       })),
     }),
     onSuccess: (response) => {
@@ -427,7 +460,15 @@ function NewInquiryModal({ dropdowns, onClose, onSuccess }: { dropdowns: any; on
         ...formData,
         items: [...formData.items, { ...newItem }],
       });
-      setNewItem({ productId: '', quantity: '', unit: 'KG', targetPrice: '', specifications: '' });
+      setNewItem({
+        productId: '',
+        quantity: '',
+        unit: 'KG',
+        targetPrice: '',
+        packageType: '',
+        packageWeight: '',
+        specifications: '',
+      });
     }
   };
 
@@ -548,6 +589,28 @@ function NewInquiryModal({ dropdowns, onClose, onSuccess }: { dropdowns: any; on
                   onChange={(e) => setNewItem({ ...newItem, targetPrice: e.target.value })}
                   placeholder="Buyer's target (optional)"
                 />
+                {/* How the buyer wants it packed. Asked at enquiry stage because it
+                    changes the price, and because it then travels to the quotation,
+                    the order and the packing list rather than being re-derived from
+                    the product's generic default. */}
+                <div className="grid grid-cols-2 gap-2">
+                  <SelectField
+                    label="Package Type"
+                    value={newItem.packageType}
+                    onChange={(e) => setNewItem({ ...newItem, packageType: e.target.value })}
+                    options={PACKAGE_TYPE_OPTIONS}
+                    placeholder="Standard"
+                  />
+                  <FormField
+                    label="Per Pack (KG)"
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    value={newItem.packageWeight}
+                    onChange={(e) => setNewItem({ ...newItem, packageWeight: e.target.value })}
+                    placeholder="e.g. 25"
+                  />
+                </div>
                 <FormField
                   label="Specifications"
                   value={newItem.specifications}
@@ -573,6 +636,11 @@ function NewInquiryModal({ dropdowns, onClose, onSuccess }: { dropdowns: any; on
                         <div className="text-sm text-gray-500">
                           {item.quantity} {item.unit}
                           {item.targetPrice && ` • Target: ${formatCurrency(parseFloat(item.targetPrice))}`}
+                          {/* Confirms what was captured before the inquiry is saved. */}
+                          {(item.packageType || item.packageWeight) &&
+                            ` • Packing: ${item.packageWeight ? `${item.packageWeight} kg ` : ''}${
+                              PACKAGE_TYPE_LABELS[item.packageType] ?? item.packageType ?? ''
+                            }`}
                         </div>
                       </div>
                       <button onClick={() => removeItem(index)} className="text-red-500 hover:text-red-700">

@@ -23,6 +23,7 @@ import {
   IndianRupee,
   TrendingUp,
   Edit,
+  Edit2,
   ShoppingCart,
   Calculator,
   AlertCircle,
@@ -30,6 +31,8 @@ import {
   Phone,
   MapPin,
   Calendar,
+  History,
+  RefreshCw,
 } from 'lucide-react';
 
 const STATUS_CONFIG: Record<string, { color: string; bg: string; icon: any }> = {
@@ -48,6 +51,10 @@ export default function QuotationDetail() {
 
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [showConvertModal, setShowConvertModal] = useState(false);
+  const [showRevisionModal, setShowRevisionModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingItem, setEditingItem] = useState<{ item: any; index: number } | null>(null);
   const [activeTab, setActiveTab] = useState<'items' | 'costs'>('items');
 
   // Fetch quotation details
@@ -57,7 +64,15 @@ export default function QuotationDetail() {
     enabled: !!id,
   });
 
+  // Fetch revision history
+  const { data: historyResponse } = useQuery({
+    queryKey: ['quotation-history', id],
+    queryFn: () => quotationsApi.getHistory(id!),
+    enabled: !!id,
+  });
+
   const quotation = response?.data?.data;
+  const history = historyResponse?.data?.data;
 
   // Update status mutation
   const updateStatusMutation = useMutation({
@@ -70,6 +85,20 @@ export default function QuotationDetail() {
       setShowStatusModal(false);
     },
     onError: () => toast.error('Failed to update status'),
+  });
+
+  // Revision mutation
+  const revisionMutation = useMutation({
+    mutationFn: (data: { revisionReason: string; validUntil?: string; paymentTerms?: string; deliveryTerms?: string; notes?: string }) =>
+      quotationsApi.revise(id!, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['quotation', id] });
+      queryClient.invalidateQueries({ queryKey: ['quotation-history', id] });
+      refreshAggregates(queryClient);
+      toast.success('Quotation revised successfully');
+      setShowRevisionModal(false);
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Failed to revise quotation'),
   });
 
   // Generate the PDF in a chosen currency and rate. The dialog collects both,
@@ -180,13 +209,45 @@ export default function QuotationDetail() {
                 <StatusIcon className="w-4 h-4" />
                 {quotation.status}
               </span>
+              {/* Version badge */}
+              {quotation.version > 1 && (
+                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-700">
+                  v{quotation.version}
+                </span>
+              )}
             </div>
             <p className="text-gray-500 mt-1">
               Created {formatDate(quotation.createdAt)} • Valid until {formatDate(quotation.validUntil)}
+              {quotation.revisedAt && (
+                <span className="ml-2 text-purple-600">
+                  • Last revised {formatDate(quotation.revisedAt)}
+                </span>
+              )}
             </p>
           </div>
         </div>
         <div className="flex gap-2">
+          {/* History button - show if there are revisions */}
+          {(history?.history?.length > 0 || quotation.version > 1) && (
+            <button onClick={() => setShowHistoryModal(true)} className="btn btn-secondary">
+              <History className="w-4 h-4 mr-2" />
+              History
+            </button>
+          )}
+          {/* Revise button - only for SENT or REJECTED quotations without orders */}
+          {['SENT', 'REJECTED', 'REVISED'].includes(quotation.status) && !linkedOrder && (
+            <button onClick={() => setShowRevisionModal(true)} className="btn btn-secondary">
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Revise
+            </button>
+          )}
+          {/* Edit button - only for DRAFT quotations */}
+          {quotation.status === 'DRAFT' && (
+            <button onClick={() => setShowEditModal(true)} className="btn btn-secondary">
+              <Edit2 className="w-4 h-4 mr-2" />
+              Edit
+            </button>
+          )}
           <DeleteRecordButton
             resourceType="quotation"
             recordId={id!}
@@ -298,6 +359,7 @@ export default function QuotationDetail() {
                       <th className="text-right">Unit Price</th>
                       <th className="text-right">Margin</th>
                       <th className="text-right">Total</th>
+                      {quotation.status === 'DRAFT' && <th className="text-center w-20">Actions</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -327,13 +389,26 @@ export default function QuotationDetail() {
                             </span>
                           </td>
                           <td className="text-right font-semibold">{formatCurrency(item.totalPrice, currency)}</td>
+                          {quotation.status === 'DRAFT' && (
+                            <td className="text-center">
+                              <div className="flex justify-center gap-1">
+                                <button
+                                  onClick={() => setEditingItem({ item, index: idx })}
+                                  className="p-1 text-gray-500 hover:text-navy-600"
+                                  title="Edit item"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       );
                     })}
                   </tbody>
                   <tfoot>
                     <tr className="bg-gray-50">
-                      <td colSpan={5} className="text-right font-semibold">Items Subtotal</td>
+                      <td colSpan={quotation.status === 'DRAFT' ? 6 : 5} className="text-right font-semibold">Items Subtotal</td>
                       <td className="text-right font-bold">{formatCurrency(itemsTotal, currency)}</td>
                     </tr>
                   </tfoot>
@@ -463,6 +538,51 @@ export default function QuotationDetail() {
           onClose={() => setShowPdfDialog(false)}
           onGenerate={handleGeneratePdf}
           isGenerating={isGenerating}
+        />
+      )}
+
+      {/* Revision Modal */}
+      {showRevisionModal && (
+        <RevisionModal
+          quotation={quotation}
+          onClose={() => setShowRevisionModal(false)}
+          onSave={(data) => revisionMutation.mutate(data)}
+          isLoading={revisionMutation.isPending}
+        />
+      )}
+
+      {/* Edit Modal - for DRAFT quotations */}
+      {showEditModal && (
+        <EditQuotationModal
+          quotation={quotation}
+          onClose={() => setShowEditModal(false)}
+          onSuccess={() => {
+            setShowEditModal(false);
+            queryClient.invalidateQueries({ queryKey: ['quotation', id] });
+          }}
+        />
+      )}
+
+      {/* Edit Line Item Modal - for DRAFT quotations */}
+      {editingItem && (
+        <EditQuotationItemModal
+          quotation={quotation}
+          item={editingItem.item}
+          itemIndex={editingItem.index}
+          onClose={() => setEditingItem(null)}
+          onSuccess={() => {
+            setEditingItem(null);
+            queryClient.invalidateQueries({ queryKey: ['quotation', id] });
+          }}
+        />
+      )}
+
+      {/* History Modal */}
+      {showHistoryModal && (
+        <HistoryModal
+          quotation={quotation}
+          history={history}
+          onClose={() => setShowHistoryModal(false)}
         />
       )}
     </div>
@@ -830,6 +950,452 @@ function ConvertToOrderModal({
           </button>
         </div>
       </div>
+    </Modal>
+  );
+}
+
+// Revision Modal
+function RevisionModal({
+  quotation,
+  onClose,
+  onSave,
+  isLoading,
+}: {
+  quotation: any;
+  onClose: () => void;
+  onSave: (data: any) => void;
+  isLoading?: boolean;
+}) {
+  const [revisionReason, setRevisionReason] = useState('');
+  const [validUntil, setValidUntil] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() + 30);
+    return date.toISOString().split('T')[0];
+  });
+  const [notes, setNotes] = useState(quotation.notes || '');
+
+  const handleSubmit = () => {
+    if (!revisionReason.trim()) {
+      toast.error('Please provide a reason for revision');
+      return;
+    }
+    onSave({
+      revisionReason,
+      validUntil,
+      notes,
+    });
+  };
+
+  return (
+    <Modal isOpen onClose={onClose} title="Revise Quotation" size="md">
+      <div className="p-6 space-y-4">
+        <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
+          <div className="flex items-start gap-3">
+            <RefreshCw className="w-5 h-5 text-purple-600 mt-0.5" />
+            <div>
+              <h3 className="font-semibold text-purple-800">Create New Version</h3>
+              <p className="text-sm text-purple-700 mt-1">
+                This will save the current version (v{quotation.version}) to history and create 
+                v{quotation.version + 1}. The quotation number stays the same.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <TextareaField
+          label="Reason for Revision"
+          value={revisionReason}
+          onChange={(e) => setRevisionReason(e.target.value)}
+          rows={3}
+          placeholder="e.g., Price adjustment per buyer request, Updated shipping terms, Added new product..."
+          required
+        />
+
+        <FormField
+          label="New Valid Until Date"
+          type="date"
+          value={validUntil}
+          onChange={(e) => setValidUntil(e.target.value)}
+        />
+
+        <TextareaField
+          label="Notes"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={2}
+          placeholder="Additional notes for this revision..."
+        />
+
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+          <p className="text-sm text-yellow-700">
+            <strong>Note:</strong> To change prices or items, edit the quotation after creating the revision, 
+            or use the Edit function on the quotation detail page.
+          </p>
+        </div>
+
+        <div className="flex justify-end gap-3 pt-4 border-t">
+          <button onClick={onClose} className="btn btn-secondary">Cancel</button>
+          <button
+            onClick={handleSubmit}
+            className="btn btn-primary"
+            disabled={isLoading || !revisionReason.trim()}
+          >
+            <RefreshCw className="w-4 h-4 mr-2" />
+            {isLoading ? 'Creating Revision...' : 'Create Revision'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// History Modal
+function HistoryModal({
+  quotation,
+  history,
+  onClose,
+}: {
+  quotation: any;
+  history: any;
+  onClose: () => void;
+}) {
+  const [selectedVersion, setSelectedVersion] = useState<any>(null);
+
+  const versions = history?.history || [];
+
+  return (
+    <Modal isOpen onClose={onClose} title="Quotation History" size="lg">
+      <div className="p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <History className="w-5 h-5 text-navy-600" />
+          <span className="font-medium">
+            {quotation.quotationNumber} — Currently v{quotation.version}
+          </span>
+        </div>
+
+        {versions.length === 0 ? (
+          <div className="text-center py-8 text-gray-500">
+            <History className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+            <p>No revision history yet.</p>
+            <p className="text-sm">Previous versions will appear here when the quotation is revised.</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Version List */}
+            <div className="border rounded-lg divide-y max-h-96 overflow-y-auto">
+              {versions.map((version: any) => (
+                <div
+                  key={version.id}
+                  className={cn(
+                    'p-4 cursor-pointer hover:bg-gray-50 transition-colors',
+                    selectedVersion?.id === version.id && 'bg-navy-50'
+                  )}
+                  onClick={() => setSelectedVersion(selectedVersion?.id === version.id ? null : version)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="font-medium">Version {version.version}</span>
+                      <span className="text-gray-500 text-sm ml-2">
+                        {formatDate(version.createdAt)}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-medium">{formatCurrency(Number(version.grandTotal))}</div>
+                      <div className="text-xs text-gray-500">{version.status}</div>
+                    </div>
+                  </div>
+                  {version.revisionReason && (
+                    <p className="text-sm text-gray-600 mt-2">
+                      <span className="font-medium">Reason:</span> {version.revisionReason}
+                    </p>
+                  )}
+
+                  {/* Expanded Details */}
+                  {selectedVersion?.id === version.id && (
+                    <div className="mt-4 pt-4 border-t space-y-3">
+                      <div className="grid grid-cols-3 gap-4 text-sm">
+                        <div>
+                          <div className="text-gray-500">Subtotal</div>
+                          <div className="font-medium">{formatCurrency(Number(version.subtotal))}</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-500">Total Cost</div>
+                          <div className="font-medium">{formatCurrency(Number(version.totalCost))}</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-500">Margin</div>
+                          <div className="font-medium text-green-600">
+                            {formatCurrency(Number(version.totalMargin))} ({Number(version.marginPercent).toFixed(1)}%)
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Items Snapshot */}
+                      {version.itemsSnapshot && version.itemsSnapshot.length > 0 && (
+                        <div>
+                          <div className="text-sm font-medium text-gray-700 mb-2">Items ({version.itemsSnapshot.length})</div>
+                          <div className="bg-gray-50 rounded p-2 text-xs">
+                            {version.itemsSnapshot.map((item: any, idx: number) => (
+                              <div key={idx} className="flex justify-between py-1">
+                                <span>{item.productName || item.productCode}</span>
+                                <span>{item.quantity} {item.unit} × {formatCurrency(item.unitPrice)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="flex justify-end pt-4 border-t mt-4">
+          <button onClick={onClose} className="btn btn-secondary">Close</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+
+
+// Edit Quotation Modal - for DRAFT status only
+function EditQuotationModal({
+  quotation,
+  onClose,
+  onSuccess,
+}: {
+  quotation: any;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [formData, setFormData] = useState({
+    validUntil: quotation.validUntil?.split('T')[0] || '',
+    paymentTerms: quotation.paymentTerms || '',
+    deliveryTerms: quotation.deliveryTerms || '',
+    notes: quotation.notes || '',
+    termsConditions: quotation.termsConditions || '',
+  });
+
+  const mutation = useMutation({
+    mutationFn: (data: any) => quotationsApi.update(quotation.id, data),
+    onSuccess: () => {
+      toast.success('Quotation updated successfully');
+      onSuccess();
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Failed to update quotation'),
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    mutation.mutate(formData);
+  };
+
+  return (
+    <Modal isOpen onClose={onClose} title="Edit Quotation" size="md">
+      <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <FormField
+          label="Valid Until"
+          type="date"
+          required
+          value={formData.validUntil}
+          onChange={(e) => setFormData({ ...formData, validUntil: e.target.value })}
+        />
+
+        <FormField
+          label="Payment Terms"
+          value={formData.paymentTerms}
+          onChange={(e) => setFormData({ ...formData, paymentTerms: e.target.value })}
+          placeholder="e.g., Net 30, LC at sight"
+        />
+
+        <FormField
+          label="Delivery Terms"
+          value={formData.deliveryTerms}
+          onChange={(e) => setFormData({ ...formData, deliveryTerms: e.target.value })}
+          placeholder="e.g., 4-6 weeks from order"
+        />
+
+        <TextareaField
+          label="Notes"
+          value={formData.notes}
+          onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+          rows={2}
+          placeholder="Internal notes..."
+        />
+
+        <TextareaField
+          label="Terms & Conditions"
+          value={formData.termsConditions}
+          onChange={(e) => setFormData({ ...formData, termsConditions: e.target.value })}
+          rows={4}
+          placeholder="Standard terms..."
+        />
+
+        <div className="flex justify-end gap-3 pt-4 border-t">
+          <button type="button" onClick={onClose} className="btn btn-secondary">
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={mutation.isPending}>
+            {mutation.isPending ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+
+// Edit Quotation Line Item Modal - for DRAFT status
+function EditQuotationItemModal({
+  quotation,
+  item,
+  itemIndex,
+  onClose,
+  onSuccess,
+}: {
+  quotation: any;
+  item: any;
+  itemIndex: number;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [formData, setFormData] = useState({
+    quantity: String(item.quantity || ''),
+    unitCost: String(item.unitCost || ''),
+    unitPrice: String(item.unitPrice || ''),
+    specifications: item.specifications || '',
+  });
+
+  const mutation = useMutation({
+    mutationFn: (data: any) => {
+      // Build updated items array with the modified item
+      const updatedItems = quotation.items.map((it: any, idx: number) => {
+        if (idx === itemIndex) {
+          const qty = Number(data.quantity) || 0;
+          const cost = Number(data.unitCost) || 0;
+          const price = Number(data.unitPrice) || 0;
+          return {
+            productId: it.productId,
+            quantity: qty,
+            unit: it.unit,
+            unitCost: cost,
+            unitPrice: price,
+            specifications: data.specifications,
+          };
+        }
+        return {
+          productId: it.productId,
+          quantity: Number(it.quantity),
+          unit: it.unit,
+          unitCost: Number(it.unitCost),
+          unitPrice: Number(it.unitPrice),
+          specifications: it.specifications,
+        };
+      });
+      return quotationsApi.update(quotation.id, { items: updatedItems });
+    },
+    onSuccess: () => {
+      toast.success('Item updated successfully');
+      onSuccess();
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Failed to update item'),
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    mutation.mutate(formData);
+  };
+
+  // Calculate margin preview
+  const qty = Number(formData.quantity) || 0;
+  const cost = Number(formData.unitCost) || 0;
+  const price = Number(formData.unitPrice) || 0;
+  const totalCost = qty * cost;
+  const totalPrice = qty * price;
+  const margin = totalPrice - totalCost;
+  const marginPct = totalPrice > 0 ? (margin / totalPrice) * 100 : 0;
+
+  return (
+    <Modal isOpen onClose={onClose} title={`Edit Line Item: ${item.product?.name}`} size="md">
+      <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <FormField
+            label="Quantity"
+            type="number"
+            required
+            value={formData.quantity}
+            onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
+          />
+          <div className="flex items-end pb-2 text-gray-600">
+            {item.unit}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <FormField
+            label="Unit Cost (₹)"
+            type="number"
+            step="0.01"
+            required
+            value={formData.unitCost}
+            onChange={(e) => setFormData({ ...formData, unitCost: e.target.value })}
+          />
+          <FormField
+            label="Unit Price (₹)"
+            type="number"
+            step="0.01"
+            required
+            value={formData.unitPrice}
+            onChange={(e) => setFormData({ ...formData, unitPrice: e.target.value })}
+          />
+        </div>
+
+        <TextareaField
+          label="Specifications"
+          value={formData.specifications}
+          onChange={(e) => setFormData({ ...formData, specifications: e.target.value })}
+          rows={2}
+          placeholder="Product specifications for this quotation..."
+        />
+
+        {/* Margin Preview */}
+        <div className="p-3 bg-gray-50 rounded-lg">
+          <div className="text-sm font-medium text-gray-700 mb-2">Preview</div>
+          <div className="grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <span className="text-gray-500">Total Cost:</span>
+              <span className="ml-2 font-medium">₹{totalCost.toLocaleString()}</span>
+            </div>
+            <div>
+              <span className="text-gray-500">Total Price:</span>
+              <span className="ml-2 font-medium">₹{totalPrice.toLocaleString()}</span>
+            </div>
+            <div>
+              <span className="text-gray-500">Margin:</span>
+              <span className={cn(
+                'ml-2 font-medium',
+                marginPct >= 20 ? 'text-green-600' :
+                marginPct >= 15 ? 'text-yellow-600' : 'text-red-600'
+              )}>
+                {marginPct.toFixed(1)}%
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 pt-4 border-t">
+          <button type="button" onClick={onClose} className="btn btn-secondary">
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={mutation.isPending}>
+            {mutation.isPending ? 'Saving...' : 'Update Item'}
+          </button>
+        </div>
+      </form>
     </Modal>
   );
 }

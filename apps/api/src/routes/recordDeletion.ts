@@ -65,6 +65,47 @@ const DELETABLE_RESOURCES: Record<string, {
     label: 'Task',
     cascades: [],
   },
+  buyer: {
+    model: 'buyer',
+    label: 'Buyer',
+    cascades: [
+      { model: 'buyerContact', foreignKey: 'buyerId', label: 'contacts' },
+      { model: 'communication', foreignKey: 'buyerId', label: 'communications' },
+      { model: 'inquiry', foreignKey: 'buyerId', label: 'inquiries' },
+      { model: 'quotation', foreignKey: 'buyerId', label: 'quotations' },
+      { model: 'exportOrder', foreignKey: 'buyerId', label: 'orders' },
+      { model: 'invoice', foreignKey: 'buyerId', label: 'invoices' },
+    ],
+  },
+  product: {
+    model: 'product',
+    label: 'Product',
+    cascades: [
+      { model: 'supplierPrice', foreignKey: 'productId', label: 'supplier prices' },
+    ],
+  },
+  supplier: {
+    model: 'supplier',
+    label: 'Supplier',
+    cascades: [
+      { model: 'supplierPrice', foreignKey: 'supplierId', label: 'price lists' },
+      { model: 'procurement', foreignKey: 'supplierId', label: 'procurements' },
+    ],
+  },
+  cha: {
+    model: 'cHA',
+    label: 'CHA Agent',
+    cascades: [
+      { model: 'cHARate', foreignKey: 'chaId', label: 'rates' },
+    ],
+  },
+  transporter: {
+    model: 'transporter',
+    label: 'Transporter',
+    cascades: [
+      { model: 'transportRate', foreignKey: 'transporterId', label: 'rates' },
+    ],
+  },
 };
 
 /**

@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { quotationsApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { formatCurrency, formatDate, getStatusColor, downloadFile, isPastDue, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { Plus, Search, Eye, Download, FileText, Clock, CheckCircle } from 'lucide-react';
@@ -23,7 +24,7 @@ export default function Quotations() {
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['quotations', search, statusFilter, page],
     queryFn: () => quotationsApi.list({
       search: search || undefined,
@@ -42,6 +43,15 @@ export default function Quotations() {
     setSearch(value);
     setPage(1);
   }, 300);
+
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Quotations" subtitle="Sales Proposals" />
+        <ErrorState error={error} onRetry={refetch} />
+      </div>
+    );
+  }
 
   const countByStatus: Record<string, number> = summary?.countByStatus ?? {};
   const stats = {

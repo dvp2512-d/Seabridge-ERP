@@ -1,5 +1,5 @@
 // New Invoice Page - Create invoice from order
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -69,6 +69,15 @@ export default function NewInvoice() {
   const order = orderData?.data?.data;
   const orders = ordersData?.data?.data || [];
 
+  // Auto-update due date based on buyer's credit days when order is selected
+  useEffect(() => {
+    if (order?.buyer?.creditDays) {
+      const date = new Date(invoiceDate);
+      date.setDate(date.getDate() + order.buyer.creditDays);
+      setDueDate(date.toISOString().split('T')[0]);
+    }
+  }, [order?.buyer?.creditDays, invoiceDate]);
+
   // Filter orders that don't have invoices yet (or show all for simplicity)
   const availableOrders = orders.filter((o: any) => 
     ['CONFIRMED', 'IN_PRODUCTION', 'READY_TO_SHIP', 'SHIPPED', 'DELIVERED'].includes(o.status)
@@ -84,8 +93,24 @@ export default function NewInvoice() {
   // Create mutation
   const mutation = useMutation({
     mutationFn: (data: any) => invoicesApi.create(data),
-    onSuccess: (response) => {
+    onSuccess: (response: any) => {
       toast.success('Invoice created successfully');
+      // A packing list fills its weight figures from the quotation and the product
+      // defaults when it is raised, so say so - otherwise figures appearing on the
+      // order's lines look like something nobody asked for.
+      const filled = response.data?.packingFilled;
+      if (filled?.filled > 0) {
+        toast.success(
+          `Packing figures filled on ${filled.filled} line${filled.filled === 1 ? '' : 's'}`
+        );
+      }
+      if (filled?.unavailable?.length > 0) {
+        toast.error(
+          `No packaging on file for ${filled.unavailable.join(', ')} — the packing list will ` +
+            'print blank for those lines.'
+        );
+      }
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
       refreshAggregates(queryClient);
       navigate(`/invoices/${response.data?.data?.id}`);
     },

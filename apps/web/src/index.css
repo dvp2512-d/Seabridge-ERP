@@ -33,6 +33,14 @@
     @apply bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
   }
   
+  .btn-ghost {
+    @apply bg-transparent hover:bg-gray-100 focus:ring-gray-300;
+  }
+  
+  .btn-sm {
+    @apply px-2 py-1 text-xs;
+  }
+  
   .input {
     @apply block w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-navy-500 focus:border-navy-500 disabled:bg-gray-100 disabled:cursor-not-allowed;
   }

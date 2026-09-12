@@ -7,9 +7,10 @@ import { buyersApi, masterApi } from '@/lib/api';
 import { formatCurrency, formatDate, getStatusColor } from '@/lib/utils';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import PageHeader from '@/components/ui/PageHeader';
+import { ErrorState } from '@/components/ui/ErrorState';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
-import { Plus, Search, Eye, Building2, MapPin, TrendingUp } from 'lucide-react';
+import { Plus, Search, Eye, Building2, MapPin, TrendingUp, Download } from 'lucide-react';
 
 export default function Buyers() {
   const navigate = useNavigate();
@@ -20,7 +21,7 @@ export default function Buyers() {
   const [showModal, setShowModal] = useState(false);
   const [page, setPage] = useState(1);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['buyers', search, statusFilter, countryFilter, page],
     queryFn: () => buyersApi.list({ 
       search: search || undefined, 
@@ -46,16 +47,53 @@ export default function Buyers() {
     setPage(1);
   }, 300);
 
+  const handleExport = async () => {
+    try {
+      const response = await buyersApi.exportCsv({
+        status: statusFilter || undefined,
+        countryId: countryFilter || undefined,
+      });
+      // Create download link
+      const blob = new Blob([response.data], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `buyers-export-${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      toast.success('Buyers exported successfully');
+    } catch (err) {
+      toast.error('Failed to export buyers');
+    }
+  };
+
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Buyers" subtitle="Customer Management" />
+        <ErrorState error={error} onRetry={refetch} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="Buyers"
         subtitle={`${pagination?.total || 0} total buyers`}
         actions={
-          <button onClick={() => setShowModal(true)} className="btn btn-primary">
-            <Plus className="w-4 h-4 mr-2" />
-            Add Buyer
-          </button>
+          <div className="flex gap-2">
+            <button onClick={handleExport} className="btn btn-secondary">
+              <Download className="w-4 h-4 mr-2" />
+              Export
+            </button>
+            <button onClick={() => setShowModal(true)} className="btn btn-primary">
+              <Plus className="w-4 h-4 mr-2" />
+              Add Buyer
+            </button>
+          </div>
         }
       />
 
@@ -224,6 +262,7 @@ export default function Buyers() {
           onSuccess={(newBuyer) => {
             setShowModal(false);
             queryClient.invalidateQueries({ queryKey: ['buyers'] });
+            queryClient.invalidateQueries({ queryKey: ['dropdowns'] });
             if (newBuyer?.id) {
               navigate(`/buyers/${newBuyer.id}`);
             }

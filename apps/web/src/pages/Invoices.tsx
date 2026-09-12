@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { invoicesApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
+import { ErrorState } from '@/components/ui/ErrorState';
 import {
   INVOICE_TYPE_BADGE_CLASS,
   describeExcludedDocuments,
@@ -38,7 +39,7 @@ export default function Invoices() {
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['invoices', search, statusFilter, page],
     queryFn: () => invoicesApi.list({
       search: search || undefined,
@@ -58,6 +59,15 @@ export default function Invoices() {
     setSearch(value);
     setPage(1);
   }, 300);
+
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Invoices" subtitle="Finance Management" />
+        <ErrorState error={error} onRetry={refetch} />
+      </div>
+    );
+  }
 
   /**
    * The cards are about getting paid, so they count commercial invoices only.

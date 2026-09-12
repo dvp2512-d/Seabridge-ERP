@@ -3,14 +3,16 @@ import { useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { ordersApi, chaApi, transportersApi, suppliersApi, masterApi, buyersApi } from '@/lib/api';
+import { ordersApi, chaApi, transportersApi, suppliersApi, masterApi, buyersApi, attachmentsApi } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { can } from '@/lib/permissions';
 import Modal from '@/components/ui/Modal';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import DeleteRecordButton from '@/components/DeleteRecordButton';
 import { formatCurrency, formatDate, getStatusColor, isPastDue, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
 import { refreshAggregates } from '@/lib/queryKeys';
+import { PACKAGE_TYPE_OPTIONS, packageCountLabel } from '@/lib/packageTypes';
 import {
   ArrowLeft,
   Package,
@@ -29,12 +31,17 @@ import {
   Anchor,
   Plus,
   Edit,
+  Edit2,
   AlertTriangle,
   AlertCircle,
+  Loader2,
   FileCheck,
   ClipboardList,
   Receipt,
   Download,
+  Upload,
+  Trash2,
+  Paperclip,
 } from 'lucide-react';
 
 const ORDER_STAGES = ['CONFIRMED', 'IN_PRODUCTION', 'READY_TO_SHIP', 'SHIPPED', 'DELIVERED'];
@@ -59,6 +66,7 @@ export default function OrderDetail() {
 
   const [activeTab, setActiveTab] = useState<'items' | 'procurement' | 'documents' | 'shipments' | 'invoices'>('items');
   const [showStatusModal, setShowStatusModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   /** The header fields every document raised against this order prints. */
   const [showDocumentDetails, setShowDocumentDetails] = useState(false);
   const [showProcurementModal, setShowProcurementModal] = useState(false);
@@ -67,7 +75,7 @@ export default function OrderDetail() {
   const [selectedDocument, setSelectedDocument] = useState<any>(null);
 
   // Fetch order details
-  const { data: response, isLoading } = useQuery({
+  const { data: response, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['order', id],
     queryFn: () => ordersApi.get(id!),
     enabled: !!id,
@@ -91,6 +99,17 @@ export default function OrderDetail() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-navy-600"></div>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        <button onClick={() => navigate('/orders')} className="flex items-center gap-2 text-gray-600 hover:text-gray-900">
+          <ArrowLeft className="w-4 h-4" /> Back to Orders
+        </button>
+        <ErrorState error={error} onRetry={refetch} />
       </div>
     );
   }
@@ -151,6 +170,13 @@ export default function OrderDetail() {
             recordName={`Order ${order.orderNumber}`}
             redirectTo="/orders"
           />
+          {/* Edit button - only when not delivered or cancelled */}
+          {!['DELIVERED', 'CANCELLED'].includes(order.status) && (
+            <button onClick={() => setShowEditModal(true)} className="btn btn-secondary">
+              <Edit2 className="w-4 h-4 mr-2" />
+              Edit
+            </button>
+          )}
           <button onClick={() => setShowDocumentDetails(true)} className="btn btn-secondary">
             <FileText className="w-4 h-4 mr-2" />
             Document Details
@@ -496,6 +522,17 @@ export default function OrderDetail() {
         />
       )}
 
+      {showEditModal && (
+        <EditOrderModal
+          order={order}
+          onClose={() => setShowEditModal(false)}
+          onSuccess={() => {
+            setShowEditModal(false);
+            queryClient.invalidateQueries({ queryKey: ['order', id] });
+          }}
+        />
+      )}
+
       {showDocumentDetails && (
         <DocumentDetailsModal
           order={order}
@@ -523,6 +560,8 @@ export default function OrderDetail() {
       {showShipmentModal && (
         <ShipmentModal
           orderId={id!}
+          defaultOriginPortId={order?.portOfLoadingId}
+          defaultDestinationPortId={order?.portOfDischargeId}
           onClose={() => setShowShipmentModal(false)}
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['order', id] });
@@ -581,6 +620,32 @@ function OrderItemsTab({ order, currency }: { order: any; currency: string }) {
 
   const incomplete = items.filter((i) => i.netWeight == null || i.grossWeight == null).length;
 
+  /**
+   * Fill the whole order's packing from what is already on file.
+   *
+   * For orders created before the packaging fields existed, or whose products had no
+   * standard pack at the time. Only fills empty lines, so anything weighed by hand
+   * stands.
+   */
+  const fillPacking = useMutation({
+    mutationFn: (overwrite: boolean) => ordersApi.fillPacking(order.id, overwrite),
+    onSuccess: (response: any) => {
+      const r = response?.data?.data;
+      if ((r?.filled ?? 0) > 0) {
+        toast.success(`Packing filled on ${r.filled} line${r.filled === 1 ? '' : 's'}`);
+      } else {
+        toast.error(
+          r?.unavailable?.length
+            ? `No packaging on file for ${r.unavailable.join(', ')}. Set a default pack on the product.`
+            : 'Nothing to fill'
+        );
+      }
+      queryClient.invalidateQueries({ queryKey: ['order', order.id] });
+    },
+    onError: (error: any) =>
+      toast.error(error?.response?.data?.message || 'Could not fill the packing figures'),
+  });
+
   return (
     <div className="space-y-4">
       <div className="overflow-x-auto">
@@ -617,7 +682,16 @@ function OrderItemsTab({ order, currency }: { order: any; currency: string }) {
                   {formatCurrency(item.totalPrice, currency)}
                 </td>
                 <td className="text-right text-sm">
-                  {item.numberOfPackages ?? <span className="text-amber-600">—</span>}
+                  {/* Count with its type, e.g. "40 Bags" - the count alone is not
+                      something the packing list can be checked against. */}
+                  {item.numberOfPackages != null ? (
+                    packageCountLabel(
+                      item.numberOfPackages,
+                      item.packageType
+                    )
+                  ) : (
+                    <span className="text-amber-600">—</span>
+                  )}
                 </td>
                 <td className="text-right text-sm">
                   {item.packageWeight ? `${Number(item.packageWeight)} kg` : <span className="text-amber-600">—</span>}
@@ -667,12 +741,26 @@ function OrderItemsTab({ order, currency }: { order: any; currency: string }) {
       {incomplete > 0 && (
         <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
           <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-          <span>
-            {incomplete} of {order.items?.length ?? 0} lines have no packing figures. The
-            Packing List and the weight block on invoices will print blank for those
-            lines. Set a default pack on the product to have these filled in
-            automatically on future orders.
-          </span>
+          <div className="space-y-2">
+            <div>
+              {incomplete} of {items.length} lines have no packing figures. The Packing List
+              and the weight block on invoices will print blank for those lines.
+            </div>
+            {canManage && (
+              <button
+                onClick={() => fillPacking.mutate(false)}
+                disabled={fillPacking.isPending}
+                className="btn btn-secondary btn-sm"
+              >
+                {fillPacking.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Package className="w-4 h-4" />
+                )}
+                Fill from quotation &amp; product defaults
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -711,9 +799,11 @@ function PackingModal({
 }) {
   const [form, setForm] = useState({
     numberOfPackages: item.numberOfPackages ? String(item.numberOfPackages) : '',
+    packageType: item.packageType || '',
     packageWeight: item.packageWeight ? String(Number(item.packageWeight)) : '',
     netWeight: item.netWeight ? String(Number(item.netWeight)) : '',
     grossWeight: item.grossWeight ? String(Number(item.grossWeight)) : '',
+    specifications: item.specifications || '',
   });
 
   const mutation = useMutation({
@@ -737,27 +827,6 @@ function PackingModal({
   const gross = numberOrNull(form.grossWeight);
   const grossTooLow = net !== null && gross !== null && gross < net;
 
-  /**
-   * Suggest the packages and gross weight from the net weight and the pack size,
-   * so entering two figures fills in the other two. Part packs round up: half a bag
-   * still ships as a bag.
-   */
-  const suggest = () => {
-    const perPack = numberOrNull(form.packageWeight) ?? Number(item.product?.packageNetWeight ?? 0);
-    const netKg = net ?? Number(item.quantity ?? 0);
-    if (!perPack || perPack <= 0 || !netKg) return;
-
-    const packages = Math.ceil(netKg / perPack);
-    const perPackGross = Number(item.product?.packageGrossWeight ?? 0);
-
-    setForm({
-      numberOfPackages: String(packages),
-      packageWeight: String(perPack),
-      netWeight: String(netKg),
-      grossWeight: perPackGross > 0 ? String(Math.round(packages * perPackGross * 1000) / 1000) : form.grossWeight,
-    });
-  };
-
   return (
     <Modal isOpen onClose={onClose} title={`Packing - ${item.product?.name ?? 'line'}`} size="md">
       <div className="p-6 space-y-4">
@@ -768,13 +837,6 @@ function PackingModal({
           </span>
         </div>
 
-        {item.product?.packageNetWeight && (
-          <button onClick={suggest} className="btn btn-secondary btn-sm w-full">
-            Fill from product default ({Number(item.product.packageNetWeight)} kg per{' '}
-            {(item.product.packageType || 'pack').toLowerCase()})
-          </button>
-        )}
-
         <div className="grid grid-cols-2 gap-4">
           <FormField
             label="No. of Packages"
@@ -783,6 +845,15 @@ function PackingModal({
             step="1"
             value={form.numberOfPackages}
             onChange={(e: any) => setForm({ ...form, numberOfPackages: e.target.value })}
+          />
+          {/* The count and the type belong together: "40" is not a figure a shipping
+              line or customs officer can act on. */}
+          <SelectField
+            label="Package Type"
+            value={form.packageType}
+            onChange={(e: any) => setForm({ ...form, packageType: e.target.value })}
+            placeholder="Not set"
+            options={PACKAGE_TYPE_OPTIONS}
           />
           <FormField
             label="Weight per Package (KG)"
@@ -810,6 +881,14 @@ function PackingModal({
           />
         </div>
 
+        <TextareaField
+          label="Specifications"
+          value={form.specifications}
+          onChange={(e: any) => setForm({ ...form, specifications: e.target.value })}
+          rows={2}
+          placeholder="Product specifications for this order..."
+        />
+
         {grossTooLow && (
           <p className="text-xs text-red-600">
             Gross weight cannot be less than net weight — gross includes the packaging.
@@ -827,9 +906,11 @@ function PackingModal({
               mutation.mutate({
                 numberOfPackages:
                   form.numberOfPackages === '' ? null : Number(form.numberOfPackages),
+                packageType: form.packageType || null,
                 packageWeight: numberOrNull(form.packageWeight),
                 netWeight: net,
                 grossWeight: gross,
+                specifications: form.specifications || null,
               })
             }
           >
@@ -1156,6 +1237,9 @@ function DocumentsTab({
         </div>
         ))}
       </div>
+
+      {/* Attachments Section */}
+      <AttachmentsSection orderId={order.id} />
     </div>
   );
 }
@@ -1463,6 +1547,70 @@ function ProcurementModal({
     variationPercent: '',
   });
 
+  /**
+   * Purchase order lines, at the supplier's price.
+   *
+   * Fetched when a supplier is chosen: the products and quantities come from the
+   * export order, the rate from that supplier's price list and the GST from the
+   * product. Every figure stays editable, because a price list is a starting point
+   * and the rate is what gets negotiated.
+   */
+  const [lines, setLines] = useState<any[]>([]);
+  const [missingPrices, setMissingPrices] = useState<string[]>([]);
+
+  const suggest = useMutation({
+    mutationFn: (supplierId: string) => ordersApi.suggestProcurement(orderId, supplierId),
+    onSuccess: (response: any) => {
+      const data = response?.data?.data;
+      setLines(
+        (data?.lines ?? []).map((l: any) => ({
+          productId: l.productId,
+          productName: l.productName,
+          productCode: l.productCode,
+          quantity: String(l.quantity),
+          unit: l.unit,
+          rate: String(l.rate ?? 0),
+          taxPercent: l.taxPercent === null ? '' : String(l.taxPercent),
+          buyerUnitPrice: l.buyerUnitPrice,
+          priceFound: l.priceFound,
+        }))
+      );
+      setMissingPrices(data?.missingPrices ?? []);
+      // Standing terms from the supplier, unless the operator has already typed
+      // something for this order.
+      setFormData((prev) => ({
+        ...prev,
+        paymentMode: prev.paymentMode || data?.defaults?.paymentMode || '',
+        pickupLocation: prev.pickupLocation || data?.defaults?.pickupLocation || '',
+      }));
+    },
+    onError: (error: any) =>
+      toast.error(error?.response?.data?.message || 'Could not load supplier prices'),
+  });
+
+  /**
+   * Totals, computed the same way the server does: rate x quantity per line, GST on
+   * each line, summed. Shown live so the figure is never a surprise, but the server
+   * recomputes on save - the total is never taken from the browser.
+   */
+  const totals = lines.reduce(
+    (acc, line) => {
+      const amount = Math.round((Number(line.quantity) || 0) * (Number(line.rate) || 0) * 100) / 100;
+      const pct = line.taxPercent === '' ? null : Number(line.taxPercent);
+      const tax = pct === null ? 0 : Math.round(((amount * pct) / 100) * 100) / 100;
+      return {
+        subtotal: acc.subtotal + amount,
+        tax: acc.tax + tax,
+        untaxed: acc.untaxed + (pct === null ? 1 : 0),
+      };
+    },
+    { subtotal: 0, tax: 0, untaxed: 0 }
+  );
+  const grandTotal = Math.round((totals.subtotal + totals.tax) * 100) / 100;
+
+  const setLine = (index: number, key: string, value: string) =>
+    setLines((prev) => prev.map((l, i) => (i === index ? { ...l, [key]: value } : l)));
+
   const { data: suppliersData } = useQuery({
     queryKey: ['suppliers-list'],
     queryFn: () => suppliersApi.list({ limit: 200 }),
@@ -1488,13 +1636,32 @@ function ProcurementModal({
   });
 
   const handleSubmit = () => {
-    if (!formData.supplierId || !formData.totalAmount) {
-      toast.error('Please fill required fields');
+    // Either priced lines or a typed total - the order needs a value one way or the
+    // other, and the server enforces the same rule.
+    if (!formData.supplierId) {
+      toast.error('Choose a supplier');
+      return;
+    }
+    if (lines.length === 0 && !formData.totalAmount) {
+      toast.error('Add line items, or enter the agreed total amount');
       return;
     }
     mutation.mutate({
       supplierId: formData.supplierId,
-      totalAmount: parseFloat(formData.totalAmount),
+      // The total is computed from these on the server. A purchase order with no
+      // lines still accepts a typed total, for a one-off purchase with nothing to
+      // itemise.
+      ...(lines.length > 0
+        ? {
+            items: lines.map((l) => ({
+              productId: l.productId,
+              quantity: Number(l.quantity) || 0,
+              unit: l.unit,
+              rate: Number(l.rate) || 0,
+              taxPercent: l.taxPercent === '' ? null : Number(l.taxPercent),
+            })),
+          }
+        : { totalAmount: parseFloat(formData.totalAmount) }),
       currency,
       expectedDate: formData.expectedDate || undefined,
       notes: formData.notes || undefined,
@@ -1519,21 +1686,145 @@ function ProcurementModal({
           label="Supplier"
           required
           value={formData.supplierId}
-          onChange={(e) => setFormData({ ...formData, supplierId: e.target.value })}
+          onChange={(e) => {
+            const supplierId = e.target.value;
+            setFormData({ ...formData, supplierId });
+            // Loading the supplier's prices is the whole point of choosing one, so it
+            // happens here rather than behind a separate button.
+            setLines([]);
+            setMissingPrices([]);
+            if (supplierId) suggest.mutate(supplierId);
+          }}
           options={(suppliersData?.data?.data || []).map((s: any) => ({
             value: s.id,
             label: s.name,
           }))}
           placeholder="Select supplier"
         />
-        <FormField
-          label={`Total Amount (${currency})`}
-          required
-          type="number"
-          step="0.01"
-          value={formData.totalAmount}
-          onChange={(e) => setFormData({ ...formData, totalAmount: e.target.value })}
-        />
+        {/*
+          Lines at the supplier's price, fetched when a supplier is chosen. The total
+          is rate x quantity per line plus GST, so it is computed rather than typed -
+          which is also why the printed order and its total can no longer disagree.
+        */}
+        {lines.length > 0 ? (
+          <div className="rounded-lg border border-gray-200 overflow-hidden">
+            <div className="bg-gray-50 px-4 py-2 flex items-center justify-between">
+              <h4 className="text-sm font-medium text-navy-900">Items at Supplier Price</h4>
+              {suggest.isPending && <Loader2 className="w-4 h-4 animate-spin text-gray-400" />}
+            </div>
+            <table className="table text-sm">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th className="text-right">Qty</th>
+                  <th className="text-right w-28">Rate ({currency})</th>
+                  <th className="text-right w-20">GST %</th>
+                  <th className="text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lines.map((line, i) => {
+                  const amount =
+                    Math.round((Number(line.quantity) || 0) * (Number(line.rate) || 0) * 100) / 100;
+                  return (
+                    <tr key={line.productId}>
+                      <td>
+                        <div className="font-medium">{line.productName}</div>
+                        <div className="text-xs text-gray-500">
+                          {line.productCode}
+                          {/* Shown while negotiating: what this product is being sold
+                              to the buyer for. Never printed on the supplier's copy. */}
+                          {line.buyerUnitPrice ? (
+                            <span className="ml-2 text-gray-400">
+                              sells at {formatCurrency(line.buyerUnitPrice, currency)}
+                            </span>
+                          ) : null}
+                        </div>
+                        {!line.priceFound && (
+                          <div className="text-xs text-amber-700">No price on file</div>
+                        )}
+                      </td>
+                      <td className="text-right whitespace-nowrap">
+                        {line.quantity} {line.unit}
+                      </td>
+                      <td>
+                        <input
+                          className="input text-right py-1"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={line.rate}
+                          onChange={(e) => setLine(i, 'rate', e.target.value)}
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="input text-right py-1"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          max="100"
+                          placeholder="—"
+                          value={line.taxPercent}
+                          onChange={(e) => setLine(i, 'taxPercent', e.target.value)}
+                        />
+                      </td>
+                      <td className="text-right font-medium whitespace-nowrap">
+                        {formatCurrency(amount, currency)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td colSpan={4} className="text-right text-gray-600">Taxable Value</td>
+                  <td className="text-right">{formatCurrency(totals.subtotal, currency)}</td>
+                </tr>
+                <tr>
+                  <td colSpan={4} className="text-right text-gray-600">GST</td>
+                  <td className="text-right">{formatCurrency(totals.tax, currency)}</td>
+                </tr>
+                <tr className="bg-gray-50">
+                  <td colSpan={4} className="text-right font-semibold">Total</td>
+                  <td className="text-right font-bold">{formatCurrency(grandTotal, currency)}</td>
+                </tr>
+              </tfoot>
+            </table>
+            {(missingPrices.length > 0 || totals.untaxed > 0) && (
+              <div className="px-4 py-2 bg-amber-50 border-t border-amber-200 text-xs text-amber-800 space-y-1">
+                {missingPrices.length > 0 && (
+                  <div>
+                    No supplier price on file for {missingPrices.join(', ')} — enter the agreed
+                    rate, and add it to the supplier's price list to save typing next time.
+                  </div>
+                )}
+                {totals.untaxed > 0 && (
+                  <div>
+                    {totals.untaxed} line{totals.untaxed === 1 ? '' : 's'} have no GST rate. Set it
+                    on the product to have it filled in automatically.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          // No lines: either no supplier chosen yet, or a one-off purchase with
+          // nothing to itemise, which can still be recorded as a single figure.
+          <FormField
+            label={`Total Amount (${currency})`}
+            type="number"
+            step="0.01"
+            value={formData.totalAmount}
+            onChange={(e) => setFormData({ ...formData, totalAmount: e.target.value })}
+            hint={
+              formData.supplierId
+                ? 'This order has no line items to price. Enter the agreed total.'
+                : 'Choose a supplier to load items at their prices.'
+            }
+          />
+        )}
+
         <FormField
           label="Expected Delivery Date"
           type="date"
@@ -1635,18 +1926,22 @@ function ProcurementModal({
 // Shipment Modal
 function ShipmentModal({
   orderId,
+  defaultOriginPortId,
+  defaultDestinationPortId,
   onClose,
   onSuccess,
 }: {
   orderId: string;
+  defaultOriginPortId?: string;
+  defaultDestinationPortId?: string;
   onClose: () => void;
   onSuccess: () => void;
 }) {
   const [formData, setFormData] = useState({
     chaId: '',
     transporterId: '',
-    originPortId: '',
-    destinationPortId: '',
+    originPortId: defaultOriginPortId || '',
+    destinationPortId: defaultDestinationPortId || '',
     containerNumber: '',
     containerType: '20FT',
     // Printed on the invoice and packing list.
@@ -1962,6 +2257,238 @@ function DocumentUpdateModal({
           </button>
         </div>
       </div>
+    </Modal>
+  );
+}
+
+// Attachments Section - allows uploading and managing file attachments
+function AttachmentsSection({ orderId }: { orderId: string }) {
+  const queryClient = useQueryClient();
+  const [isUploading, setIsUploading] = useState(false);
+
+  // Fetch attachments
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ['attachments', 'ORDER', orderId],
+    queryFn: () => attachmentsApi.list('ORDER', orderId),
+  });
+
+  const attachments = data?.data?.data || [];
+
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => attachmentsApi.delete(id),
+    onSuccess: () => {
+      toast.success('Attachment deleted');
+      refetch();
+    },
+    onError: () => toast.error('Failed to delete attachment'),
+  });
+
+  // Handle file selection
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Check file size (10MB max)
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('File size must be less than 10MB');
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      // Read file as base64
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = (reader.result as string).split(',')[1];
+        
+        await attachmentsApi.upload({
+          entityType: 'ORDER',
+          entityId: orderId,
+          fileName: file.name,
+          mimeType: file.type,
+          fileData: base64,
+        });
+
+        toast.success('File uploaded successfully');
+        refetch();
+        queryClient.invalidateQueries({ queryKey: ['order', orderId] });
+      };
+      reader.readAsDataURL(file);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to upload file');
+    } finally {
+      setIsUploading(false);
+      // Reset input
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  // Handle download
+  const handleDownload = async (attachment: any) => {
+    try {
+      const response = await attachmentsApi.download(attachment.id);
+      const blob = new Blob([response.data], { type: attachment.mimeType });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = attachment.originalName;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      toast.error('Failed to download file');
+    }
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  return (
+    <div className="mt-6 border-t pt-4">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="font-medium flex items-center gap-2">
+          <Paperclip className="w-4 h-4" />
+          Attachments
+        </h3>
+        <label className="btn btn-secondary btn-sm cursor-pointer">
+          <Upload className="w-4 h-4 mr-2" />
+          {isUploading ? 'Uploading...' : 'Upload File'}
+          <input
+            type="file"
+            className="hidden"
+            onChange={handleFileSelect}
+            disabled={isUploading}
+            accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.jpg,.jpeg,.png,.gif"
+          />
+        </label>
+      </div>
+
+      {isLoading ? (
+        <div className="text-sm text-gray-500 text-center py-4">Loading attachments...</div>
+      ) : attachments.length === 0 ? (
+        <div className="text-sm text-gray-500 text-center py-4 border border-dashed rounded-lg">
+          <Paperclip className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+          No attachments yet. Upload BL, CoO, certificates, or other documents.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {attachments.map((attachment: any) => (
+            <div
+              key={attachment.id}
+              className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <FileText className="w-8 h-8 text-navy-600 flex-shrink-0" />
+                <div className="min-w-0">
+                  <div className="font-medium text-sm truncate">{attachment.originalName}</div>
+                  <div className="text-xs text-gray-500">
+                    {formatFileSize(attachment.fileSize)} • {formatDate(attachment.createdAt)}
+                    {attachment.uploadedBy && (
+                      <span> • {attachment.uploadedBy.firstName}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleDownload(attachment)}
+                  className="p-2 text-navy-600 hover:bg-navy-100 rounded"
+                  title="Download"
+                >
+                  <Download className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => {
+                    if (confirm('Delete this attachment?')) {
+                      deleteMutation.mutate(attachment.id);
+                    }
+                  }}
+                  className="p-2 text-red-600 hover:bg-red-100 rounded"
+                  title="Delete"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
+// Edit Order Modal
+function EditOrderModal({
+  order,
+  onClose,
+  onSuccess,
+}: {
+  order: any;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [formData, setFormData] = useState({
+    expectedDate: order.expectedDate?.split('T')[0] || '',
+    poNumber: order.poNumber || '',
+    notes: order.notes || '',
+  });
+
+  const mutation = useMutation({
+    mutationFn: (data: any) => ordersApi.update(order.id, data),
+    onSuccess: () => {
+      toast.success('Order updated successfully');
+      onSuccess();
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Failed to update order'),
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    mutation.mutate(formData);
+  };
+
+  return (
+    <Modal isOpen onClose={onClose} title="Edit Order" size="md">
+      <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <FormField
+          label="Expected Delivery Date"
+          type="date"
+          required
+          value={formData.expectedDate}
+          onChange={(e) => setFormData({ ...formData, expectedDate: e.target.value })}
+        />
+
+        <FormField
+          label="Customer PO Number"
+          value={formData.poNumber}
+          onChange={(e) => setFormData({ ...formData, poNumber: e.target.value })}
+          placeholder="Buyer's purchase order reference"
+        />
+
+        <TextareaField
+          label="Notes"
+          value={formData.notes}
+          onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+          rows={3}
+          placeholder="Internal notes..."
+        />
+
+        <div className="flex justify-end gap-3 pt-4 border-t">
+          <button type="button" onClick={onClose} className="btn btn-secondary">
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={mutation.isPending}>
+            {mutation.isPending ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </form>
     </Modal>
   );
 }

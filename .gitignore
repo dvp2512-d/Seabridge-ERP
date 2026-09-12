@@ -61,7 +61,7 @@ coverage/
 *.lcov
 
 # Documents rendered by `npm run verify:pdf` for eyeballing against MASTER DRAFT.
-samples/generated/
+samples/
 
 # ---------- Runtime storage ----------
 storage/

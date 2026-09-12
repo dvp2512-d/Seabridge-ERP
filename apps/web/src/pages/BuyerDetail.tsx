@@ -7,6 +7,7 @@ import { buyersApi, masterApi } from '@/lib/api';
 import { formatCurrency, formatDate, formatDateTime, getStatusColor, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
+import DeleteRecordButton from '@/components/DeleteRecordButton';
 import {
   ArrowLeft, Mail, Phone, Globe, Building2, Edit2, Plus,
   User, MessageSquare, FileText, ShoppingCart, IndianRupee,
@@ -95,10 +96,18 @@ export default function BuyerDetail() {
             )}
           </div>
         </div>
-        <button onClick={() => setShowEditModal(true)} className="btn btn-secondary">
-          <Edit2 className="w-4 h-4 mr-2" />
-          Edit
-        </button>
+        <div className="flex gap-2">
+          <DeleteRecordButton
+            resourceType="buyer"
+            recordId={id!}
+            recordName={buyer.companyName}
+            redirectTo="/buyers"
+          />
+          <button onClick={() => setShowEditModal(true)} className="btn btn-secondary">
+            <Edit2 className="w-4 h-4 mr-2" />
+            Edit
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -416,7 +425,7 @@ function ContactsTab({ contacts, onAdd, onEdit }: { contacts: any[]; onAdd: () =
                   )}
                 </div>
               </div>
-              <button onClick={() => onEdit(contact)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => onEdit(contact)} className="text-gray-400 hover:text-gray-600" aria-label="Edit contact">
                 <Edit2 className="w-4 h-4" />
               </button>
             </div>

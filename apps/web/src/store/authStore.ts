@@ -45,16 +45,3 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
-
-// Role-based permission helpers
-export const canAccess = (userRole: string, requiredRoles: string[]) => {
-  return requiredRoles.includes(userRole);
-};
-
-export const ROLE_PERMISSIONS = {
-  FOUNDER: ['*'], // Full access
-  ADMIN: ['*'],
-  SALES: ['dashboard:sales', 'buyers', 'inquiries', 'quotations', 'products'],
-  OPERATIONS: ['dashboard:operations', 'orders', 'shipments', 'documents', 'buyers:view'],
-  FINANCE: ['dashboard:finance', 'invoices', 'payments', 'buyers:view', 'orders:view'],
-};

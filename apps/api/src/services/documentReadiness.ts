@@ -236,11 +236,20 @@ export function assessOrderDocuments(order: any, companyProfile: any): DocumentR
       where: 'Order \u2192 Items \u2192 Packing',
     },
     {
+      // A count without its type cannot be acted on by whoever loads or clears the
+      // consignment, so the type is required rather than cosmetic.
+      label: 'Package Type',
+      ready:
+        (order?.items?.length ?? 0) > 0 &&
+        order.items.every((i: any) => has(i.packageType)),
+      where: 'Order → Items → Packing',
+    },
+    {
       label: 'Bag / Carton Per KGs',
       ready:
         (order?.items?.length ?? 0) > 0 &&
-        order.items.every((i: any) => has(i.packageWeight) || has(i.product?.packageNetWeight)),
-      where: 'Order \u2192 Items \u2192 Packing',
+        order.items.every((i: any) => has(i.packageWeight)),
+      where: 'Order → Items → Packing',
     },
     ...weights.filter((f) => f.label !== 'Total Cartons / Box'),
   ]);

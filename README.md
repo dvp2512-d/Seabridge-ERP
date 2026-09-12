@@ -205,10 +205,15 @@ Run these checks without a server:
 npm run typecheck        # TypeScript — zero errors expected
 npm run verify:contract  # Every frontend API call maps to a real backend route
 npm run verify:pdf       # Generates quotation/invoice PDFs from mock data
-npm run verify:logic     # Currency, date and margin calculations
+npm run verify:logic     # Currency, date, margin, and financial calculations
 npm run verify           # All of the above
 npm run db:validate      # Prisma schema validity
 ```
+
+The verification scripts live in `scripts/`:
+- `check-api-contract.mjs` — Cross-references frontend API calls against backend routes
+- `verify-pdf.ts` — Renders all 7 document types from mock data
+- `verify-logic.ts` — Tests pure calculation functions (30 tests)
 
 ---
 
@@ -228,7 +233,8 @@ seabridge-ERP/
 │   │   │   │   ├── exchangeRates.ts
 │   │   │   │   ├── audit.ts
 │   │   │   │   ├── recordDeletion.ts
-│   │   │   │   └── ... (16 more)
+│   │   │   │   ├── lifecycle.ts
+│   │   │   │   └── ... (13 more)
 │   │   │   ├── middleware/
 │   │   │   │   ├── auth.ts     # JWT authentication
 │   │   │   │   ├── auditLog.ts # Automatic change tracking
@@ -247,7 +253,7 @@ seabridge-ERP/
 │       │   │   ├── DeleteRecordButton.tsx  # Permanent delete (Founder)
 │       │   │   ├── modals/
 │       │   │   └── ui/                     # Reusable UI components
-│       │   ├── pages/          # 26 page components
+│       │   ├── pages/          # 25 page components
 │       │   │   ├── Dashboard.tsx
 │       │   │   ├── AuditLog.tsx
 │       │   │   ├── QuotationDetail.tsx
@@ -262,7 +268,7 @@ seabridge-ERP/
 ├── packages/
 │   └── database/
 │       └── prisma/
-│           ├── schema.prisma   # 44 database models
+│           ├── schema.prisma   # 46 database models
 │           ├── migrations/
 │           └── seed.ts
 ├── scripts/                    # Verification scripts
@@ -277,7 +283,7 @@ seabridge-ERP/
 
 ## 🔐 Default Login
 
-The seed creates two accounts with password `Admin@123` (or shown during first seed):
+The seed creates two accounts with password `admin123`:
 
 | Email | Role | Purpose |
 |-------|------|---------|
@@ -456,25 +462,30 @@ GET /health
 | Authentication (JWT) | Login, logout, sessions, password change |
 | Role-based access control | 5 roles, permission guards on all routes |
 | Buyers & Contacts | CRUD, communication log, full history |
-| Products & Categories | CRUD with HSN code |
+| Products & Categories | CRUD with HSN code, default packaging |
 | Suppliers & Pricing | Per-product price lists |
 | CHA Agents & Rates | Port-based rate management |
 | Transporters & Rates | Distance/route-based rates |
 | Inquiries & Follow-ups | Full pipeline, stage tracking |
 | Quotations | Costing, margin, ports, PDF, status workflow |
 | Order Management | Full lifecycle, procurement, documents, shipments |
-| Invoices & Payments | Multi-currency, PDF, receivables |
-| Exchange Rates | CBIC rates, market comparison, history |
-| Dashboard | KPIs, charts, multi-currency totals |
-| Expenses & Income | CRUD with categorization |
-| Tasks | CRUD, complete, reopen |
+| Invoices & Payments | Multi-type (Commercial, Proforma, Sample, Packing List), PDF, receivables |
+| Exchange Rates | Market comparison (advisory only — all amounts stored in INR) |
+| Dashboard | KPIs, charts, multi-currency totals, role-scoped views |
+| Expenses & Income | CRUD with categorization, payment tracking |
+| Tasks | CRUD, complete, reopen, role-scoped visibility |
 | Users | CRUD, roles, deactivate/reactivate |
-| Master Data | Countries, ports, currencies, Incoterms |
+| Master Data | Countries, ports, currencies, Incoterms with deactivate/reactivate |
+| Master Data Lifecycle | Soft delete with cascade preview, reactivation |
 | Audit Log | Full activity tracking with UI viewer |
 | Record Deletion | Founder-only permanent delete with cascade preview |
 | Webhooks | Create, test, SSRF-protected |
-| PDF Generation | Quotation and Invoice PDFs |
+| PDF Generation | Quotation, Purchase Order, Invoice (4 types), Packing List |
 | Deployment | Single `deploy.cmd` script (Windows) |
+| Verification Scripts | TypeScript, API contract, PDF, and logic verification |
+| Error Handling | Friendly error states with retry on all major pages |
+| Smart Defaults | Auto-fill from buyer (payment terms), order (ports), creditDays (due date) |
+| Seeded Ports | 27 major Indian and international ports pre-loaded |
 
 ### Partial / Not Yet Complete ⚠️
 | Feature | Status |
@@ -500,7 +511,7 @@ GET /health
 
 ## 🗄️ Database
 
-**44 Prisma models** across these domains:
+**46 Prisma models** across these domains:
 
 | Domain | Models |
 |--------|--------|
@@ -511,8 +522,8 @@ GET /health
 | CRM | Buyer, BuyerContact, Communication |
 | Sales | Inquiry, InquiryItem, FollowUp |
 | Quotations | Quotation, QuotationItem, QuotationCost |
-| Orders | ExportOrder, OrderItem, Procurement, Document, Shipment |
-| Finance | Invoice, Payment, Expense, Income |
+| Orders | ExportOrder, OrderItem, Procurement, ProcurementItem, Document, Shipment |
+| Finance | Invoice, Payment, Expense, ExpensePayment, Income |
 | System | CompanyProfile, Employee, Task, AuditLog, SystemSetting |
 | Sequences | NumberSequence |
 | Automation | Webhook, WebhookLog, Template, AutomationRule, EmailQueue |

@@ -6,6 +6,7 @@ import { useAuthStore } from '@/store/authStore';
 import { can } from '@/lib/permissions';
 import { formatCurrency, formatDate, getStatusColor, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
 import NetPositionPanel from '@/components/ui/NetPositionPanel';
+import { ErrorState } from '@/components/ui/ErrorState';
 import {
   TrendingUp,
   Users,
@@ -49,7 +50,7 @@ export default function Dashboard() {
    * lib/queryKeys.ts), but refetching on mount is the safety net that does not
    * depend on every screen remembering to.
    */
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['dashboard'],
     queryFn: () => dashboardApi.getMain(),
     enabled: canViewFull,
@@ -58,7 +59,7 @@ export default function Dashboard() {
   });
 
   // Sales data for charts
-  const { data: salesData } = useQuery({
+  const { data: salesData, refetch: refetchSales } = useQuery({
     queryKey: ['dashboard-sales'],
     queryFn: () => dashboardApi.getSales(),
     enabled: canViewSales,
@@ -67,7 +68,7 @@ export default function Dashboard() {
   });
 
   // Finance data
-  const { data: financeData } = useQuery({
+  const { data: _financeData, refetch: refetchFinance } = useQuery({
     queryKey: ['dashboard-finance'],
     queryFn: () => dashboardApi.getFinance(),
     enabled: canViewFinance,
@@ -77,13 +78,25 @@ export default function Dashboard() {
 
   const dashboard = data?.data?.data;
   const sales = salesData?.data?.data;
-  const finance = financeData?.data?.data;
 
   if (canViewFull && isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-navy-900" />
       </div>
+    );
+  }
+
+  if (canViewFull && isError) {
+    return (
+      <ErrorState
+        error={error}
+        onRetry={() => {
+          refetch();
+          refetchSales();
+          refetchFinance();
+        }}
+      />
     );
   }
 
@@ -319,19 +332,6 @@ export default function Dashboard() {
                 No recent orders
               </div>
             )}
-          </div>
-        </div>
-
-        {/* Receivables Aging */}
-        <div className="card">
-          <div className="card-header flex items-center justify-between">
-            <h2 className="font-semibold">Receivables Aging</h2>
-            <Link to="/invoices" className="text-sm text-navy-600 hover:underline flex items-center gap-1">
-              View all <ArrowRight className="w-4 h-4" />
-            </Link>
-          </div>
-          <div className="card-body">
-            <ReceivablesAging data={finance?.receivablesSummary || []} />
           </div>
         </div>
       </div>
@@ -620,72 +620,6 @@ function OrderStatusChart({ data }: { data: any[] }) {
           </div>
         );
       })}
-    </div>
-  );
-}
-
-// Receivables Aging Component
-function ReceivablesAging({ data }: { data: any[] }) {
-  const agingBuckets = [
-    { key: 'current', label: 'Current', color: 'bg-green-500' },
-    { key: '1-30 days', label: '1-30 Days', color: 'bg-yellow-500' },
-    { key: '31-60 days', label: '31-60 Days', color: 'bg-orange-500' },
-    { key: '61-90 days', label: '61-90 Days', color: 'bg-red-400' },
-    { key: '90+ days', label: '90+ Days', color: 'bg-red-600' },
-  ];
-
-  const totalReceivables = data.reduce((sum, d) => sum + parseFloat(d.total || 0), 0);
-
-  return (
-    <div className="space-y-4">
-      {/* Stacked Bar */}
-      <div className="h-8 bg-gray-100 rounded-full overflow-hidden flex">
-        {agingBuckets.map(bucket => {
-          const bucketData = data.find(d => d.aging === bucket.key);
-          const value = parseFloat(bucketData?.total || 0);
-          const percentage = totalReceivables > 0 ? (value / totalReceivables) * 100 : 0;
-          
-          if (percentage === 0) return null;
-          
-          return (
-            <div
-              key={bucket.key}
-              className={cn('h-full', bucket.color)}
-              style={{ width: `${percentage}%` }}
-              title={`${bucket.label}: ${formatCurrency(value)}`}
-            />
-          );
-        })}
-      </div>
-
-      {/* Legend */}
-      <div className="space-y-2">
-        {agingBuckets.map(bucket => {
-          const bucketData = data.find(d => d.aging === bucket.key);
-          const value = parseFloat(bucketData?.total || 0);
-          const count = parseInt(bucketData?.count || 0);
-          
-          if (value === 0) return null;
-          
-          return (
-            <div key={bucket.key} className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-2">
-                <div className={cn('w-3 h-3 rounded', bucket.color)} />
-                <span className="text-gray-600">{bucket.label}</span>
-                <span className="text-gray-400">({count})</span>
-              </div>
-              <span className="font-medium">{formatCurrency(value)}</span>
-            </div>
-          );
-        })}
-      </div>
-
-      {data.length === 0 && (
-        <div className="text-center py-4 text-gray-500 text-sm">
-          <CheckCircle className="w-8 h-8 mx-auto mb-2 text-green-500" />
-          No outstanding receivables
-        </div>
-      )}
     </div>
   );
 }

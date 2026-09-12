@@ -130,7 +130,7 @@ const createSchema = z.object({
   notes: z.string().optional(),
 });
 
-router.post('/', can('OPERATIONS_VIEW'), async (req: any, res, next) => {
+router.post('/', can('OPERATIONS_MANAGE'), async (req: any, res, next) => {
   try {
     const validation = createSchema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
@@ -189,7 +189,7 @@ const updateSchema = z.object({
   notes: z.string().optional(),
 });
 
-router.put('/:id', can('OPERATIONS_VIEW'), async (req: any, res, next) => {
+router.put('/:id', can('OPERATIONS_MANAGE'), async (req: any, res, next) => {
   try {
     const validation = updateSchema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
@@ -248,7 +248,7 @@ router.put('/:id', can('OPERATIONS_VIEW'), async (req: any, res, next) => {
   }
 });
 
-router.delete('/:id', can('OPERATIONS_VIEW'), async (req: any, res, next) => {
+router.delete('/:id', can('OPERATIONS_MANAGE'), async (req: any, res, next) => {
   try {
     const existing = await prisma.task.findUnique({ where: { id: req.params.id } });
     if (!existing) throw new NotFoundError('Task');

@@ -4,7 +4,7 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
-import { createOrderFromQuotation } from '../services/orderService';
+import { createOrderFromQuotation, fillOrderPacking } from '../services/orderService';
 import { getBaseCurrency } from '../services/exchangeRateService';
 import { emitEvent } from '../services/eventService';
 import { generatePurchaseOrderPDF } from '../services/pdfService';
@@ -13,6 +13,8 @@ import {
   syncShipmentExpenses,
 } from '../services/expenseSyncService';
 import { assessOrderDocuments } from '../services/documentReadiness';
+import { priceProcurementLines } from '../services/procurementPricing';
+import { PACKAGE_TYPES } from '../utils/packageTypes';
 
 const router: Router = Router();
 
@@ -97,7 +99,9 @@ router.get('/:id', can('OPERATIONS_VIEW'), async (req, res, next) => {
         quotation: { select: { id: true, quotationNumber: true } },
         incoterm: true,
         items: { include: { product: true } },
-        procurements: { include: { supplier: true } },
+        procurements: {
+          include: { supplier: true, items: { include: { product: true } } },
+        },
         documents: { orderBy: { documentType: 'asc' } },
         shipments: { include: { cha: true, transporter: true, originPort: true, destinationPort: true } },
         invoices: { orderBy: { createdAt: 'desc' } },
@@ -209,6 +213,115 @@ router.put('/:id', can('OPERATIONS_MANAGE'), async (req, res, next) => {
   }
 });
 
+/**
+ * Suggested purchase order lines for a supplier.
+ *
+ * Answers "what am I buying and at what price" without anyone typing it: the
+ * products come from the export order, the quantities from its lines, the rate from
+ * this supplier's own price list, and the GST from the product.
+ *
+ * A product with no price on file is returned with a rate of zero and
+ * `priceFound: false` rather than being omitted. Leaving it out would silently
+ * shorten the order; returning it flagged shows exactly what still needs a price
+ * agreed, which is the useful answer.
+ *
+ * Nothing is saved. The operator can change any rate before creating the order,
+ * because a price list is a starting point and not a contract.
+ */
+router.get('/:orderId/procurements/suggest', can('OPERATIONS_VIEW'), async (req, res, next) => {
+  try {
+    const supplierId = String(req.query.supplierId ?? '');
+    if (!supplierId) throw new AppError('Choose a supplier first.', 400);
+
+    const [order, supplier] = await Promise.all([
+      prisma.exportOrder.findUnique({
+        where: { id: req.params.orderId },
+        include: { items: { include: { product: true } } },
+      }),
+      prisma.supplier.findUnique({
+        where: { id: supplierId },
+        select: { id: true, name: true, paymentTerms: true, address: true },
+      }),
+    ]);
+
+    if (!order) throw new NotFoundError('Order');
+    if (!supplier) throw new NotFoundError('Supplier');
+
+    const productIds = order.items.map((i) => i.productId);
+
+    /**
+     * The supplier's current prices for these products.
+     *
+     * Filtered to prices in force today, because an expired rate is not a rate. The
+     * newest applicable one wins where a supplier has several - a price list is
+     * revised by adding a row, not by editing the old one.
+     */
+    const now = new Date();
+    const prices = await prisma.supplierPrice.findMany({
+      where: {
+        supplierId,
+        productId: { in: productIds },
+        isActive: true,
+        validFrom: { lte: now },
+        OR: [{ validTo: null }, { validTo: { gte: now } }],
+      },
+      orderBy: { validFrom: 'desc' },
+    });
+
+    const lines = order.items.map((item) => {
+      const quantity = Number(item.quantity);
+
+      // A minimum quantity this order does not reach means the price does not apply
+      // to it, so it is not offered.
+      const price = prices.find(
+        (p) =>
+          p.productId === item.productId &&
+          (p.minQuantity === null || quantity >= Number(p.minQuantity))
+      );
+
+      const gstRate = item.product.gstRate === null ? null : Number(item.product.gstRate);
+
+      return {
+        productId: item.productId,
+        productName: item.product.name,
+        productCode: item.product.code,
+        hsnCode: item.product.hsnCode,
+        quantity,
+        unit: item.unit,
+        rate: price ? Number(price.price) : 0,
+        taxPercent: gstRate,
+        priceFound: Boolean(price),
+        /** The price quoted to the buyer, for reference while negotiating. */
+        buyerUnitPrice: Number(item.unitPrice),
+      };
+    });
+
+    const totals = priceProcurementLines(lines);
+
+    res.json({
+      success: true,
+      data: {
+        supplier,
+        lines: lines.map((line, i) => ({ ...line, ...totals.lines[i] })),
+        subtotal: totals.subtotal,
+        taxAmount: totals.taxAmount,
+        totalAmount: totals.totalAmount,
+        /** Products with no current price from this supplier. */
+        missingPrices: lines.filter((l) => !l.priceFound).map((l) => l.productName),
+        linesWithoutTax: totals.linesWithoutTax,
+        // Sensible defaults for the rest of the form, so a repeat purchase needs
+        // little more than a confirmation.
+        defaults: {
+          paymentMode: supplier.paymentTerms ?? null,
+          pickupLocation: supplier.address ?? null,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Add procurement
 router.post('/:id/procurements', can('OPERATIONS_MANAGE'), async (req, res, next) => {
   try {
@@ -220,7 +333,27 @@ router.post('/:id/procurements', can('OPERATIONS_MANAGE'), async (req, res, next
 
     const schema = z.object({
       supplierId: z.string().min(1),
-      totalAmount: z.number().positive(),
+      /**
+       * The agreed total, for a purchase order raised without line items.
+       *
+       * Optional now: when `items` are given the total is computed from them and
+       * anything sent here is ignored, because a total that can be typed
+       * independently of the lines is a total that will eventually contradict them.
+       */
+      totalAmount: z.number().positive().optional(),
+      /** Lines at the supplier's price. rate x quantity + GST becomes the total. */
+      items: z
+        .array(
+          z.object({
+            productId: z.string().min(1),
+            quantity: z.number().positive(),
+            unit: z.string().optional(),
+            rate: z.number().nonnegative(),
+            taxPercent: z.number().min(0).max(100).nullable().optional(),
+            notes: z.string().optional(),
+          })
+        )
+        .optional(),
       currency: z.string().optional(),
       expectedDate: dateString,
       notes: z.string().optional(),
@@ -255,14 +388,56 @@ router.post('/:id/procurements', can('OPERATIONS_MANAGE'), async (req, res, next
 
     const poNumber = await generateCode('PROCUREMENT', 'PO');
 
+    const { items, totalAmount: typedTotal, ...fields } = validation.data;
+
+    /**
+     * The total comes from the lines when there are lines.
+     *
+     * A purchase order raised without them keeps the typed figure, which is how
+     * every order worked before line items existed and is still valid for a one-off
+     * purchase with nothing to itemise. One of the two must be present, or the order
+     * would have no value at all.
+     */
+    const priced = items && items.length > 0 ? priceProcurementLines(items) : null;
+
+    if (!priced && typedTotal === undefined) {
+      throw new AppError(
+        'Add at least one line item, or enter the agreed total amount.',
+        400
+      );
+    }
+
+    const subtotal = priced ? priced.subtotal : (typedTotal as number);
+    const taxAmount = priced ? priced.taxAmount : 0;
+    const total = priced ? priced.totalAmount : (typedTotal as number);
+
     const procurement = await prisma.procurement.create({
       data: {
-        ...validation.data,
+        ...fields,
         orderId: req.params.id,
         poNumber,
         orderDate: new Date(),
+        subtotal,
+        taxAmount,
+        totalAmount: total,
+        ...(priced
+          ? {
+              items: {
+                create: priced.lines.map((line) => ({
+                  productId: line.productId,
+                  quantity: line.quantity,
+                  unit: line.unit,
+                  rate: line.rate,
+                  taxPercent: line.taxPercent,
+                  amount: line.amount,
+                  taxAmount: line.taxAmount,
+                  notes: line.notes,
+                })),
+              },
+            }
+          : {}),
       },
-      include: { supplier: true },
+      include: { supplier: true, items: { include: { product: true } } },
     });
 
     // Ordering from a supplier is what creates the obligation, so the payable is
@@ -296,6 +471,26 @@ router.put('/:orderId/procurements/:procId', can('OPERATIONS_MANAGE'), async (re
     const schema = z.object({
       supplierId: z.string().min(1).optional(),
       totalAmount: z.number().positive().optional(),
+      /**
+       * Replaces the lines wholesale when given.
+       *
+       * A purchase order is a short document that gets revised as a whole - a rate
+       * is renegotiated and it is reissued - so replacing the set is closer to how
+       * it is used than patching individual lines, and it keeps the total and the
+       * lines derived from one write.
+       */
+      items: z
+        .array(
+          z.object({
+            productId: z.string().min(1),
+            quantity: z.number().positive(),
+            unit: z.string().optional(),
+            rate: z.number().nonnegative(),
+            taxPercent: z.number().min(0).max(100).nullable().optional(),
+            notes: z.string().optional(),
+          })
+        )
+        .optional(),
       status: z.enum(['PENDING', 'ORDERED', 'RECEIVED', 'PARTIAL']).optional(),
       expectedDate: dateString,
       receivedDate: dateString,
@@ -323,10 +518,42 @@ router.put('/:orderId/procurements/:procId', can('OPERATIONS_MANAGE'), async (re
       throw new NotFoundError('Procurement not found for this order');
     }
 
-    const procurement = await prisma.procurement.update({
-      where: { id: req.params.procId },
-      data: validation.data,
-      include: { supplier: true },
+    const { items, ...fields } = validation.data;
+    const priced = items ? priceProcurementLines(items) : null;
+
+    // Replacing the lines and recomputing the total is one transaction: a total that
+    // survived a failed line write would be a figure with nothing behind it.
+    const procurement = await prisma.$transaction(async (tx) => {
+      if (priced) {
+        await tx.procurementItem.deleteMany({ where: { procurementId: req.params.procId } });
+      }
+
+      return tx.procurement.update({
+        where: { id: req.params.procId },
+        data: {
+          ...fields,
+          ...(priced
+            ? {
+                subtotal: priced.subtotal,
+                taxAmount: priced.taxAmount,
+                totalAmount: priced.totalAmount,
+                items: {
+                  create: priced.lines.map((line) => ({
+                    productId: line.productId,
+                    quantity: line.quantity,
+                    unit: line.unit,
+                    rate: line.rate,
+                    taxPercent: line.taxPercent,
+                    amount: line.amount,
+                    taxAmount: line.taxAmount,
+                    notes: line.notes,
+                  })),
+                },
+              }
+            : {}),
+        },
+        include: { supplier: true, items: { include: { product: true } } },
+      });
     });
 
     const expense = await syncProcurementExpense(procurement.id).catch((error) => {
@@ -485,10 +712,14 @@ router.put('/:orderId/items/:itemId', can('OPERATIONS_MANAGE'), async (req, res,
   try {
     const schema = z.object({
       numberOfPackages: z.number().int().nonnegative().nullable().optional(),
+      // What the goods are packed in. Validated against the shared list so a typo
+      // cannot reach a packing list a customs officer reads.
+      packageType: z.enum(PACKAGE_TYPES).nullable().optional(),
       packageWeight: z.number().nonnegative().nullable().optional(),
       netWeight: z.number().nonnegative().nullable().optional(),
       grossWeight: z.number().nonnegative().nullable().optional(),
       notes: z.string().optional(),
+      specifications: z.string().nullable().optional(),
     });
 
     const validation = schema.safeParse(req.body);
@@ -618,6 +849,35 @@ router.get('/:id/document-readiness', can('OPERATIONS_VIEW'), async (req, res, n
   }
 });
 
+/**
+ * Fill every line's packing figures from the agreed packing and the product defaults.
+ *
+ * For orders that predate the packaging fields, or whose products had no packaging set
+ * at the time. Only fills what is empty unless `overwrite` is asked for, so weighed
+ * figures are never replaced by computed ones.
+ */
+router.post('/:id/items/fill-packing', can('OPERATIONS_MANAGE'), async (req, res, next) => {
+  try {
+    const schema = z.object({ overwrite: z.boolean().optional() });
+    const validation = schema.safeParse(req.body ?? {});
+    if (!validation.success) throw new ValidationError(validation.error.errors);
+
+    const order = await prisma.exportOrder.findUnique({
+      where: { id: req.params.id },
+      select: { id: true },
+    });
+    if (!order) throw new NotFoundError('Order');
+
+    const result = await fillOrderPacking(req.params.id, {
+      overwrite: validation.data.overwrite,
+    });
+
+    res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Update document status
 router.put('/:orderId/documents/:docId', can('OPERATIONS_MANAGE'), async (req, res, next) => {
   try {
@@ -629,6 +889,16 @@ router.put('/:orderId/documents/:docId', can('OPERATIONS_MANAGE'), async (req, r
 
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
+
+    // Verify document belongs to this order
+    const existing = await prisma.document.findUnique({
+      where: { id: req.params.docId },
+      select: { id: true, orderId: true },
+    });
+    if (!existing) throw new NotFoundError('Document');
+    if (existing.orderId !== req.params.orderId) {
+      throw new NotFoundError('Document not found for this order');
+    }
 
     const updateData: any = { ...validation.data };
     if (validation.data.status === 'COMPLETED') {
@@ -653,8 +923,10 @@ router.get('/:orderId/procurements/:procId/pdf', can('OPERATIONS_VIEW'), async (
       where: { id: req.params.procId },
       include: {
         supplier: { include: { country: true } },
-        // The PO lists the goods ordered, so the order's items and their products
-        // are needed - selecting only the order number left the table empty.
+        // The purchase order's own lines, at supplier rates. The order's items are
+        // still fetched as a fallback for purchase orders raised before lines
+        // existed; see generatePurchaseOrderPDF.
+        items: { include: { product: true } },
         order: {
           select: {
             id: true,

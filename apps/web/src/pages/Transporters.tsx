@@ -6,6 +6,7 @@ import { transportersApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
+import DeleteRecordButton from '@/components/DeleteRecordButton';
 import { Plus, Search, Edit2, Star, Eye, Truck, IndianRupee } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
@@ -102,8 +103,16 @@ export default function Transporters() {
                   <td><span className={`badge ${t.isActive ? 'badge-success' : 'badge-gray'}`}>{t.isActive ? 'Active' : 'Inactive'}</span></td>
                   <td>
                     <div className="flex gap-2">
-                      <button onClick={() => { setSelectedTransporter(t); setShowDetailModal(true); }} className="text-navy-600"><Eye className="w-4 h-4" /></button>
-                      <button onClick={() => { setEditTransporter(t); setShowModal(true); }} className="text-gray-400"><Edit2 className="w-4 h-4" /></button>
+                      <button onClick={() => { setSelectedTransporter(t); setShowDetailModal(true); }} className="text-navy-600" aria-label="View transporter details"><Eye className="w-4 h-4" /></button>
+                      <button onClick={() => { setEditTransporter(t); setShowModal(true); }} className="text-gray-400" aria-label="Edit transporter"><Edit2 className="w-4 h-4" /></button>
+                      <DeleteRecordButton
+                        resourceType="transporter"
+                        recordId={t.id}
+                        recordName={t.name}
+                        redirectTo=""
+                        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['transporters'] })}
+                        iconOnly
+                      />
                     </div>
                   </td>
                 </tr>

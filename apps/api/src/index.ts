@@ -27,6 +27,7 @@ import { settingsRouter } from './routes/settings';
 import { lifecycleRouter } from './routes/lifecycle';
 import { auditRouter } from './routes/audit';
 import { recordDeletionRouter } from './routes/recordDeletion';
+import { attachmentRouter } from './routes/attachments';
 import { auditLog } from './middleware/auditLog';
 
 dotenv.config();
@@ -99,6 +100,7 @@ app.use('/api/settings', settingsRouter);
 app.use('/api/lifecycle', lifecycleRouter);
 app.use('/api/audit', auditRouter);
 app.use('/api/records', recordDeletionRouter);
+app.use('/api/attachments', attachmentRouter);
 
 // Error handling
 // 404 for anything that didn't match a route above, then the error handler.

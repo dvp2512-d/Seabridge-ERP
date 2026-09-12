@@ -4,6 +4,7 @@ import { prisma, Prisma, InquiryStage } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode, calculateMarginPercent } from '../utils/helpers';
+import { PACKAGE_TYPES } from '../utils/packageTypes';
 import { generateQuotationPDF } from '../services/pdfService';
 import {
   BASE_CURRENCY_CODE,
@@ -131,6 +132,10 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
         // margin: price = cost / (1 - margin). Each line carries its own price,
         // so a cheap line and an expensive line are never priced alike.
         unitPrice: z.number().finite().positive(),
+        // The packing this line is quoted on, carried from the inquiry. Part of the
+        // agreement: a price for 25kg bags is not a price for jumbo bags.
+        packageType: z.enum(PACKAGE_TYPES).optional(),
+        packageWeight: z.number().positive().optional(),
         specifications: z.string().optional(),
       })).min(1),
       costs: z.array(z.object({
@@ -355,6 +360,9 @@ router.post('/:id/convert-to-order', can('SALES_MANAGE'), async (req, res, next)
       notes: validation.data.notes,
     });
 
+    // Emit order.created event for webhooks/automation
+    emitEvent('order.created', { orderId: order.id, convertedFromQuotation: quotation.id });
+
     res.status(201).json({ success: true, data: order });
   } catch (error) {
     next(error);
@@ -452,6 +460,260 @@ router.get('/:id/pdf', can('SALES_VIEW'), async (req, res, next) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${quotation.quotationNumber}.pdf"`);
     res.send(pdfBuffer);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get quotation revision history
+router.get('/:id/history', can('SALES_VIEW'), async (req, res, next) => {
+  try {
+    const quotation = await prisma.quotation.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, quotationNumber: true, version: true },
+    });
+
+    if (!quotation) throw new NotFoundError('Quotation');
+
+    const history = await prisma.quotationHistory.findMany({
+      where: { quotationId: req.params.id },
+      orderBy: { version: 'desc' },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        currentVersion: quotation.version,
+        quotationNumber: quotation.quotationNumber,
+        history,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Create a revision of an existing quotation
+// Saves current state to history, increments version, and updates with new data
+router.post('/:id/revise', can('SALES_MANAGE'), async (req, res, next) => {
+  try {
+    const schema = z.object({
+      revisionReason: z.string().min(1, 'Revision reason is required'),
+      // Optional: new values to update
+      validUntil: z.string().optional(),
+      paymentTerms: z.string().optional(),
+      deliveryTerms: z.string().optional(),
+      notes: z.string().optional(),
+      // Items can be updated
+      items: z.array(z.object({
+        productId: z.string(),
+        quantity: z.number().positive(),
+        unit: z.string().optional(),
+        unitCost: z.number().min(0),
+        unitPrice: z.number().min(0),
+        packageType: z.string().optional().nullable(),
+        packageWeight: z.number().optional().nullable(),
+        specifications: z.string().optional().nullable(),
+        notes: z.string().optional().nullable(),
+      })).optional(),
+      // Costs can be updated
+      costs: z.array(z.object({
+        costType: z.string(),
+        description: z.string(),
+        amount: z.number().min(0),
+        currency: z.string().optional(),
+        notes: z.string().optional().nullable(),
+      })).optional(),
+    });
+
+    const validation = schema.safeParse(req.body);
+    if (!validation.success) throw new ValidationError(validation.error.errors);
+
+    const data = validation.data;
+
+    // Get current quotation with items and costs
+    const quotation = await prisma.quotation.findUnique({
+      where: { id: req.params.id },
+      include: {
+        items: { include: { product: { select: { name: true, code: true } } } },
+        costs: true,
+      },
+    });
+
+    if (!quotation) throw new NotFoundError('Quotation');
+
+    // Cannot revise an already converted quotation
+    const hasOrder = await prisma.exportOrder.findFirst({
+      where: { quotationId: quotation.id },
+      select: { id: true },
+    });
+    if (hasOrder) {
+      throw new AppError('Cannot revise a quotation that has been converted to an order', 400);
+    }
+
+    // Save current state to history
+    await prisma.quotationHistory.create({
+      data: {
+        quotationId: quotation.id,
+        version: quotation.version,
+        subtotal: quotation.subtotal,
+        totalCost: quotation.totalCost,
+        totalMargin: quotation.totalMargin,
+        marginPercent: quotation.marginPercent,
+        grandTotal: quotation.grandTotal,
+        validUntil: quotation.validUntil,
+        paymentTerms: quotation.paymentTerms,
+        deliveryTerms: quotation.deliveryTerms,
+        status: quotation.status,
+        itemsSnapshot: quotation.items.map((item) => ({
+          productId: item.productId,
+          productName: item.product.name,
+          productCode: item.product.code,
+          quantity: Number(item.quantity),
+          unit: item.unit,
+          unitCost: Number(item.unitCost),
+          unitPrice: Number(item.unitPrice),
+          totalCost: Number(item.totalCost),
+          totalPrice: Number(item.totalPrice),
+          margin: Number(item.margin),
+          marginPercent: Number(item.marginPercent),
+          packageType: item.packageType,
+          packageWeight: item.packageWeight ? Number(item.packageWeight) : null,
+        })),
+        costsSnapshot: quotation.costs.map((cost) => ({
+          costType: cost.costType,
+          description: cost.description,
+          amount: Number(cost.amount),
+          currency: cost.currency,
+          notes: cost.notes,
+        })),
+        createdById: req.user!.id,
+        revisionReason: data.revisionReason,
+      },
+    });
+
+    // Update quotation version and status
+    const newVersion = quotation.version + 1;
+
+    // If items are provided, replace them
+    if (data.items) {
+      // Delete existing items
+      await prisma.quotationItem.deleteMany({ where: { quotationId: quotation.id } });
+
+      // Create new items and calculate totals
+      let subtotal = 0;
+      let totalCost = 0;
+
+      for (const item of data.items) {
+        const itemTotalCost = item.unitCost * item.quantity;
+        const itemTotalPrice = item.unitPrice * item.quantity;
+        const itemMargin = itemTotalPrice - itemTotalCost;
+        const itemMarginPercent = itemTotalPrice > 0 ? (itemMargin / itemTotalPrice) * 100 : 0;
+
+        await prisma.quotationItem.create({
+          data: {
+            quotationId: quotation.id,
+            productId: item.productId,
+            quantity: item.quantity,
+            unit: item.unit || 'KG',
+            unitCost: item.unitCost,
+            unitPrice: item.unitPrice,
+            totalCost: itemTotalCost,
+            totalPrice: itemTotalPrice,
+            margin: itemMargin,
+            marginPercent: itemMarginPercent,
+            packageType: item.packageType,
+            packageWeight: item.packageWeight,
+            specifications: item.specifications,
+            notes: item.notes,
+          },
+        });
+
+        subtotal += itemTotalPrice;
+        totalCost += itemTotalCost;
+      }
+
+      // If costs are provided, replace them
+      let additionalCosts = 0;
+      if (data.costs) {
+        await prisma.quotationCost.deleteMany({ where: { quotationId: quotation.id } });
+        for (const cost of data.costs) {
+          await prisma.quotationCost.create({
+            data: {
+              quotationId: quotation.id,
+              costType: cost.costType,
+              description: cost.description,
+              amount: cost.amount,
+              currency: cost.currency || 'INR',
+              notes: cost.notes,
+            },
+          });
+          additionalCosts += cost.amount;
+        }
+      } else {
+        // Keep existing costs
+        additionalCosts = quotation.costs.reduce((sum, c) => sum + Number(c.amount), 0);
+      }
+
+      const totalMargin = subtotal - totalCost;
+      const marginPercent = subtotal > 0 ? (totalMargin / subtotal) * 100 : 0;
+      const grandTotal = subtotal + additionalCosts;
+
+      // Update quotation with new totals
+      await prisma.quotation.update({
+        where: { id: quotation.id },
+        data: {
+          version: newVersion,
+          status: 'REVISED',
+          revisionReason: data.revisionReason,
+          revisedById: req.user!.id,
+          revisedAt: new Date(),
+          validUntil: data.validUntil ? new Date(data.validUntil) : undefined,
+          paymentTerms: data.paymentTerms,
+          deliveryTerms: data.deliveryTerms,
+          notes: data.notes,
+          subtotal,
+          totalCost,
+          totalMargin,
+          marginPercent,
+          grandTotal,
+          // Reset PDF fields on revision
+          pdfCurrency: null,
+          pdfExchangeRate: null,
+          pdfGeneratedAt: null,
+          sentAt: null,
+        },
+      });
+    } else {
+      // Just update metadata without changing items/costs
+      await prisma.quotation.update({
+        where: { id: quotation.id },
+        data: {
+          version: newVersion,
+          status: 'REVISED',
+          revisionReason: data.revisionReason,
+          revisedById: req.user!.id,
+          revisedAt: new Date(),
+          validUntil: data.validUntil ? new Date(data.validUntil) : undefined,
+          paymentTerms: data.paymentTerms,
+          deliveryTerms: data.deliveryTerms,
+          notes: data.notes,
+        },
+      });
+    }
+
+    // Fetch and return updated quotation
+    const updated = await prisma.quotation.findUnique({
+      where: { id: quotation.id },
+      include: {
+        items: { include: { product: true } },
+        costs: true,
+        buyer: { select: { companyName: true } },
+        history: { orderBy: { version: 'desc' }, take: 5 },
+      },
+    });
+
+    res.json({ success: true, data: updated });
   } catch (error) {
     next(error);
   }

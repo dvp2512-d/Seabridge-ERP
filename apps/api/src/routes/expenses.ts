@@ -311,7 +311,8 @@ const ALLOWED_TRANSITIONS: Record<string, string[]> = {
   PAID: [],
 };
 
-router.put('/:id/status', can('FINANCE_MANAGE'), async (req, res, next) => {
+// PATCH for consistency with income status update and quotation status update
+router.patch('/:id/status', can('FINANCE_MANAGE'), async (req, res, next) => {
   try {
     const validation = statusSchema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);

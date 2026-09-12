@@ -124,6 +124,65 @@ async function main() {
   }
   console.log('✅ Seeded product categories');
 
+  // Seed Ports - Major Indian and International Ports
+  // First get country IDs
+  const india = await prisma.country.findUnique({ where: { code: 'IN' } });
+  const uae = await prisma.country.findUnique({ where: { code: 'AE' } });
+  const usa = await prisma.country.findUnique({ where: { code: 'US' } });
+  const uk = await prisma.country.findUnique({ where: { code: 'GB' } });
+  const china = await prisma.country.findUnique({ where: { code: 'CN' } });
+  const singapore = await prisma.country.findUnique({ where: { code: 'SG' } });
+  const germany = await prisma.country.findUnique({ where: { code: 'DE' } });
+
+  const ports = [
+    // Indian Sea Ports
+    { code: 'INMUN', name: 'Mundra', type: 'SEA', countryId: india?.id },
+    { code: 'INNSA', name: 'Nhava Sheva (JNPT)', type: 'SEA', countryId: india?.id },
+    { code: 'INPAV', name: 'Pipavav', type: 'SEA', countryId: india?.id },
+    { code: 'INHZA', name: 'Hazira', type: 'SEA', countryId: india?.id },
+    { code: 'INKTP', name: 'Kandla', type: 'SEA', countryId: india?.id },
+    { code: 'INMAA', name: 'Chennai', type: 'SEA', countryId: india?.id },
+    { code: 'INTUT', name: 'Tuticorin', type: 'SEA', countryId: india?.id },
+    { code: 'INCOK', name: 'Cochin', type: 'SEA', countryId: india?.id },
+    { code: 'INBLR', name: 'Bangalore ICD', type: 'LAND', countryId: india?.id },
+    // Indian Air Ports
+    { code: 'INAMD', name: 'Ahmedabad Airport', type: 'AIR', countryId: india?.id },
+    { code: 'INDEL', name: 'Delhi Airport', type: 'AIR', countryId: india?.id },
+    { code: 'INBOM', name: 'Mumbai Airport', type: 'AIR', countryId: india?.id },
+    // UAE Ports
+    { code: 'AEJEA', name: 'Jebel Ali', type: 'SEA', countryId: uae?.id },
+    { code: 'AEDXB', name: 'Dubai', type: 'SEA', countryId: uae?.id },
+    { code: 'AEAUH', name: 'Abu Dhabi', type: 'SEA', countryId: uae?.id },
+    // USA Ports
+    { code: 'USNYC', name: 'New York', type: 'SEA', countryId: usa?.id },
+    { code: 'USLAX', name: 'Los Angeles', type: 'SEA', countryId: usa?.id },
+    { code: 'USHOU', name: 'Houston', type: 'SEA', countryId: usa?.id },
+    // UK Ports
+    { code: 'GBFXT', name: 'Felixstowe', type: 'SEA', countryId: uk?.id },
+    { code: 'GBSOU', name: 'Southampton', type: 'SEA', countryId: uk?.id },
+    { code: 'GBLGP', name: 'London Gateway', type: 'SEA', countryId: uk?.id },
+    // China Ports
+    { code: 'CNSHA', name: 'Shanghai', type: 'SEA', countryId: china?.id },
+    { code: 'CNSZX', name: 'Shenzhen', type: 'SEA', countryId: china?.id },
+    { code: 'CNNGB', name: 'Ningbo', type: 'SEA', countryId: china?.id },
+    // Singapore
+    { code: 'SGSIN', name: 'Singapore', type: 'SEA', countryId: singapore?.id },
+    // Germany
+    { code: 'DEHAM', name: 'Hamburg', type: 'SEA', countryId: germany?.id },
+    { code: 'DEBRV', name: 'Bremerhaven', type: 'SEA', countryId: germany?.id },
+  ];
+
+  for (const port of ports) {
+    if (port.countryId) {
+      await prisma.port.upsert({
+        where: { code: port.code },
+        update: { name: port.name, type: port.type },
+        create: port as any,
+      });
+    }
+  }
+  console.log('✅ Seeded ports');
+
   // Seed Number Sequences
   const sequences = [
     { entityType: 'BUYER', prefix: 'BYR', currentNo: 0, padLength: 5 },

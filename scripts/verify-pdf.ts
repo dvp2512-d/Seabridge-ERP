@@ -121,6 +121,9 @@ const orderItems = [
     unitPrice: 265,
     totalPrice: 662500,
     numberOfPackages: 50,
+    // Cartoned for this shipment even though the product default is a bag, which is
+    // exactly the case a per-line type exists for.
+    packageType: 'CARTON',
     packageWeight: 50,
     netWeight: 2500,
     grossWeight: 2530,
@@ -219,7 +222,6 @@ const procurement = {
   status: 'ORDERED',
   orderDate: new Date('2026-08-22'),
   expectedDate: new Date('2026-09-05'),
-  totalAmount: 742300,
   notes: 'Deliver to Mundra ICD. Fumigation certificate required with each lot.',
   // The PO sheet boxes.
   deliveryAddress: 'SeaBridge Warehouse, Plot 42, Mundra Port ICD, Kutch, Gujarat',
@@ -231,6 +233,44 @@ const procurement = {
   qualityRequirement:
     'Batch-wise COA required with delivery (purity, swelling index, moisture, microbial parameters)',
   variationPercent: 5,
+  // The PO's own lines, at supplier rates with GST. Totals below are what
+  // priceProcurementLines computes from them:
+  //   1000 x 180.00 = 180,000.00  + 5%  =   9,000.00
+  //    500 x 152.00 =  76,000.00  + 5%  =   3,800.00
+  //   2500 x 240.00 = 600,000.00  + 12% =  72,000.00
+  //   subtotal 856,000.00, tax 84,800.00, total 940,800.00
+  items: [
+    {
+      quantity: 1000,
+      unit: 'KG',
+      rate: 180,
+      taxPercent: 5,
+      amount: 180000,
+      taxAmount: 9000,
+      product: products[0],
+    },
+    {
+      quantity: 500,
+      unit: 'KG',
+      rate: 152,
+      taxPercent: 5,
+      amount: 76000,
+      taxAmount: 3800,
+      product: products[1],
+    },
+    {
+      quantity: 2500,
+      unit: 'KG',
+      rate: 240,
+      taxPercent: 12,
+      amount: 600000,
+      taxAmount: 72000,
+      product: products[2],
+    },
+  ],
+  subtotal: 856000,
+  taxAmount: 84800,
+  totalAmount: 940800,
   supplier: {
     name: 'Shree Unjha Psyllium Industries',
     address: 'Survey 214, GIDC Phase II, Unjha, Mehsana, Gujarat 384170',

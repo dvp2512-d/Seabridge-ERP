@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { ordersApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { formatCurrency, formatDate, getStatusColor, isPastDue, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import {
@@ -31,7 +32,7 @@ export default function Orders() {
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['orders', search, statusFilter, page],
     queryFn: () => ordersApi.list({
       search: search || undefined,
@@ -51,6 +52,15 @@ export default function Orders() {
     setSearch(value);
     setPage(1);
   }, 300);
+
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Export Orders" subtitle="Operations Management" />
+        <ErrorState error={error} onRetry={refetch} />
+      </div>
+    );
+  }
 
   const countByStatus: Record<string, number> = summary?.countByStatus ?? {};
   const stats = {

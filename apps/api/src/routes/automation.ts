@@ -14,11 +14,20 @@ router.use(authenticate);
 // WEBHOOKS
 // ============================================
 
-// List webhooks
+// List webhooks — secret excluded to prevent exposure of signing keys
 router.get('/webhooks', can('SETTINGS_MANAGE'), async (req, res, next) => {
   try {
     const webhooks = await prisma.webhook.findMany({
       orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        url: true,
+        events: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
     res.json({ success: true, data: webhooks });
   } catch (error) {
@@ -50,6 +59,15 @@ router.post('/webhooks', can('SETTINGS_MANAGE'), async (req, res, next) => {
       data: {
         ...validation.data,
         secret: validation.data.secret || crypto.randomBytes(32).toString('hex'),
+      },
+      select: {
+        id: true,
+        name: true,
+        url: true,
+        events: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
 
@@ -83,6 +101,15 @@ router.put('/webhooks/:id', can('SETTINGS_MANAGE'), async (req, res, next) => {
     const webhook = await prisma.webhook.update({
       where: { id: req.params.id },
       data: validation.data,
+      select: {
+        id: true,
+        name: true,
+        url: true,
+        events: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
 
     res.json({ success: true, data: webhook });

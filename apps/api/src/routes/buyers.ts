@@ -14,9 +14,13 @@ router.use(authenticate);
 // List buyers
 router.get('/', can('BUYER_VIEW'), async (req, res, next) => {
   try {
-    const { status, countryId, search, page = 1, limit = 50 } = req.query;
+    const { status, countryId, search, page = 1, limit = 50, includeInactive } = req.query;
 
     const where: any = {};
+    // Only include active buyers by default (soft-deleted buyers have isActive=false)
+    if (includeInactive !== 'true') {
+      where.isActive = true;
+    }
     if (status) where.status = status;
     if (countryId) where.countryId = countryId;
     if (search) {
@@ -258,6 +262,106 @@ router.delete('/:id', can('BUYER_MANAGE'), async (req, res, next) => {
       data: { isActive: false },
     });
     res.json({ success: true, message: 'Buyer deactivated' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Export buyers to CSV
+router.get('/export/csv', can('BUYER_VIEW'), async (req, res, next) => {
+  try {
+    const { status, countryId } = req.query;
+
+    const where: any = { isActive: true };
+    if (status) where.status = status;
+    if (countryId) where.countryId = countryId;
+
+    const buyers = await prisma.buyer.findMany({
+      where,
+      include: {
+        country: { select: { name: true, code: true } },
+        currency: { select: { code: true } },
+        contacts: { where: { isPrimary: true }, take: 1 },
+        _count: { select: { inquiries: true, orders: true, invoices: true } },
+      },
+      orderBy: { companyName: 'asc' },
+    });
+
+    // Build CSV header
+    const headers = [
+      'Code',
+      'Company Name',
+      'Trade Name',
+      'Status',
+      'Country',
+      'City',
+      'State',
+      'Address',
+      'Primary Contact',
+      'Contact Email',
+      'Contact Phone',
+      'Currency',
+      'Payment Terms',
+      'Credit Limit',
+      'Credit Days',
+      'Tax ID',
+      'Total Orders',
+      'Total Revenue (INR)',
+      'Last Order Date',
+      'Inquiries',
+      'Orders',
+      'Invoices',
+    ];
+
+    // Build CSV rows
+    const rows = buyers.map((buyer) => {
+      const primaryContact = buyer.contacts?.[0];
+      return [
+        buyer.code,
+        buyer.companyName,
+        buyer.tradeName || '',
+        buyer.status,
+        buyer.country?.name || '',
+        buyer.city || '',
+        buyer.state || '',
+        (buyer.address || '').replace(/[\n\r,]/g, ' '),
+        primaryContact ? `${primaryContact.firstName} ${primaryContact.lastName || ''}`.trim() : '',
+        primaryContact?.email || '',
+        primaryContact?.phone || primaryContact?.mobile || '',
+        buyer.currency?.code || 'INR',
+        buyer.paymentTerms || '',
+        buyer.creditLimit?.toString() || '',
+        buyer.creditDays?.toString() || '',
+        buyer.taxId || '',
+        buyer.totalOrders,
+        buyer.totalRevenue?.toString() || '0',
+        buyer.lastOrderDate ? buyer.lastOrderDate.toISOString().split('T')[0] : '',
+        buyer._count.inquiries,
+        buyer._count.orders,
+        buyer._count.invoices,
+      ];
+    });
+
+    // Escape CSV values
+    const escapeCsv = (val: any): string => {
+      const str = String(val ?? '');
+      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return str;
+    };
+
+    // Generate CSV content
+    const csvContent = [
+      headers.map(escapeCsv).join(','),
+      ...rows.map((row) => row.map(escapeCsv).join(',')),
+    ].join('\n');
+
+    // Send as file download
+    const filename = `buyers-export-${new Date().toISOString().split('T')[0]}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csvContent);
   } catch (error) {
     next(error);
   }

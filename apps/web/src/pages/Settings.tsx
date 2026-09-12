@@ -498,6 +498,7 @@ function TemplatesSettings() {
       queryClient.invalidateQueries({ queryKey: ['templates'] });
       toast.success('Template deleted');
     },
+    onError: () => toast.error('Failed to delete template'),
   });
 
   return (
@@ -561,12 +562,14 @@ function TemplatesSettings() {
                   <button
                     onClick={() => { setSelectedTemplate(template); setShowModal(true); }}
                     className="p-2 text-gray-400 hover:text-gray-600"
+                    aria-label="Edit template"
                   >
                     <Edit className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => deleteMutation.mutate(template.id)}
                     className="p-2 text-gray-400 hover:text-red-600"
+                    aria-label="Delete template"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -739,6 +742,7 @@ function WebhooksSettings() {
       queryClient.invalidateQueries({ queryKey: ['webhooks'] });
       toast.success('Webhook deleted');
     },
+    onError: () => toast.error('Failed to delete webhook'),
   });
 
   const testMutation = useMutation({
@@ -800,12 +804,14 @@ function WebhooksSettings() {
                     <button
                       onClick={() => { setSelectedWebhook(webhook); setShowModal(true); }}
                       className="p-2 text-gray-400 hover:text-gray-600"
+                      aria-label="Edit webhook"
                     >
                       <Edit className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => deleteMutation.mutate(webhook.id)}
                       className="p-2 text-gray-400 hover:text-red-600"
+                      aria-label="Delete webhook"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -918,6 +924,7 @@ function WebhookModal({
                 type="button"
                 onClick={() => setShowSecret(!showSecret)}
                 className="p-2 text-gray-400 hover:text-gray-600"
+                aria-label={showSecret ? 'Hide secret' : 'Show secret'}
               >
                 {showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
@@ -925,6 +932,7 @@ function WebhookModal({
                 type="button"
                 onClick={() => { navigator.clipboard.writeText(webhook.secret); toast.success('Copied!'); }}
                 className="p-2 text-gray-400 hover:text-gray-600"
+                aria-label="Copy secret to clipboard"
               >
                 <Copy className="w-4 h-4" />
               </button>
@@ -1006,6 +1014,7 @@ function AutomationsSettings() {
       queryClient.invalidateQueries({ queryKey: ['automations'] });
       toast.success('Automation deleted');
     },
+    onError: () => toast.error('Failed to delete automation'),
   });
 
   // Predefined automation templates
@@ -1083,12 +1092,14 @@ function AutomationsSettings() {
                   <button
                     onClick={() => { setSelectedAutomation(automation); setShowModal(true); }}
                     className="p-2 text-gray-400 hover:text-gray-600"
+                    aria-label="Edit automation"
                   >
                     <Edit className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => deleteMutation.mutate(automation.id)}
                     className="p-2 text-gray-400 hover:text-red-600"
+                    aria-label="Delete automation"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>

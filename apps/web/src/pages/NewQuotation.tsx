@@ -41,6 +41,14 @@ interface QuotationItem {
   unitPrice: number;
   totalCost: number;
   totalPrice: number;
+  /**
+   * The packing this line is quoted on, carried from the inquiry.
+   *
+   * Part of what is being quoted rather than a shipping detail: a price for 25kg bags
+   * is not a price for jumbo bags. Becomes the order line's packing when accepted.
+   */
+  packageType: string;
+  packageWeight: string;
   specifications: string;
 }
 
@@ -135,6 +143,19 @@ export default function NewQuotation() {
     }
   }, [inquiryData]);
 
+  // Auto-fill defaults from buyer when selected
+  useEffect(() => {
+    if (buyerId && buyersData?.data?.data) {
+      const buyer = buyersData.data.data.find((b: any) => b.id === buyerId);
+      if (buyer) {
+        // Only set if currently empty (don't overwrite user input)
+        if (!paymentTerms && buyer.paymentTerms) {
+          setPaymentTerms(buyer.paymentTerms);
+        }
+      }
+    }
+  }, [buyerId, buyersData]);
+
   // Quotation totals. Each line already carries its own selling price, derived
   // from its own margin in the item modal, so the rollup only has to add up.
   //
@@ -175,6 +196,7 @@ export default function NewQuotation() {
     mutationFn: (data: any) => quotationsApi.create(data),
     onSuccess: (response) => {
       toast.success('Quotation created successfully');
+      queryClient.invalidateQueries({ queryKey: ['quotations'] });
       refreshAggregates(queryClient);
       navigate(`/quotations/${response.data?.data?.id}`);
     },
@@ -230,6 +252,10 @@ export default function NewQuotation() {
         unit: item.unit,
         unitCost: item.unitCost,
         unitPrice: item.unitPrice,
+        // Carried from the inquiry. Part of what is being quoted, and it becomes the
+        // order line's packing when the quotation is accepted.
+        packageType: item.packageType || undefined,
+        packageWeight: item.packageWeight ? Number(item.packageWeight) : undefined,
         specifications: item.specifications,
       })),
       costs: additionalCosts.map(cost => ({
@@ -418,6 +444,7 @@ export default function NewQuotation() {
                           <button
                             onClick={() => setItems(items.filter(i => i.id !== item.id))}
                             className="text-red-500 hover:text-red-700 p-1"
+                            aria-label="Remove item"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -471,6 +498,7 @@ export default function NewQuotation() {
                         <button
                           onClick={() => setAdditionalCosts(additionalCosts.filter(c => c.id !== cost.id))}
                           className="text-red-500 hover:text-red-700 p-1"
+                          aria-label="Remove cost"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -738,6 +766,10 @@ function ItemCostingModal({
       unitPrice: calculations.unitPrice,
       totalCost: calculations.totalCost,
       totalPrice: calculations.totalPrice,
+      // Preserved when editing a line that came from an inquiry, and empty for one
+      // added by hand - the product's own packaging then applies.
+      packageType: item?.packageType ?? '',
+      packageWeight: item?.packageWeight ?? '',
       specifications: formData.specifications,
     };
 

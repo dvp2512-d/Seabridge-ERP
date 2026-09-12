@@ -6,6 +6,7 @@ import { suppliersApi, masterApi, productsApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
+import DeleteRecordButton from '@/components/DeleteRecordButton';
 import { Plus, Search, Edit2, Star, Eye, Building2, IndianRupee } from 'lucide-react';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
@@ -117,12 +118,20 @@ export default function Suppliers() {
                   </td>
                   <td>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => viewDetails(supplier)} className="text-navy-600 hover:text-navy-800">
+                      <button onClick={() => viewDetails(supplier)} className="text-navy-600 hover:text-navy-800" aria-label="View supplier details">
                         <Eye className="w-4 h-4" />
                       </button>
-                      <button onClick={() => { setEditSupplier(supplier); setShowModal(true); }} className="text-gray-400 hover:text-gray-600">
+                      <button onClick={() => { setEditSupplier(supplier); setShowModal(true); }} className="text-gray-400 hover:text-gray-600" aria-label="Edit supplier">
                         <Edit2 className="w-4 h-4" />
                       </button>
+                      <DeleteRecordButton
+                        resourceType="supplier"
+                        recordId={supplier.id}
+                        recordName={supplier.name}
+                        redirectTo=""
+                        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['suppliers'] })}
+                        iconOnly
+                      />
                     </div>
                   </td>
                 </tr>
@@ -141,6 +150,7 @@ export default function Suppliers() {
             setShowModal(false);
             setEditSupplier(null);
             queryClient.invalidateQueries({ queryKey: ['suppliers'] });
+            queryClient.invalidateQueries({ queryKey: ['dropdowns'] });
           }}
         />
       )}

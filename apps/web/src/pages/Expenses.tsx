@@ -646,7 +646,7 @@ function ExpenseActions({
     return canDelete ? (
       <div className="inline-flex gap-1 items-center">
         <span className="text-xs text-gray-400">paid</span>
-        <button onClick={onDelete} className="btn btn-ghost btn-sm text-red-600" title="Delete">
+        <button onClick={onDelete} className="btn btn-ghost btn-sm text-red-600" title="Delete" aria-label="Delete expense">
           <Trash2 className="w-4 h-4" />
         </button>
       </div>
@@ -691,7 +691,7 @@ function ExpenseActions({
       {/* Hidden for non-founders. The API also refuses, so this is presentation
           rather than the security boundary. */}
       {canDelete && (
-        <button onClick={onDelete} className="btn btn-ghost btn-sm text-red-600" title="Delete">
+        <button onClick={onDelete} className="btn btn-ghost btn-sm text-red-600" title="Delete" aria-label="Delete expense">
           <Trash2 className="w-4 h-4" />
         </button>
       )}

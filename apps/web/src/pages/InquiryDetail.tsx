@@ -7,6 +7,7 @@ import { inquiriesApi, productsApi } from '@/lib/api';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import DeleteRecordButton from '@/components/DeleteRecordButton';
+import { PACKAGE_TYPE_OPTIONS, PACKAGE_TYPE_LABELS } from '@/lib/packageTypes';
 import { formatCurrency, formatDate, getStatusColor, getPriorityColor, cn } from '@/lib/utils';
 import { refreshAggregates } from '@/lib/queryKeys';
 import {
@@ -209,6 +210,7 @@ export default function InquiryDetail() {
                     <th>Product</th>
                     <th>Quantity</th>
                     <th>Target Price</th>
+                    <th>Packing</th>
                     <th>Specifications</th>
                   </tr>
                 </thead>
@@ -221,12 +223,24 @@ export default function InquiryDetail() {
                       </td>
                       <td>{item.quantity} {item.unit}</td>
                       <td>{item.targetPrice ? formatCurrency(item.targetPrice) : '-'}</td>
+                      <td className="text-sm">
+                        {/* What the buyer asked for. "Standard" means the product's
+                            own packaging applies. */}
+                        {item.packageType || item.packageWeight ? (
+                          <>
+                            {item.packageWeight ? `${Number(item.packageWeight)} kg ` : ''}
+                            {PACKAGE_TYPE_LABELS[item.packageType] ?? item.packageType ?? ''}
+                          </>
+                        ) : (
+                          <span className="text-gray-400">Standard</span>
+                        )}
+                      </td>
                       <td className="max-w-xs truncate">{item.specifications || '-'}</td>
                     </tr>
                   ))}
                   {(!inquiry.items || inquiry.items.length === 0) && (
                     <tr>
-                      <td colSpan={4} className="text-center py-8 text-gray-500">
+                      <td colSpan={5} className="text-center py-8 text-gray-500">
                         No products added yet
                       </td>
                     </tr>
@@ -627,6 +641,11 @@ function AddItemModal({ inquiryId, onClose, onSuccess }: { inquiryId: string; on
     quantity: '',
     unit: 'KG',
     targetPrice: '',
+    // How the buyer wants it packed. Asked here because it changes the price -
+    // filling one jumbo bag costs differently from filling forty small ones - and
+    // because it then travels to the quotation, the order and the packing list.
+    packageType: '',
+    packageWeight: '',
     specifications: '',
   });
 
@@ -640,6 +659,8 @@ function AddItemModal({ inquiryId, onClose, onSuccess }: { inquiryId: string; on
       ...data,
       quantity: parseFloat(data.quantity),
       targetPrice: data.targetPrice ? parseFloat(data.targetPrice) : undefined,
+      packageType: data.packageType || undefined,
+      packageWeight: data.packageWeight ? parseFloat(data.packageWeight) : undefined,
     }),
     onSuccess: () => {
       toast.success('Product added');
@@ -686,6 +707,40 @@ function AddItemModal({ inquiryId, onClose, onSuccess }: { inquiryId: string; on
           onChange={(e) => setFormData({ ...formData, targetPrice: e.target.value })}
           placeholder="Buyer's target price per unit"
         />
+
+        {/*
+          What the buyer wants the goods packed in. Recorded at enquiry stage because
+          it affects the price, and because it then travels to the quotation, the
+          order and the packing list rather than being re-derived from the product's
+          generic default. Optional - leave blank and the product's own packaging
+          applies.
+        */}
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <h4 className="text-sm font-medium text-navy-900">Packing Required</h4>
+          <p className="text-xs text-gray-500 mt-0.5 mb-3">
+            What the buyer asked for. Carried through to the quotation and the packing
+            list. Leave blank to use the product's standard pack.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <SelectField
+              label="Package Type"
+              value={formData.packageType}
+              onChange={(e) => setFormData({ ...formData, packageType: e.target.value })}
+              placeholder="Product default"
+              options={PACKAGE_TYPE_OPTIONS}
+            />
+            <FormField
+              label="Net Weight per Package (KG)"
+              type="number"
+              step="0.001"
+              min="0"
+              value={formData.packageWeight}
+              onChange={(e) => setFormData({ ...formData, packageWeight: e.target.value })}
+              placeholder="e.g. 25"
+            />
+          </div>
+        </div>
+
         <TextareaField
           label="Specifications"
           value={formData.specifications}

@@ -27,12 +27,6 @@ export function startOfFinancialYear(reference: Date = new Date()): Date {
   return new Date(Date.UTC(year, 3, 1));
 }
 
-/** End of that financial year: 31 March, inclusive, in UTC for the same reason. */
-export function endOfFinancialYear(reference: Date = new Date()): Date {
-  const start = startOfFinancialYear(reference);
-  return new Date(Date.UTC(start.getUTCFullYear() + 1, 2, 31, 23, 59, 59, 999));
-}
-
 /** Start of the calendar month containing the given date. */
 export function startOfMonth(reference: Date = new Date()): Date {
   return new Date(Date.UTC(reference.getFullYear(), reference.getMonth(), 1));

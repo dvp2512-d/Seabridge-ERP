@@ -23,6 +23,8 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // Prevent hung requests from blocking indefinitely
+  timeout: 30000,
 });
 
 // Request interceptor - attach the bearer token to every call
@@ -50,8 +52,6 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
-
-export default api;
 
 /**
  * Extract a human-readable message from an API error so pages can surface
@@ -135,6 +135,9 @@ export const buyersApi = {
   updateContact: (id: string, contactId: string, data: any) =>
     api.put(`/buyers/${id}/contacts/${contactId}`, data),
   addCommunication: (id: string, data: any) => api.post(`/buyers/${id}/communications`, data),
+  // Export to CSV - returns blob
+  exportCsv: (params?: { status?: string; countryId?: string }) =>
+    api.get('/buyers/export/csv', { params, responseType: 'blob' }),
 };
 
 // ============================================
@@ -219,6 +222,10 @@ export const quotationsApi = {
       responseType: 'blob',
       params: currency ? { currency, rate } : undefined,
     }),
+  // Revision tracking
+  getHistory: (id: string) => api.get(`/quotations/${id}/history`),
+  revise: (id: string, data: { revisionReason: string; validUntil?: string; paymentTerms?: string; deliveryTerms?: string; notes?: string; items?: any[]; costs?: any[] }) =>
+    api.post(`/quotations/${id}/revise`, data),
 };
 
 // ============================================
@@ -238,11 +245,23 @@ export const ordersApi = {
    */
   documentReadiness: (id: string) => api.get(`/orders/${id}/document-readiness`),
   /**
+   * Fill every line's packing figures from the packing agreed on the quotation and the
+   * product's standard pack. Only fills what is empty unless overwrite is asked for.
+   */
+  fillPacking: (orderId: string, overwrite = false) =>
+    api.post(`/orders/${orderId}/items/fill-packing`, { overwrite }),
+  /**
    * Update a line's packing figures - packages, weight per package, net and gross.
    * These four are the Packing List and the weight block on every invoice.
    */
   updateOrderItem: (orderId: string, itemId: string, data: any) =>
     api.put(`/orders/${orderId}/items/${itemId}`, data),
+  /**
+   * Suggested purchase order lines for a supplier: the order's products, priced
+   * from that supplier's price list, with GST from each product. Nothing is saved.
+   */
+  suggestProcurement: (orderId: string, supplierId: string) =>
+    api.get(`/orders/${orderId}/procurements/suggest`, { params: { supplierId } }),
   /**
    * Update a supplier purchase order. Changing the amount moves the matching
    * expense with it, unless that expense has already been part paid.
@@ -342,7 +361,7 @@ export const expensesApi = {
   delete: (id: string) => api.delete(`/expenses/${id}`),
   remove: (id: string) => api.delete(`/expenses/${id}`),
   setStatus: (id: string, status: string) =>
-    api.put(`/expenses/${id}/status`, { status }),
+    api.patch(`/expenses/${id}/status`, { status }),
   options: () => api.get('/expenses/meta/options'),
   /** Search vendors (suppliers, CHAs, transporters) for auto-complete */
   searchVendors: (params?: { search?: string; category?: string }) =>
@@ -467,4 +486,58 @@ export const recordsApi = {
     api.delete(`/records/${resource}/${id}`, { data: { confirmDelete: 'DELETE' } }),
   /** Get list of deletable resource types */
   types: () => api.get('/records/types'),
+};
+
+// ============================================
+// ATTACHMENTS API
+// ============================================
+
+export const attachmentsApi = {
+  /** List attachments for an entity */
+  list: (entityType: string, entityId: string, documentId?: string) =>
+    api.get('/attachments', { params: { entityType, entityId, documentId } }),
+  /** Upload a file attachment (base64 encoded) */
+  upload: (data: {
+    entityType: 'ORDER' | 'INQUIRY' | 'DOCUMENT' | 'QUOTATION';
+    entityId: string;
+    documentId?: string;
+    description?: string;
+    fileName: string;
+    mimeType: string;
+    fileData: string; // base64
+  }) => api.post('/attachments/upload', data),
+  /** Download an attachment */
+  download: (id: string) => api.get(`/attachments/${id}/download`, { responseType: 'blob' }),
+  /** Delete an attachment */
+  delete: (id: string) => api.delete(`/attachments/${id}`),
+};
+
+
+
+// ============================================
+// LIFECYCLE API (Master Data Deactivation)
+// ============================================
+// Soft delete and restore for master data records. These records cannot be
+// hard-deleted because they are referenced by historical documents, but they
+// can be hidden from dropdowns in new records.
+
+export const lifecycleApi = {
+  /**
+   * Preview what deactivating a record would affect, without changing anything.
+   * Returns dependent counts and whether the action is blocked.
+   */
+  preview: (resource: string, id: string) =>
+    api.get(`/lifecycle/${resource}/${id}/preview`),
+  /**
+   * Deactivate a master data record (hide from new records, keep on existing).
+   * Requires SETTINGS_MANAGE permission (Founder/Admin only).
+   */
+  deactivate: (resource: string, id: string) =>
+    api.put(`/lifecycle/${resource}/${id}/deactivate`),
+  /**
+   * Reactivate a previously deactivated record.
+   * Requires SETTINGS_MANAGE permission (Founder/Admin only).
+   */
+  reactivate: (resource: string, id: string) =>
+    api.put(`/lifecycle/${resource}/${id}/reactivate`),
 };

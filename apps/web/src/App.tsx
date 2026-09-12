@@ -1,4 +1,5 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import Layout from '@/components/Layout';
 import Login from '@/pages/Login';
@@ -27,6 +28,17 @@ import Tasks from '@/pages/Tasks';
 import Users from '@/pages/Users';
 import AuditLog from '@/pages/AuditLog';
 
+/** Scrolls to top on route change for consistent UX */
+function ScrollToTop() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
+  return null;
+}
+
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore();
   
@@ -39,15 +51,17 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
-      
-      <Route
-        path="/*"
-        element={
-          <ProtectedRoute>
-            <Layout>
-              <Routes>
+    <>
+      <ScrollToTop />
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        
+        <Route
+          path="/*"
+          element={
+            <ProtectedRoute>
+              <Layout>
+                <Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/buyers" element={<Buyers />} />
                 <Route path="/buyers/:id" element={<BuyerDetail />} />
@@ -80,7 +94,8 @@ function App() {
           </ProtectedRoute>
         }
       />
-    </Routes>
+      </Routes>
+    </>
   );
 }
 

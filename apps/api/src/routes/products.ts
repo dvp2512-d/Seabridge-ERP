@@ -68,12 +68,8 @@ router.post('/', can('MASTER_MANAGE'), async (req, res, next) => {
       categoryId: z.string().min(1),
       hsnCode: z.string().optional(),
       unit: z.string().optional(),
-      // Default packaging. Entered once here and used to prefill the packing
-      // figures on every order line for this product, which is what fills the
-      // Packing List without anyone typing weights per order.
-      packageType: z.string().optional(),
-      packageNetWeight: z.number().positive().optional(),
-      packageGrossWeight: z.number().positive().optional(),
+      // GST percent for domestic purchases, which prefills purchase order lines.
+      gstRate: z.number().min(0).max(100).optional(),
     });
 
     const validation = schema.safeParse(req.body);
@@ -101,11 +97,7 @@ router.put('/:id', can('MASTER_MANAGE'), async (req, res, next) => {
       categoryId: z.string().optional(),
       hsnCode: z.string().optional(),
       unit: z.string().optional(),
-      // Nullable so packaging entered by mistake can be cleared, rather than being
-      // stuck at a wrong weight that then prefills every future order line.
-      packageType: z.string().nullable().optional(),
-      packageNetWeight: z.number().positive().nullable().optional(),
-      packageGrossWeight: z.number().positive().nullable().optional(),
+      gstRate: z.number().min(0).max(100).nullable().optional(),
       isActive: z.boolean().optional(),
     });
 
@@ -124,34 +116,7 @@ router.put('/:id', can('MASTER_MANAGE'), async (req, res, next) => {
   }
 });
 
-// Product categories
-router.get('/categories/list', can('MASTER_VIEW'), async (req, res, next) => {
-  try {
-    const categories = await prisma.productCategory.findMany({
-      where: { isActive: true },
-      orderBy: { name: 'asc' },
-    });
-    res.json({ success: true, data: categories });
-  } catch (error) {
-    next(error);
-  }
-});
-
-router.post('/categories', can('MASTER_MANAGE'), async (req, res, next) => {
-  try {
-    const schema = z.object({
-      name: z.string().min(1),
-      description: z.string().optional(),
-    });
-
-    const validation = schema.safeParse(req.body);
-    if (!validation.success) throw new ValidationError(validation.error.errors);
-
-    const category = await prisma.productCategory.create({ data: validation.data });
-    res.status(201).json({ success: true, data: category });
-  } catch (error) {
-    next(error);
-  }
-});
+// NOTE: Product categories are managed via /api/master/product-categories.
+// The routes that used to live here were duplicates and have been removed.
 
 export { router as productRouter };

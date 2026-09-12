@@ -5,6 +5,7 @@ import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
 import { generateInvoicePDF, generatePackingListPDF } from '../services/pdfService';
+import { fillOrderPacking } from '../services/orderService';
 import {
   BASE_CURRENCY_CODE,
   getBaseCurrency,
@@ -209,6 +210,24 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
      * own to be referred to or traced by.
      */
     const type = validation.data.type || 'COMMERCIAL';
+
+    /**
+     * A packing list is the document those figures exist for, so raising one fills
+     * them from what is already on file - the packing agreed on the quotation and the
+     * product's standard pack - rather than printing blank columns.
+     *
+     * Only empty lines are touched, so anything weighed and entered by hand stands.
+     * Failure is logged rather than raised: the document is still worth creating with
+     * gaps an operator can fill, and refusing to create it would be worse.
+     */
+    let packingFilled: { filled: number; skipped: number; unavailable: string[] } | null = null;
+    if (type === 'PACKING_LIST') {
+      packingFilled = await fillOrderPacking(order.id).catch((error) => {
+        console.error(`[packing-fill] order ${order.id}:`, error);
+        return null;
+      });
+    }
+
     const invoiceNumber =
       type === 'PACKING_LIST'
         ? await generateCode('PACKING_LIST', 'PL')
@@ -254,7 +273,7 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
     });
 
     emitEvent('invoice.created', invoice);
-    res.status(201).json({ success: true, data: invoice });
+    res.status(201).json({ success: true, data: invoice, packingFilled });
   } catch (error) {
     next(error);
   }

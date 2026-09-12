@@ -308,6 +308,7 @@ export default function Income() {
                             onClick={() => setPendingDelete(e)}
                             className="btn btn-ghost btn-sm text-red-600"
                             title="Delete"
+                            aria-label="Delete income"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>

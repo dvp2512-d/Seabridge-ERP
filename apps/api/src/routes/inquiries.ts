@@ -4,6 +4,7 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
+import { PACKAGE_TYPES } from '../utils/packageTypes';
 import { getBaseCurrency } from '../services/exchangeRateService';
 
 const router: Router = Router();
@@ -129,6 +130,10 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
         quantity: z.number().positive(),
         unit: z.string().optional(),
         targetPrice: z.number().optional(),
+        // How the buyer wants it packed. Changes the price, so it is asked here
+        // rather than discovered at packing time.
+        packageType: z.enum(PACKAGE_TYPES).optional(),
+        packageWeight: z.number().positive().optional(),
         specifications: z.string().optional(),
       })).optional(),
     });
@@ -203,6 +208,8 @@ router.post('/:id/items', can('SALES_MANAGE'), async (req, res, next) => {
       quantity: z.number().positive(),
       unit: z.string().optional(),
       targetPrice: z.number().optional(),
+      packageType: z.enum(PACKAGE_TYPES).nullable().optional(),
+      packageWeight: z.number().positive().nullable().optional(),
       specifications: z.string().optional(),
     });
 

@@ -30,6 +30,7 @@ import {
 } from '../utils/invoiceTypes';
 import PDFDocument from 'pdfkit';
 import { calculateInclusiveUnitPrices } from './inclusivePricing';
+import { packageCountText } from '../utils/packageTypes';
 import {
   LAYOUT,
   DOC_COLORS,
@@ -219,15 +220,12 @@ function finalise(doc: Doc, note?: string): void {
 }
 
 /**
- * A note stating the currency and rate the document was produced at.
- *
- * Amounts are held in INR, so a foreign-currency document is a conversion. Saying
- * so is what makes the figures auditable: without it a reader cannot reconcile the
- * document against the books.
+ * Conversion note disabled — the business prefers not to show exchange rates on
+ * printed documents. The rate is still recorded on the invoice/quotation row for
+ * internal audit purposes.
  */
-function conversionNote(code: string, rate: number): string | undefined {
-  if (rate === 1) return undefined;
-  return `Amounts shown in ${code}, converted at 1 ${code} = INR ${rate.toFixed(4)}.`;
+function conversionNote(_code: string, _rate: number): string | undefined {
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -511,9 +509,9 @@ function packageCount(item: any): number | null {
   return n === null ? null : Math.round(n);
 }
 
-/** Net weight per package: the line's figure, else the product's default. */
+/** Net weight per package from the line. */
 function packageWeightKg(item: any): number | null {
-  return decimalOrNull(item?.packageWeight) ?? decimalOrNull(item?.product?.packageNetWeight);
+  return decimalOrNull(item?.packageWeight);
 }
 
 function weightText(kg: number | null): string {
@@ -528,25 +526,40 @@ function sumOrNull(items: any[], pick: (item: any) => number | null): number | n
 }
 
 /**
- * "120 BAG(S)" - the total package count with the packaging named.
+ * "120 BAGS", or "80 BAGS, 30 CARTONS" when an order mixes packaging.
  *
- * The type comes from the products on the document; when they disagree, or none is
- * set, the count stands on its own rather than claiming a packaging.
+ * The type is read from the order line first and falls back to the product's
+ * default, because a product normally bagged is sometimes cartoned for one shipment
+ * and the packing list has to state what actually shipped.
+ *
+ * Mixed packaging is listed rather than collapsed to a bare count: a shipping line
+ * asked to load "110 packages" of unstated kind will ask, and a bare number was what
+ * this printed before.
  */
 function cartonsText(items: any[]): string {
   const total = sumOrNull(items, packageCount);
   if (total === null) return '';
 
-  const types = Array.from(
-    new Set(
-      items
-        .map((i) => i.product?.packageType)
-        .filter((t: unknown): t is string => Boolean(t))
-        .map((t) => t.toUpperCase())
-    )
-  );
+  // Group counts by type, so a mixed order reports each rather than losing the type.
+  const byType = new Map<string, number>();
+  let untyped = 0;
 
-  return types.length === 1 ? `${total} ${types[0]}(S)` : String(total);
+  for (const item of items) {
+    const count = packageCount(item);
+    if (count === null) continue;
+    const type = item.packageType ?? null;
+    if (!type) {
+      untyped += count;
+      continue;
+    }
+    const key = String(type).toUpperCase();
+    byType.set(key, (byType.get(key) ?? 0) + count);
+  }
+
+  const parts = [...byType.entries()].map(([type, count]) => packageCountText(count, type));
+  if (untyped > 0) parts.push(String(untyped));
+
+  return parts.length > 0 ? parts.join(', ') : String(total);
 }
 
 // ---------------------------------------------------------------------------
@@ -595,16 +608,15 @@ interface InvoiceSheetSpec {
 }
 
 /**
- * The commercial invoice sheet carries the "NOT FOR SALE" stamp at A18.
+ * The "NOT FOR SALE" stamp is shown only on sample invoices.
  *
- * It is reproduced because the workbook is the specification. Be aware that it
- * contradicts the declaration the same sheet prints at A22 - "this Invoice shows
- * the actual Price of goods described" - and that a commercial invoice is the
- * document customs assesses duty against and the bank negotiates. If a shipment is
- * queried over it, set this to false and the stamp disappears from the commercial
- * invoice alone; the proforma, sample and packing list keep theirs.
+ * Commercial and proforma invoices are trade documents that reflect actual or
+ * intended sale prices — adding a "NOT FOR SALE" stamp contradicts the declaration
+ * "this Invoice shows the actual Price of goods described" that customs and banks
+ * rely on. Sample invoices, which accompany goods sent free of charge for
+ * evaluation, legitimately carry this stamp.
  */
-const STAMP_NOT_FOR_SALE_ON_COMMERCIAL = true;
+const STAMP_NOT_FOR_SALE_ON_COMMERCIAL = false;
 
 const INVOICE_SHEETS: Record<string, InvoiceSheetSpec> = {
   COMMERCIAL: {
@@ -629,7 +641,7 @@ const INVOICE_SHEETS: Record<string, InvoiceSheetSpec> = {
     weightBand: true,
     variation: true,
     bankDetails: true,
-    notForSale: true,
+    notForSale: false,
   },
   SAMPLE: {
     // Customs assesses a free sample against its tariff heading, and there is no
@@ -1335,10 +1347,14 @@ export async function generatePackingListPDF(
     for (const item of items) {
       const packages = packageCount(item);
       const perPackage = packageWeightKg(item);
+      // The line's package type.
+      const type = item.packageType ?? null;
       y = tableRow(doc, y, columns, [
         item.product?.code || item.product?.hsnCode || '',
         item.product?.name || '',
-        packages === null ? '' : String(packages),
+        // "40 BAGS" rather than "40": a count without its type cannot be acted on by
+        // whoever loads or clears the consignment.
+        packages === null ? '' : packageCountText(packages, type),
         weightText(perPackage),
         weightText(netWeightKg(item)),
         weightText(grossWeightKg(item)),
@@ -1363,7 +1379,9 @@ export async function generatePackingListPDF(
       { width: 0.145, value: weightText(grossKg), align: 'right', bold: true },
     ]);
 
-    if (isDocumentOnlyInvoice(invoice.type)) {
+    // NOT FOR SALE stamp only on sample invoices - packing lists and proformas
+    // are documents but not "not for sale" declarations.
+    if (invoice.type === 'SAMPLE') {
       y = bannerRow(doc, y, DECLARATIONS.notForSale, {
         fontSize: 18,
         minHeight: 34,
@@ -1427,7 +1445,27 @@ export async function generatePurchaseOrderPDF(
   const { companyProfile } = options;
   const currencyCode = 'INR';
 
-  const items: any[] = procurement.order?.items ?? [];
+  /**
+   * The purchase order's own lines, at the supplier's price.
+   *
+   * Falls back to the export order's items only for purchase orders raised before
+   * line items existed. Those carry the price quoted to the BUYER, so the fallback
+   * is marked on the document rather than passed off as a supplier rate.
+   */
+  const items: any[] = procurement.items?.length
+    ? procurement.items
+    : (procurement.order?.items ?? []).map((item: any) => ({
+        product: item.product,
+        quantity: item.quantity,
+        unit: item.unit,
+        // Legacy rows have no supplier rate; showing the buyer's price would be
+        // worse than showing none.
+        rate: null,
+        taxPercent: null,
+        amount: null,
+      }));
+
+  const legacyWithoutLines = !procurement.items?.length && items.length > 0;
 
   /** Terms saved on the company profile, one clause per line. */
   const savedPoTerms: string[] = (companyProfile?.purchaseOrderTerms || '')
@@ -1436,7 +1474,17 @@ export async function generatePurchaseOrderPDF(
     .filter(Boolean);
 
   try {
-    const columns = invoiceColumns('Product Code', `Rate (${currencyCode})`);
+    // The PO carries a GST column, which the invoice documents do not: a domestic
+    // purchase is taxed and the supplier's total has to be explicable.
+    const columns: Column[] = [
+      { header: 'Product Code', width: 0.13, align: 'center' },
+      { header: 'Description of Goods', width: 0.28 },
+      { header: 'Quantity', width: 0.11, align: 'right' },
+      { header: 'Unit Type', width: 0.1, align: 'center' },
+      { header: `Rate (${currencyCode})`, width: 0.15, align: 'right' },
+      { header: 'GST %', width: 0.08, align: 'right' },
+      { header: 'Amount', width: 0.15, align: 'right' },
+    ];
     let y = titleBand(doc, LAYOUT.continuationTop, 'PURCHASE ORDER');
 
     y = splitRow(
@@ -1522,8 +1570,13 @@ export async function generatePurchaseOrderPDF(
         item.product?.name || '',
         qtyText(item.quantity),
         item.unit || item.product?.unit || 'KG',
-        money(item.unitPrice, currencyCode),
-        money(item.totalPrice, currencyCode),
+        money(item.rate, currencyCode),
+        // GST percent stated per line, because rates differ by product and the
+        // supplier's own tax invoice will be computed the same way.
+        item.taxPercent === null || item.taxPercent === undefined
+          ? ''
+          : `${Number(item.taxPercent)}%`,
+        money(item.amount, currencyCode),
       ]);
     }
     y = tableFiller(doc, y, columns, Math.max(0, MIN_ITEM_ROWS - items.length));
@@ -1550,14 +1603,55 @@ export async function generatePurchaseOrderPDF(
       },
     ]);
 
-    // The order total is what was agreed with the supplier, which is the figure on
-    // the procurement record rather than a sum of the export order's own lines.
+    /**
+     * Taxable value, GST and the grand total, stated separately.
+     *
+     * The master PO sheet has a single TOTAL row, which cannot explain a figure that
+     * includes tax - a supplier reconciling against their own tax invoice needs to
+     * see the taxable value and the GST on it. So this is a deliberate addition to
+     * the drafted layout.
+     *
+     * Legacy purchase orders raised before line items have a subtotal equal to their
+     * total and no tax, so they print one meaningful row and two zeroes; the tax rows
+     * are suppressed for them rather than printing GST 0.00 on an order that was
+     * never itemised.
+     */
+    const subtotal = Number(procurement.subtotal ?? 0);
+    const tax = Number(procurement.taxAmount ?? 0);
     const total = Number(procurement.totalAmount ?? 0);
+
+    if (tax > 0 || procurement.items?.length) {
+      y = bandRow(doc, y, [
+        { width: 0.66, value: '' },
+        { width: 0.17, value: 'Taxable Value', align: 'right', fontSize: 8 },
+        { width: 0.17, value: money(subtotal, currencyCode), align: 'right', fontSize: 8 },
+      ]);
+      y = bandRow(doc, y, [
+        { width: 0.66, value: '' },
+        { width: 0.17, value: 'GST', align: 'right', fontSize: 8 },
+        { width: 0.17, value: money(tax, currencyCode), align: 'right', fontSize: 8 },
+      ]);
+    }
+
     y = bandRow(doc, y, [
       { width: 0.66, label: 'Amount in words :', value: amountInWords(total, currencyCode) },
       { width: 0.17, value: 'TOTAL', align: 'right', bold: true, fontSize: 9 },
       { width: 0.17, value: money(total, currencyCode), align: 'right', bold: true, fontSize: 9 },
     ]);
+
+    // A purchase order printing the buyer's prices would be worse than one printing
+    // none, so a legacy order without lines says so plainly.
+    if (legacyWithoutLines) {
+      y = bandRow(doc, y, [
+        {
+          width: 1,
+          value:
+            'Rates not itemised on this purchase order. The total above is the agreed order value.',
+          fontSize: 7,
+          align: 'center',
+        },
+      ]);
+    }
 
     y = ensureRoom(doc, y, 190);
     y = splitRow(

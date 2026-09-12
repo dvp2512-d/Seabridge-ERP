@@ -36,6 +36,7 @@ import {
   Package,
   FileText,
   Banknote,
+  Edit2,
 } from 'lucide-react';
 
 const STATUS_CONFIG: Record<string, { color: string; bg: string; icon: any }> = {
@@ -92,6 +93,7 @@ export default function InvoiceDetail() {
   const queryClient = useQueryClient();
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'items' | 'payments'>('items');
 
   // Fetch invoice details
@@ -256,6 +258,13 @@ export default function InvoiceDetail() {
             recordName={`Invoice ${invoice.invoiceNumber}`}
             redirectTo="/invoices"
           />
+          {/* Edit button - only for DRAFT invoices */}
+          {invoice.status === 'DRAFT' && (
+            <button onClick={() => setShowEditModal(true)} className="btn btn-secondary">
+              <Edit2 className="w-4 h-4 mr-2" />
+              Edit
+            </button>
+          )}
           <button onClick={() => setShowPdfDialog(true)} className="btn btn-secondary">
             <Download className="w-4 h-4 mr-2" />
             Generate PDF
@@ -707,6 +716,19 @@ export default function InvoiceDetail() {
           }}
         />
       )}
+
+      {/* Edit Invoice Modal - for DRAFT only */}
+      {showEditModal && (
+        <EditInvoiceModal
+          invoice={invoice}
+          onClose={() => setShowEditModal(false)}
+          onSuccess={() => {
+            setShowEditModal(false);
+            queryClient.invalidateQueries({ queryKey: ['invoice', id] });
+          }}
+        />
+      )}
+
       {showPdfDialog && (
         <GenerateDocumentDialog
           title={`Generate PDF - ${invoice.invoiceNumber}`}
@@ -1137,6 +1159,78 @@ function PaymentModal({
           </button>
         </div>
       </div>
+    </Modal>
+  );
+}
+
+
+
+// Edit Invoice Modal - for DRAFT status only
+function EditInvoiceModal({
+  invoice,
+  onClose,
+  onSuccess,
+}: {
+  invoice: any;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [formData, setFormData] = useState({
+    invoiceDate: invoice.invoiceDate?.split('T')[0] || '',
+    dueDate: invoice.dueDate?.split('T')[0] || '',
+    notes: invoice.notes || '',
+  });
+
+  const mutation = useMutation({
+    mutationFn: (data: any) => invoicesApi.update(invoice.id, data),
+    onSuccess: () => {
+      toast.success('Invoice updated successfully');
+      onSuccess();
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Failed to update invoice'),
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    mutation.mutate(formData);
+  };
+
+  return (
+    <Modal isOpen onClose={onClose} title="Edit Invoice" size="md">
+      <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <FormField
+          label="Invoice Date"
+          type="date"
+          required
+          value={formData.invoiceDate}
+          onChange={(e) => setFormData({ ...formData, invoiceDate: e.target.value })}
+        />
+
+        <FormField
+          label="Due Date"
+          type="date"
+          required
+          value={formData.dueDate}
+          onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+        />
+
+        <TextareaField
+          label="Notes"
+          value={formData.notes}
+          onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+          rows={3}
+          placeholder="Internal notes..."
+        />
+
+        <div className="flex justify-end gap-3 pt-4 border-t">
+          <button type="button" onClick={onClose} className="btn btn-secondary">
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-primary" disabled={mutation.isPending}>
+            {mutation.isPending ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </form>
     </Modal>
   );
 }

@@ -15,16 +15,20 @@ import Modal from '@/components/ui/Modal';
 import { Trash2, AlertTriangle, Loader2 } from 'lucide-react';
 
 interface DeleteRecordButtonProps {
-  /** Resource type: quotation, order, invoice, inquiry, expense, income, task */
-  resourceType: 'quotation' | 'order' | 'invoice' | 'inquiry' | 'expense' | 'income' | 'task';
+  /** Resource type: quotation, order, invoice, inquiry, expense, income, task, buyer, product, supplier, cha, transporter */
+  resourceType: 'quotation' | 'order' | 'invoice' | 'inquiry' | 'expense' | 'income' | 'task' | 'buyer' | 'product' | 'supplier' | 'cha' | 'transporter';
   /** Record ID to delete */
   recordId: string;
   /** Display name for the record (e.g., "Quotation Q-2024-001") */
   recordName: string;
-  /** Where to navigate after successful deletion */
+  /** Where to navigate after successful deletion (empty string to stay on page) */
   redirectTo: string;
   /** Optional: Button size */
   size?: 'sm' | 'md';
+  /** Optional: Show only icon without text */
+  iconOnly?: boolean;
+  /** Optional: Callback after successful deletion (instead of redirect) */
+  onSuccess?: () => void;
 }
 
 export default function DeleteRecordButton({
@@ -33,6 +37,8 @@ export default function DeleteRecordButton({
   recordName,
   redirectTo,
   size = 'md',
+  iconOnly = false,
+  onSuccess,
 }: DeleteRecordButtonProps) {
   const { user } = useAuthStore();
   const navigate = useNavigate();
@@ -61,7 +67,11 @@ export default function DeleteRecordButton({
       // Deleting a record changes every aggregate, so the dashboard has to be
       // refetched rather than left showing totals that include the deleted row.
       refreshAggregates(queryClient);
-      navigate(redirectTo);
+      if (onSuccess) {
+        onSuccess();
+      } else if (redirectTo) {
+        navigate(redirectTo);
+      }
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.message || 'Failed to delete record');
@@ -76,9 +86,11 @@ export default function DeleteRecordButton({
     deleteMutation.mutate();
   };
 
-  const btnClass = size === 'sm' 
-    ? 'btn btn-sm text-red-600 hover:bg-red-50 border-red-200'
-    : 'btn text-red-600 hover:bg-red-50 border-red-200';
+  const btnClass = iconOnly
+    ? 'text-red-500 hover:text-red-700 p-1'
+    : size === 'sm' 
+      ? 'btn btn-sm text-red-600 hover:bg-red-50 border-red-200'
+      : 'btn text-red-600 hover:bg-red-50 border-red-200';
 
   return (
     <>
@@ -87,8 +99,8 @@ export default function DeleteRecordButton({
         className={btnClass}
         title="Permanently delete this record"
       >
-        <Trash2 className={size === 'sm' ? 'w-3 h-3' : 'w-4 h-4'} />
-        {size !== 'sm' && <span className="ml-1">Delete</span>}
+        <Trash2 className={size === 'sm' || iconOnly ? 'w-4 h-4' : 'w-4 h-4'} />
+        {!iconOnly && size !== 'sm' && <span className="ml-1">Delete</span>}
       </button>
 
       {showConfirm && (

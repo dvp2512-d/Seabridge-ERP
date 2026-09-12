@@ -42,14 +42,12 @@ const MASS_UNITS_IN_KG: Record<string, number> = {
 };
 
 /**
- * Prefill an order line's packing figures from the product's declared packaging.
+ * Prefill an order line's packing figures from the quotation.
  *
  * These four figures are the Packing List and the weight block on every invoice.
- * Nothing here is estimated: the package size and its gross weight are the
- * exporter's own declared specification on the Product record, so the arithmetic
- * only applies it to the ordered quantity. Where a product has no packaging on
- * file the fields stay null and the document leaves those cells blank, which is a
- * visible gap rather than a plausible wrong number on a customs document.
+ * Where packaging details aren't specified on the quotation, the fields stay null
+ * and the document leaves those cells blank, which is a visible gap rather than
+ * a plausible wrong number on a customs document.
  *
  * Operations can correct these per line afterwards; the figures below are a
  * starting point, not a substitute for weighing the shipment.
@@ -57,11 +55,16 @@ const MASS_UNITS_IN_KG: Record<string, number> = {
 function packingFromProduct(
   quantity: number,
   unit: string,
-  product: { packageType: string | null; packageNetWeight: unknown; packageGrossWeight: unknown }
+  _product: unknown,
+  quoted: { packageType?: string | null; packageWeight?: unknown } = {}
 ) {
-  const perPackageNet = product.packageNetWeight === null ? null : Number(product.packageNetWeight);
-  const perPackageGross =
-    product.packageGrossWeight === null ? null : Number(product.packageGrossWeight);
+  const quotedWeight =
+    quoted.packageWeight === null || quoted.packageWeight === undefined
+      ? null
+      : Number(quoted.packageWeight);
+
+  const packageType = quoted.packageType ?? null;
+  const perPackageNet = quotedWeight;
 
   // The net weight of goods sold by mass is the quantity itself.
   const factor = MASS_UNITS_IN_KG[unit.toUpperCase().trim()];
@@ -73,17 +76,101 @@ function packingFromProduct(
       ? Math.ceil(netWeight / perPackageNet)
       : null;
 
-  const grossWeight =
-    numberOfPackages !== null && perPackageGross && perPackageGross > 0
-      ? Math.round(numberOfPackages * perPackageGross * 1000) / 1000
-      : null;
-
   return {
     numberOfPackages,
+    // The type comes along with the figures: a package count is only actionable
+    // alongside what the packages are.
+    packageType,
     packageWeight: perPackageNet,
     netWeight,
-    grossWeight,
+    grossWeight: null, // Gross weight must be entered manually per order
   };
+}
+
+/**
+ * Fill an order's packing figures from what is already on file.
+ *
+ * New orders get these when the quotation is converted, but an order created before
+ * the packaging fields existed - or one whose product had no packaging set at the
+ * time - has empty lines, and the packing list prints blank however complete the rest
+ * of the order is. This fills them from the two sources that already know: the
+ * packing agreed on the quotation, and the product's standard pack.
+ *
+ * By default it only fills what is empty, so figures someone has weighed and entered
+ * are never overwritten by a computed guess. `overwrite` recalculates every line, for
+ * when a product's packaging has been corrected and the orders should follow.
+ *
+ * Returns what it did rather than throwing on lines it cannot fill: a product with no
+ * packaging on file has nothing to fetch, and that is worth reporting rather than
+ * treating as a failure.
+ */
+export async function fillOrderPacking(
+  orderId: string,
+  options: { overwrite?: boolean } = {}
+): Promise<{ filled: number; skipped: number; unavailable: string[] }> {
+  const order = await prisma.exportOrder.findUnique({
+    where: { id: orderId },
+    include: {
+      items: { include: { product: true } },
+      // The packing the buyer agreed to, which outranks the product's default.
+      quotation: { include: { items: true } },
+    },
+  });
+
+  if (!order) return { filled: 0, skipped: 0, unavailable: [] };
+
+  let filled = 0;
+  let skipped = 0;
+  const unavailable: string[] = [];
+
+  for (const item of order.items) {
+    /**
+     * Whether someone has actually declared this line's packing.
+     *
+     * Net weight is deliberately not part of the test: it is derived from the
+     * quantity whenever goods are sold by mass, so every line has one from the moment
+     * it is created. Counting it as "already set" would mean a line whose packages,
+     * type and gross weight are all empty could never be filled - which is exactly
+     * what happened before this was corrected.
+     *
+     * The three below cannot be derived from a quantity, so their presence is
+     * evidence of a human decision worth preserving.
+     */
+    const alreadySet =
+      item.numberOfPackages !== null || item.grossWeight !== null || item.packageType !== null;
+
+    if (alreadySet && !options.overwrite) {
+      skipped += 1;
+      continue;
+    }
+
+    // Matched on product: a quotation line and an order line for the same product are
+    // the same line, since an order is created one-for-one from its quotation.
+    const quoted = order.quotation?.items.find((q) => q.productId === item.productId);
+
+    const packing = packingFromProduct(Number(item.quantity), item.unit, item.product, {
+      packageType: quoted?.packageType ?? null,
+      packageWeight: quoted?.packageWeight ?? null,
+    });
+
+    // Nothing on file to fetch from - no agreed packing and no product default.
+    if (
+      packing.packageType === null &&
+      packing.numberOfPackages === null &&
+      packing.netWeight === null
+    ) {
+      unavailable.push(item.product.name);
+      continue;
+    }
+
+    await prisma.orderItem.update({
+      where: { id: item.id },
+      data: packing,
+    });
+    filled += 1;
+  }
+
+  return { filled, skipped, unavailable };
 }
 
 /**
@@ -196,7 +283,10 @@ export async function createOrderFromQuotation(
             unitPrice: pricing.lines[index].unitPrice,
             totalPrice: pricing.lines[index].amount,
             notes: item.specifications,
-            ...packingFromProduct(Number(item.quantity), item.unit, item.product),
+            ...packingFromProduct(Number(item.quantity), item.unit, item.product, {
+              packageType: item.packageType,
+              packageWeight: item.packageWeight,
+            }),
           })),
         },
         documents: {

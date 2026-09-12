@@ -31,11 +31,6 @@ export type InvoiceType = (typeof INVOICE_TYPES)[number];
  */
 export const DOCUMENT_ONLY_INVOICE_TYPES = ['PROFORMA', 'SAMPLE', 'PACKING_LIST'] as const;
 
-/** Types that represent a genuine demand for payment. */
-export const COMMERCIAL_INVOICE_TYPES = INVOICE_TYPES.filter(
-  (t) => !DOCUMENT_ONLY_INVOICE_TYPES.includes(t as any)
-);
-
 /**
  * Spread into a Prisma `type` filter to keep documents out of money totals.
  *
@@ -79,15 +74,4 @@ export const INVOICE_TYPE_DOCUMENT_TITLES: Record<string, string> = {
   PROFORMA: 'PROFORMA  INVOICE',
   SAMPLE: 'SAMPLE  INVOICE',
   PACKING_LIST: 'Packing List',
-};
-
-/**
- * Printed under the totals on document-only invoices so the reader - buyer or
- * customs officer - is not left to infer that no payment is due.
- */
-export const INVOICE_TYPE_DECLARATIONS: Record<string, string> = {
-  PROFORMA:
-    'This is a proforma invoice issued for documentation purposes. It is not a demand for payment.',
-  SAMPLE:
-    'Sample shipment supplied free of charge. Value declared for customs purposes only.',
 };

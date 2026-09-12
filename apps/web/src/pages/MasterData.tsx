@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { masterApi } from '@/lib/api';
+import { masterApi, lifecycleApi } from '@/lib/api';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField } from '@/components/ui/FormFields';
-import { Plus, Edit2, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Edit2, Search, ChevronLeft, ChevronRight, Power, PowerOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
 import { can } from '@/lib/permissions';
@@ -208,13 +208,143 @@ function StatusBadge({ active }: { active: boolean }) {
 }
 
 /** Shared edit button, rendered only when the user may manage master data. */
-function EditCell({ item, onEdit }: { item: any; onEdit?: (item: any) => void }) {
-  if (!onEdit) return <td />;
+function EditCell({
+  item,
+  resource,
+  onEdit,
+  canManage,
+}: {
+  item: any;
+  resource: string;
+  onEdit?: (item: any) => void;
+  canManage: boolean;
+}) {
+  const queryClient = useQueryClient();
+  const { user } = useAuthStore();
+  // SETTINGS_MANAGE is required to deactivate/reactivate (more restrictive than edit)
+  const canLifecycle = can(user?.role, 'SETTINGS_MANAGE');
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  // Fetch preview when confirm dialog opens
+  const previewQuery = useQuery({
+    queryKey: ['lifecycle-preview', resource, item.id],
+    queryFn: () => lifecycleApi.preview(resource, item.id),
+    enabled: showConfirm && item.isActive,
+  });
+
+  const deactivate = useMutation({
+    mutationFn: () => lifecycleApi.deactivate(resource, item.id),
+    onSuccess: (res) => {
+      toast.success(res.data?.message || 'Deactivated successfully');
+      queryClient.invalidateQueries({ queryKey: [resource === 'product-categories' ? 'productCategories' : resource] });
+      queryClient.invalidateQueries({ queryKey: ['dropdowns'] });
+      setShowConfirm(false);
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Failed to deactivate'),
+  });
+
+  const reactivate = useMutation({
+    mutationFn: () => lifecycleApi.reactivate(resource, item.id),
+    onSuccess: (res) => {
+      toast.success(res.data?.message || 'Reactivated successfully');
+      queryClient.invalidateQueries({ queryKey: [resource === 'product-categories' ? 'productCategories' : resource] });
+      queryClient.invalidateQueries({ queryKey: ['dropdowns'] });
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Failed to reactivate'),
+  });
+
+  if (!canManage) return <td />;
+
+  const previewData = previewQuery.data?.data?.data;
+
   return (
     <td>
-      <button onClick={() => onEdit(item)} className="text-navy-600 hover:text-navy-800">
-        <Edit2 className="w-4 h-4" />
-      </button>
+      <div className="flex items-center gap-2">
+        {onEdit && (
+          <button
+            onClick={() => onEdit(item)}
+            className="text-navy-600 hover:text-navy-800"
+            title="Edit"
+            aria-label="Edit"
+          >
+            <Edit2 className="w-4 h-4" />
+          </button>
+        )}
+        {canLifecycle && (
+          item.isActive ? (
+            <button
+              onClick={() => setShowConfirm(true)}
+              className="text-gray-400 hover:text-red-600"
+              title="Deactivate"
+              aria-label="Deactivate"
+            >
+              <PowerOff className="w-4 h-4" />
+            </button>
+          ) : (
+            <button
+              onClick={() => reactivate.mutate()}
+              disabled={reactivate.isPending}
+              className="text-gray-400 hover:text-green-600"
+              title="Reactivate"
+              aria-label="Reactivate"
+            >
+              <Power className="w-4 h-4" />
+            </button>
+          )
+        )}
+      </div>
+
+      {/* Deactivation confirmation dialog */}
+      {showConfirm && (
+        <Modal isOpen onClose={() => setShowConfirm(false)} title="Deactivate Record" size="sm">
+          <div className="p-6 space-y-4">
+            {previewQuery.isLoading ? (
+              <p className="text-gray-500">Checking dependencies...</p>
+            ) : previewData?.blocked ? (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                <p className="text-red-700 font-medium">Cannot deactivate</p>
+                <p className="text-red-600 text-sm mt-1">{previewData.blocked}</p>
+              </div>
+            ) : (
+              <>
+                <p className="text-gray-700">
+                  This will hide the record from dropdowns in new documents.
+                </p>
+                {previewData?.dependents?.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <p className="text-amber-800 font-medium text-sm">
+                      This record is referenced by:
+                    </p>
+                    <ul className="mt-2 text-sm text-amber-700 list-disc list-inside">
+                      {previewData.dependents.map((d: any) => (
+                        <li key={d.label}>{d.count} {d.label}</li>
+                      ))}
+                    </ul>
+                    <p className="mt-2 text-sm text-amber-600">
+                      It will remain on those existing records.
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+            <div className="flex justify-end gap-3 pt-4 border-t">
+              <button
+                onClick={() => setShowConfirm(false)}
+                className="btn btn-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => deactivate.mutate()}
+                disabled={deactivate.isPending || !!previewData?.blocked}
+                className="btn bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {deactivate.isPending ? 'Deactivating...' : 'Deactivate'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </td>
   );
 }
@@ -264,11 +394,11 @@ export default function MasterData() {
       </div>
 
       {/* Content */}
-      {activeTab === 'countries' && <CountriesTab onEdit={canManage ? (item) => { setEditItem(item); setShowModal(true); } : undefined} />}
-      {activeTab === 'currencies' && <CurrenciesTab onEdit={canManage ? (item) => { setEditItem(item); setShowModal(true); } : undefined} />}
-      {activeTab === 'incoterms' && <IncotermsTab onEdit={canManage ? (item) => { setEditItem(item); setShowModal(true); } : undefined} />}
-      {activeTab === 'categories' && <CategoriesTab onEdit={canManage ? (item) => { setEditItem(item); setShowModal(true); } : undefined} />}
-      {activeTab === 'ports' && <PortsTab onEdit={canManage ? (item) => { setEditItem(item); setShowModal(true); } : undefined} />}
+      {activeTab === 'countries' && <CountriesTab onEdit={canManage ? (item) => { setEditItem(item); setShowModal(true); } : undefined} canManage={canManage} />}
+      {activeTab === 'currencies' && <CurrenciesTab onEdit={canManage ? (item) => { setEditItem(item); setShowModal(true); } : undefined} canManage={canManage} />}
+      {activeTab === 'incoterms' && <IncotermsTab onEdit={canManage ? (item) => { setEditItem(item); setShowModal(true); } : undefined} canManage={canManage} />}
+      {activeTab === 'categories' && <CategoriesTab onEdit={canManage ? (item) => { setEditItem(item); setShowModal(true); } : undefined} canManage={canManage} />}
+      {activeTab === 'ports' && <PortsTab onEdit={canManage ? (item) => { setEditItem(item); setShowModal(true); } : undefined} canManage={canManage} />}
 
       {/* Add/Edit Modal */}
       {showModal && (
@@ -283,7 +413,7 @@ export default function MasterData() {
 }
 
 // Countries Tab
-function CountriesTab({ onEdit }: { onEdit?: (item: any) => void }) {
+function CountriesTab({ onEdit, canManage }: { onEdit?: (item: any) => void; canManage: boolean }) {
   const list = useMasterList('countries', masterApi.getCountries);
 
   return (
@@ -299,14 +429,14 @@ function CountriesTab({ onEdit }: { onEdit?: (item: any) => void }) {
           <td>{c.name}</td>
           <td>{c.region || '-'}</td>
           <td><StatusBadge active={c.isActive} /></td>
-          <EditCell item={c} onEdit={onEdit} />
+          <EditCell item={c} resource="countries" onEdit={onEdit} canManage={canManage} />
         </tr>
       ))}
     </MasterTable>
   );
 }
 // Currencies Tab
-function CurrenciesTab({ onEdit }: { onEdit?: (item: any) => void }) {
+function CurrenciesTab({ onEdit, canManage }: { onEdit?: (item: any) => void; canManage: boolean }) {
   const list = useMasterList('currencies', masterApi.getCurrencies);
 
   return (
@@ -326,14 +456,14 @@ function CurrenciesTab({ onEdit }: { onEdit?: (item: any) => void }) {
           <td>{c.name}</td>
           <td>{c.symbol}</td>
           <td><StatusBadge active={c.isActive} /></td>
-          <EditCell item={c} onEdit={onEdit} />
+          <EditCell item={c} resource="currencies" onEdit={onEdit} canManage={canManage} />
         </tr>
       ))}
     </MasterTable>
   );
 }
 // Incoterms Tab
-function IncotermsTab({ onEdit }: { onEdit?: (item: any) => void }) {
+function IncotermsTab({ onEdit, canManage }: { onEdit?: (item: any) => void; canManage: boolean }) {
   const list = useMasterList('incoterms', masterApi.getIncoterms);
 
   return (
@@ -349,14 +479,14 @@ function IncotermsTab({ onEdit }: { onEdit?: (item: any) => void }) {
           <td className="whitespace-nowrap">{i.name}</td>
           <td className="text-sm text-gray-600">{i.description || '-'}</td>
           <td><StatusBadge active={i.isActive} /></td>
-          <EditCell item={i} onEdit={onEdit} />
+          <EditCell item={i} resource="incoterms" onEdit={onEdit} canManage={canManage} />
         </tr>
       ))}
     </MasterTable>
   );
 }
 // Categories Tab
-function CategoriesTab({ onEdit }: { onEdit?: (item: any) => void }) {
+function CategoriesTab({ onEdit, canManage }: { onEdit?: (item: any) => void; canManage: boolean }) {
   const list = useMasterList('productCategories', masterApi.getProductCategories);
 
   return (
@@ -371,14 +501,14 @@ function CategoriesTab({ onEdit }: { onEdit?: (item: any) => void }) {
           <td className="font-medium">{c.name}</td>
           <td className="text-sm text-gray-600">{c.description || '-'}</td>
           <td><StatusBadge active={c.isActive} /></td>
-          <EditCell item={c} onEdit={onEdit} />
+          <EditCell item={c} resource="product-categories" onEdit={onEdit} canManage={canManage} />
         </tr>
       ))}
     </MasterTable>
   );
 }
 // Ports Tab
-function PortsTab({ onEdit }: { onEdit?: (item: any) => void }) {
+function PortsTab({ onEdit, canManage }: { onEdit?: (item: any) => void; canManage: boolean }) {
   const [type, setType] = useState<'' | 'SEA' | 'AIR' | 'LAND'>('');
   const list = useMasterList('ports', masterApi.getPorts, type ? { type } : {});
 
@@ -422,7 +552,7 @@ function PortsTab({ onEdit }: { onEdit?: (item: any) => void }) {
             <td>{p.country?.name || '-'}</td>
             <td><span className="badge badge-navy">{p.type}</span></td>
             <td><StatusBadge active={p.isActive} /></td>
-            <EditCell item={p} onEdit={onEdit} />
+            <EditCell item={p} resource="ports" onEdit={onEdit} canManage={canManage} />
           </tr>
         ))}
       </MasterTable>

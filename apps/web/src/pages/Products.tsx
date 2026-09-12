@@ -4,8 +4,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { productsApi, masterApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
+import { ErrorState } from '@/components/ui/ErrorState';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
+import DeleteRecordButton from '@/components/DeleteRecordButton';
 import { Plus, Search, Edit2, Package } from 'lucide-react';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 
@@ -16,7 +18,7 @@ export default function Products() {
   const [showModal, setShowModal] = useState(false);
   const [editProduct, setEditProduct] = useState<any>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['products', search, categoryFilter],
     queryFn: () => productsApi.list({ 
       search: search || undefined, 
@@ -44,6 +46,15 @@ export default function Products() {
     setEditProduct(null);
     setShowModal(true);
   };
+
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Products" subtitle="Product Management" />
+        <ErrorState error={error} onRetry={refetch} />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -143,12 +154,23 @@ export default function Products() {
                     </span>
                   </td>
                   <td>
-                    <button
-                      onClick={() => openEdit(product)}
-                      className="text-navy-600 hover:text-navy-800"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => openEdit(product)}
+                        className="text-navy-600 hover:text-navy-800"
+                        aria-label="Edit product"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <DeleteRecordButton
+                        resourceType="product"
+                        recordId={product.id}
+                        recordName={product.name}
+                        redirectTo=""
+                        onSuccess={() => queryClient.invalidateQueries({ queryKey: ['products'] })}
+                        iconOnly
+                      />
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -168,6 +190,7 @@ export default function Products() {
             setShowModal(false);
             setEditProduct(null);
             queryClient.invalidateQueries({ queryKey: ['products'] });
+            queryClient.invalidateQueries({ queryKey: ['dropdowns'] });
           }}
         />
       )}
@@ -195,11 +218,7 @@ function ProductModal({
     categoryId: product?.categoryId || '',
     hsnCode: product?.hsnCode || '',
     unit: product?.unit || 'KG',
-    // Default packaging. Entered once per product and used to prefill the packing
-    // figures on every order line, which is what fills the Packing List.
-    packageType: product?.packageType || '',
-    packageNetWeight: product?.packageNetWeight ? String(product.packageNetWeight) : '',
-    packageGrossWeight: product?.packageGrossWeight ? String(product.packageGrossWeight) : '',
+    gstRate: product?.gstRate != null ? String(product.gstRate) : '',
     isActive: product?.isActive ?? true,
   });
 
@@ -215,20 +234,24 @@ function ProductModal({
     },
   });
 
-  /** Blank means "no default packaging", which is different from zero. */
-  const numberOrNull = (value: string) => {
+  /**
+   * GST, where zero is a real answer.
+   *
+   * Several food export lines are nil-rated or exempt, so 0 must be stored as 0 rather
+   * than discarded as "not set" - the difference is between a purchase order line
+   * showing no tax deliberately and one showing none because nobody filled it in.
+   */
+  const rateOrNull = (value: string) => {
     if (value === '') return product ? null : undefined;
     const n = Number(value);
-    return Number.isFinite(n) && n > 0 ? n : undefined;
+    return Number.isFinite(n) && n >= 0 && n <= 100 ? n : undefined;
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     mutation.mutate({
       ...formData,
-      packageType: formData.packageType || (product ? null : undefined),
-      packageNetWeight: numberOrNull(formData.packageNetWeight),
-      packageGrossWeight: numberOrNull(formData.packageGrossWeight),
+      gstRate: rateOrNull(formData.gstRate),
     });
   };
 
@@ -275,54 +298,21 @@ function ProductModal({
             options={units.map((u) => ({ value: u, label: u }))}
           />
 
-          {/*
-            Default packaging. Filled in once here, it prefills the packing figures
-            on every order line for this product - packages, weight per package, net
-            and gross - which is what makes the Packing List print complete without
-            weights being typed per order. Optional: leave blank for a product sold
-            loose or in varying packs.
-          */}
-          <div className="col-span-2 rounded-lg border border-gray-200 bg-gray-50 p-4">
-            <h4 className="text-sm font-medium text-navy-900">Default Packaging</h4>
-            <p className="text-xs text-gray-500 mt-0.5 mb-3">
-              Used to prefill the packing list figures on new order lines. Leave blank if
-              this product has no standard pack.
-            </p>
-            <div className="grid grid-cols-3 gap-4">
-              <SelectField
-                label="Package Type"
-                value={formData.packageType}
-                onChange={(e) => setFormData({ ...formData, packageType: e.target.value })}
-                placeholder="Not set"
-                options={[
-                  { value: 'BAG', label: 'Bag' },
-                  { value: 'CARTON', label: 'Carton' },
-                  { value: 'BOX', label: 'Box' },
-                  { value: 'DRUM', label: 'Drum' },
-                  { value: 'JUMBO_BAG', label: 'Jumbo Bag' },
-                  { value: 'PALLET', label: 'Pallet' },
-                ]}
-              />
-              <FormField
-                label="Net Weight per Pack (KG)"
-                type="number"
-                step="0.001"
-                min="0"
-                value={formData.packageNetWeight}
-                onChange={(e) => setFormData({ ...formData, packageNetWeight: e.target.value })}
-                placeholder="25"
-              />
-              <FormField
-                label="Gross Weight per Pack (KG)"
-                type="number"
-                step="0.001"
-                min="0"
-                value={formData.packageGrossWeight}
-                onChange={(e) => setFormData({ ...formData, packageGrossWeight: e.target.value })}
-                placeholder="25.4"
-              />
-            </div>
-          </div>
+          {/* Prefills the GST on purchase order lines for this product. Rates follow
+              the HSN code, so this belongs on the product rather than being typed on
+              every order. Blank means unknown, which leaves the line's tax blank
+              rather than treating it as zero. */}
+          <FormField
+            label="GST Rate (%)"
+            type="number"
+            step="0.01"
+            min="0"
+            max="100"
+            value={formData.gstRate}
+            onChange={(e) => setFormData({ ...formData, gstRate: e.target.value })}
+            placeholder="e.g. 5"
+            hint="Used on purchase orders"
+          />
 
           {product && (
             <div className="flex items-center gap-2 self-end pb-2">
