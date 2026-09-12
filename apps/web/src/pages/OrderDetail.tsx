@@ -562,6 +562,7 @@ export default function OrderDetail() {
           orderId={id!}
           defaultOriginPortId={order?.portOfLoadingId}
           defaultDestinationPortId={order?.portOfDischargeId}
+          quotationCosts={order?.quotation?.costs}
           onClose={() => setShowShipmentModal(false)}
           onSuccess={() => {
             queryClient.invalidateQueries({ queryKey: ['order', id] });
@@ -957,8 +958,8 @@ function DocumentDetailsModal({
   });
 
   const { data: portsData } = useQuery({
-    queryKey: ['ports'],
-    queryFn: () => masterApi.getPorts({ limit: 200 }),
+    queryKey: ['ports-all'],
+    queryFn: () => masterApi.getPorts({ limit: 500, includeInactive: true }),
   });
 
   const mutation = useMutation({
@@ -1928,15 +1929,30 @@ function ShipmentModal({
   orderId,
   defaultOriginPortId,
   defaultDestinationPortId,
+  quotationCosts,
   onClose,
   onSuccess,
 }: {
   orderId: string;
   defaultOriginPortId?: string;
   defaultDestinationPortId?: string;
+  /** Additional costs from the quotation, used to prefill shipment costs */
+  quotationCosts?: Array<{ costType: string; description: string; amount: any }>;
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  /**
+   * Extract cost amounts from quotation costs by type.
+   * Quotation costType values: CHA, TRANSPORT, FREIGHT, PACKAGING, OTHER
+   */
+  const getQuotedCost = (types: string[]) => {
+    if (!quotationCosts) return '';
+    const cost = quotationCosts.find((c) =>
+      types.some((t) => c.costType.toUpperCase().includes(t))
+    );
+    return cost ? String(Number(cost.amount)) : '';
+  };
+
   const [formData, setFormData] = useState({
     chaId: '',
     transporterId: '',
@@ -1949,9 +1965,10 @@ function ShipmentModal({
     blNumber: '',
     // Costs. Each one entered raises the matching expense automatically, so these
     // are the fields that populate the Expenses module.
-    freightCost: '',
-    chaCharges: '',
-    transportCharges: '',
+    // Pre-filled from quotation additional costs when available.
+    freightCost: getQuotedCost(['FREIGHT', 'SHIPPING']),
+    chaCharges: getQuotedCost(['CHA', 'CUSTOMS', 'CLEARANCE']),
+    transportCharges: getQuotedCost(['TRANSPORT', 'TRUCKING', 'LOGISTICS']),
     etd: '',
     eta: '',
     notes: '',
@@ -1968,8 +1985,8 @@ function ShipmentModal({
   });
 
   const { data: portsData } = useQuery({
-    queryKey: ['ports'],
-    queryFn: () => masterApi.getPorts({ limit: 200 }),
+    queryKey: ['ports-all'],
+    queryFn: () => masterApi.getPorts({ limit: 500, includeInactive: true }),
   });
 
   const mutation = useMutation({
@@ -2133,6 +2150,11 @@ function ShipmentModal({
             <p className="text-xs text-gray-500 mt-0.5">
               Each amount entered is added to Expenses automatically and tracked until paid.
             </p>
+            {quotationCosts && quotationCosts.length > 0 && (
+              <p className="text-xs text-green-600 mt-1">
+                ✓ Pre-filled from quotation additional costs. Adjust if needed.
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-3 gap-4">
             <FormField

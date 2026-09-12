@@ -96,7 +96,16 @@ router.get('/:id', can('OPERATIONS_VIEW'), async (req, res, next) => {
       where: { id: req.params.id },
       include: {
         buyer: { include: { country: true } },
-        quotation: { select: { id: true, quotationNumber: true } },
+        quotation: {
+          select: {
+            id: true,
+            quotationNumber: true,
+            // Additional costs from the quotation, used to prefill shipment costs
+            costs: {
+              select: { costType: true, description: true, amount: true },
+            },
+          },
+        },
         incoterm: true,
         items: { include: { product: true } },
         procurements: {
