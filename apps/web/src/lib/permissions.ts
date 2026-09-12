@@ -35,6 +35,9 @@ export const PERMISSIONS: Record<string, Role[]> = {
 
   SETTINGS_MANAGE: ['FOUNDER', 'ADMIN'],
   SETTINGS_VIEW: ['FOUNDER', 'ADMIN', 'SALES', 'OPERATIONS', 'FINANCE'],
+
+  // Permanent record deletion - restricted to FOUNDER only
+  RECORD_DELETE: ['FOUNDER'],
 };
 
 export type Permission = keyof typeof PERMISSIONS;
