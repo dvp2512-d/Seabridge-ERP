@@ -744,7 +744,7 @@ function ExpensesWidget({ data, currency }: { data: any; currency?: string }) {
 
   return (
     <div className="space-y-4">
-      {/* Summary KPIs */}
+      {/* Summary KPIs - This Month */}
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-gray-50 rounded-lg p-3">
           <div className="text-xs text-gray-500">This Month</div>
@@ -754,12 +754,42 @@ function ExpensesWidget({ data, currency }: { data: any; currency?: string }) {
           <div className="text-xs text-gray-400">
             {data.thisMonthCount || 0} expenses
           </div>
+          {/* Show paid vs outstanding for this month */}
+          {(data.thisMonth || 0) > 0 && (
+            <div className="mt-2 space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-green-600">Paid</span>
+                <span className="text-green-600 font-medium">{formatCurrency(data.thisMonthPaid || 0, currency)}</span>
+              </div>
+              {(data.thisMonthBalance || 0) > 0 && (
+                <div className="flex justify-between text-xs">
+                  <span className="text-orange-600">Outstanding</span>
+                  <span className="text-orange-600 font-medium">{formatCurrency(data.thisMonthBalance, currency)}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="bg-gray-50 rounded-lg p-3">
           <div className="text-xs text-gray-500">Year to Date</div>
           <div className="text-lg font-bold text-gray-900">
             {formatCurrency(data.yearToDate || 0, currency)}
           </div>
+          {/* Show paid vs outstanding for YTD */}
+          {(data.yearToDate || 0) > 0 && (
+            <div className="mt-2 space-y-1">
+              <div className="flex justify-between text-xs">
+                <span className="text-green-600">Paid</span>
+                <span className="text-green-600 font-medium">{formatCurrency(data.yearToDatePaid || 0, currency)}</span>
+              </div>
+              {(data.yearToDateBalance || 0) > 0 && (
+                <div className="flex justify-between text-xs">
+                  <span className="text-orange-600">Outstanding</span>
+                  <span className="text-orange-600 font-medium">{formatCurrency(data.yearToDateBalance, currency)}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

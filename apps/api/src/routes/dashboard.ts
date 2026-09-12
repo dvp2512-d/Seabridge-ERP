@@ -209,22 +209,22 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
         _count: { _all: true },
         _sum: { amount: true, paidAmount: true, balanceAmount: true },
       }),
-      // Monthly expenses
+      // Monthly expenses - include paid and balance amounts
       prisma.expense.aggregate({
         where: {
           expenseDate: { gte: startOfMonth },
           status: { not: 'REJECTED' },
         },
-        _sum: { amount: true },
+        _sum: { amount: true, paidAmount: true, balanceAmount: true },
         _count: { _all: true },
       }),
-      // Yearly expenses
+      // Yearly expenses - include paid and balance amounts
       prisma.expense.aggregate({
         where: {
           expenseDate: { gte: startOfYear },
           status: { not: 'REJECTED' },
         },
-        _sum: { amount: true },
+        _sum: { amount: true, paidAmount: true, balanceAmount: true },
       }),
       // Expenses by category
       prisma.expense.groupBy({
@@ -378,9 +378,15 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
          */
         expenses: {
           currency: 'INR',
+          // This month totals
           thisMonth: round2(Number(monthlyExpenseTotal._sum.amount ?? 0)),
+          thisMonthPaid: round2(Number(monthlyExpenseTotal._sum.paidAmount ?? 0)),
+          thisMonthBalance: round2(Number(monthlyExpenseTotal._sum.balanceAmount ?? 0)),
           thisMonthCount: monthlyExpenseTotal._count?._all ?? 0,
+          // Year to date totals
           yearToDate: round2(Number(yearlyExpenseTotal._sum.amount ?? 0)),
+          yearToDatePaid: round2(Number(yearlyExpenseTotal._sum.paidAmount ?? 0)),
+          yearToDateBalance: round2(Number(yearlyExpenseTotal._sum.balanceAmount ?? 0)),
           pendingApproval: {
             count: pendingExpenseCount,
             amount: round2(Number(pendingExpenseTotal._sum.amount ?? 0)),

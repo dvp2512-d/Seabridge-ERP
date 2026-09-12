@@ -1969,6 +1969,11 @@ function ShipmentModal({
     freightCost: getQuotedCost(['FREIGHT', 'SHIPPING']),
     chaCharges: getQuotedCost(['CHA', 'CUSTOMS', 'CLEARANCE']),
     transportCharges: getQuotedCost(['TRANSPORT', 'TRUCKING', 'LOGISTICS']),
+    packagingCharges: getQuotedCost(['PACKAGING', 'PACKING']),
+    insuranceCharges: getQuotedCost(['INSURANCE']),
+    inspectionCharges: getQuotedCost(['INSPECTION', 'TESTING', 'QUALITY']),
+    commissionCharges: getQuotedCost(['COMMISSION', 'AGENT']),
+    otherCharges: getQuotedCost(['OTHER', 'MISC']),
     etd: '',
     eta: '',
     notes: '',
@@ -2030,6 +2035,11 @@ function ShipmentModal({
       freightCost: numberOrUndefined(formData.freightCost),
       chaCharges: numberOrUndefined(formData.chaCharges),
       transportCharges: numberOrUndefined(formData.transportCharges),
+      packagingCharges: numberOrUndefined(formData.packagingCharges),
+      insuranceCharges: numberOrUndefined(formData.insuranceCharges),
+      inspectionCharges: numberOrUndefined(formData.inspectionCharges),
+      commissionCharges: numberOrUndefined(formData.commissionCharges),
+      otherCharges: numberOrUndefined(formData.otherCharges),
       etd: formData.etd || undefined,
       eta: formData.eta || undefined,
       notes: formData.notes || undefined,
@@ -2180,6 +2190,46 @@ function ShipmentModal({
               min="0"
               value={formData.transportCharges}
               onChange={(e) => setFormData({ ...formData, transportCharges: e.target.value })}
+            />
+            <FormField
+              label="Packaging (₹)"
+              type="number"
+              step="0.01"
+              min="0"
+              value={formData.packagingCharges}
+              onChange={(e) => setFormData({ ...formData, packagingCharges: e.target.value })}
+            />
+            <FormField
+              label="Insurance (₹)"
+              type="number"
+              step="0.01"
+              min="0"
+              value={formData.insuranceCharges}
+              onChange={(e) => setFormData({ ...formData, insuranceCharges: e.target.value })}
+            />
+            <FormField
+              label="Inspection (₹)"
+              type="number"
+              step="0.01"
+              min="0"
+              value={formData.inspectionCharges}
+              onChange={(e) => setFormData({ ...formData, inspectionCharges: e.target.value })}
+            />
+            <FormField
+              label="Commission (₹)"
+              type="number"
+              step="0.01"
+              min="0"
+              value={formData.commissionCharges}
+              onChange={(e) => setFormData({ ...formData, commissionCharges: e.target.value })}
+            />
+            <FormField
+              label="Other Charges (₹)"
+              type="number"
+              step="0.01"
+              min="0"
+              value={formData.otherCharges}
+              onChange={(e) => setFormData({ ...formData, otherCharges: e.target.value })}
             />
           </div>
         </div>

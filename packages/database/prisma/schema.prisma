@@ -974,6 +974,12 @@ model Shipment {
   // see services/expenseSyncService.ts.
   chaCharges        Decimal?    @map("cha_charges") @db.Decimal(12, 2)
   transportCharges  Decimal?    @map("transport_charges") @db.Decimal(12, 2)
+  // Additional cost fields to capture all quotation cost types
+  packagingCharges  Decimal?    @map("packaging_charges") @db.Decimal(12, 2)
+  insuranceCharges  Decimal?    @map("insurance_charges") @db.Decimal(12, 2)
+  inspectionCharges Decimal?    @map("inspection_charges") @db.Decimal(12, 2)
+  commissionCharges Decimal?    @map("commission_charges") @db.Decimal(12, 2)
+  otherCharges      Decimal?    @map("other_charges") @db.Decimal(12, 2)
   notes             String?
   createdAt         DateTime    @default(now()) @map("created_at")
   updatedAt         DateTime    @updatedAt @map("updated_at")
