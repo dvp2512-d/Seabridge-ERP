@@ -11,6 +11,53 @@ import { getBaseCurrency } from '../services/exchangeRateService';
 import { cache, CACHE_TTL, CACHE_KEYS } from '../services/cacheService';
 
 /**
+ * Check which optional tables exist in the database.
+ * Caches the result since table existence doesn't change during runtime.
+ */
+interface TableState {
+  hasIncomeTable: boolean;
+  hasExpensePaymentColumns: boolean;
+}
+
+let tableState: TableState | null = null;
+
+async function detectTableState(): Promise<TableState> {
+  if (tableState !== null) return tableState;
+  
+  try {
+    const tables = await prisma.$queryRaw<{ tablename: string }[]>`
+      SELECT tablename FROM pg_tables 
+      WHERE schemaname = 'public' 
+      AND tablename IN ('income', 'expenses', 'expense_payments')
+    `;
+    
+    const tableNames = tables.map(t => t.tablename);
+    const hasIncomeTable = tableNames.includes('income');
+    
+    // Check if expense payment columns exist
+    let hasExpensePaymentColumns = false;
+    if (tableNames.includes('expenses')) {
+      try {
+        const columns = await prisma.$queryRaw<{ column_name: string }[]>`
+          SELECT column_name FROM information_schema.columns 
+          WHERE table_name = 'expenses' AND column_name = 'paid_amount'
+        `;
+        hasExpensePaymentColumns = columns.length > 0;
+      } catch {
+        hasExpensePaymentColumns = false;
+      }
+    }
+    
+    tableState = { hasIncomeTable, hasExpensePaymentColumns };
+  } catch {
+    // Fallback: assume all tables exist
+    tableState = { hasIncomeTable: true, hasExpensePaymentColumns: true };
+  }
+  
+  return tableState;
+}
+
+/**
  * Reshape a Prisma groupBy into the { key, count, value } rows the charts read.
  *
  * Kept as a named helper because the chart components depend on this exact shape:
@@ -58,40 +105,11 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
     const startOfYear = startOfFinancialYear(today);
     const periodLabel = financialYearLabel(today);
 
-    // ALL queries run in parallel for maximum performance
-    const [
-      // Counts
-      totalOrders,
-      activeOrders,
-      openInquiries,
-      pendingQuotations,
-      activeShipments,
-      totalBuyers,
-      activeBuyers,
-      // Recent items
-      recentInquiries,
-      recentOrders,
-      pendingTasks,
-      // Financial aggregates
-      monthlyPaymentTotal,
-      yearlyPaymentTotal,
-      receivableTotal,
-      overdueTotal,
-      pipelineTotal,
-      incomeByStatus,
-      incomeByCategory,
-      allPaymentTotal,
-      allIncomeReceived,
-      allExpenseGroups,
-      // Expense data for dashboard widget
-      monthlyExpenseTotal,
-      yearlyExpenseTotal,
-      expensesByCategory,
-      pendingExpenseCount,
-      pendingExpenseTotal,
-      // Base currency
-      base,
-    ] = await Promise.all([
+    // Check which tables exist before querying
+    const tables = await detectTableState();
+
+    // Build core queries that always work
+    const coreQueries = [
       // Total orders this year
       prisma.exportOrder.count({
         where: { orderDate: { gte: startOfYear } },
@@ -189,73 +207,147 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
         where: { stage: { notIn: ['WON', 'LOST'] } },
         _sum: { expectedValue: true },
       }),
-      // Income by status
-      prisma.income.groupBy({
-        by: ['status'],
-        where: { receivedDate: { gte: startOfYear } },
-        _count: { _all: true },
-        _sum: { amountINR: true },
-      }),
-      // Income by category
-      prisma.income.groupBy({
-        by: ['category'],
-        where: { receivedDate: { gte: startOfYear }, status: 'RECEIVED' },
-        _sum: { amountINR: true },
-      }),
       // All-time payments
       prisma.payment.aggregate({ _sum: { amount: true } }),
-      // All-time income received
-      prisma.income.aggregate({
-        where: { status: 'RECEIVED' },
-        _sum: { amountINR: true },
-      }),
-      // All expenses by status, with what has actually been paid against each.
-      // paidAmount and balanceAmount come from the expense payment records, so the
-      // cash figures below follow money that moved rather than a status flag.
-      prisma.expense.groupBy({
-        by: ['status'],
-        _count: { _all: true },
-        _sum: { amount: true, paidAmount: true, balanceAmount: true },
-      }),
-      // Monthly expenses - include paid and balance amounts
-      prisma.expense.aggregate({
-        where: {
-          expenseDate: { gte: startOfMonth },
-          status: { not: 'REJECTED' },
-        },
-        _sum: { amount: true, paidAmount: true, balanceAmount: true },
-        _count: { _all: true },
-      }),
-      // Yearly expenses - include paid and balance amounts
-      prisma.expense.aggregate({
-        where: {
-          expenseDate: { gte: startOfYear },
-          status: { not: 'REJECTED' },
-        },
-        _sum: { amount: true, paidAmount: true, balanceAmount: true },
-      }),
-      // Expenses by category
-      prisma.expense.groupBy({
-        by: ['category'],
-        where: {
-          expenseDate: { gte: startOfYear },
-          status: { not: 'REJECTED' },
-        },
-        _sum: { amount: true },
-        _count: { _all: true },
-      }),
-      // Pending expense count
-      prisma.expense.count({
-        where: { status: 'PENDING' },
-      }),
-      // Pending expense total
-      prisma.expense.aggregate({
-        where: { status: 'PENDING' },
-        _sum: { amount: true },
-      }),
-      // Base currency (runs in parallel with all other queries)
+      // Base currency
       getBaseCurrency(),
-    ]);
+    ];
+
+    // Execute core queries
+    const [
+      totalOrders,
+      activeOrders,
+      openInquiries,
+      pendingQuotations,
+      activeShipments,
+      totalBuyers,
+      activeBuyers,
+      recentInquiries,
+      recentOrders,
+      pendingTasks,
+      monthlyPaymentTotal,
+      yearlyPaymentTotal,
+      receivableTotal,
+      overdueTotal,
+      pipelineTotal,
+      allPaymentTotal,
+      base,
+    ] = await Promise.all(coreQueries) as any[];
+
+    // Initialize income data with defaults
+    let incomeByStatus: any[] = [];
+    let incomeByCategory: any[] = [];
+    let allIncomeReceived = { _sum: { amountINR: 0 } };
+
+    // Query income data only if table exists
+    if (tables.hasIncomeTable) {
+      try {
+        [incomeByStatus, incomeByCategory, allIncomeReceived] = await Promise.all([
+          prisma.income.groupBy({
+            by: ['status'],
+            where: { receivedDate: { gte: startOfYear } },
+            _count: { _all: true },
+            _sum: { amountINR: true },
+          }),
+          prisma.income.groupBy({
+            by: ['category'],
+            where: { receivedDate: { gte: startOfYear }, status: 'RECEIVED' },
+            _sum: { amountINR: true },
+          }),
+          prisma.income.aggregate({
+            where: { status: 'RECEIVED' },
+            _sum: { amountINR: true },
+          }),
+        ]);
+      } catch (err) {
+        // Income queries failed - use defaults
+        console.warn('Income queries failed, using defaults:', err);
+      }
+    }
+
+    // Initialize expense data with defaults
+    let allExpenseGroups: any[] = [];
+    let monthlyExpenseTotal = { _sum: { amount: 0, paidAmount: 0, balanceAmount: 0 }, _count: { _all: 0 } };
+    let yearlyExpenseTotal = { _sum: { amount: 0, paidAmount: 0, balanceAmount: 0 } };
+    let expensesByCategory: any[] = [];
+    let pendingExpenseCount = 0;
+    let pendingExpenseTotal = { _sum: { amount: 0 } };
+
+    // Query expense data using raw SQL to handle schema differences
+    try {
+      if (tables.hasExpensePaymentColumns) {
+        // Full schema with payment columns
+        [allExpenseGroups, monthlyExpenseTotal, yearlyExpenseTotal, expensesByCategory, pendingExpenseCount, pendingExpenseTotal] = await Promise.all([
+          prisma.expense.groupBy({
+            by: ['status'],
+            _count: { _all: true },
+            _sum: { amount: true, paidAmount: true, balanceAmount: true },
+          }),
+          prisma.expense.aggregate({
+            where: { expenseDate: { gte: startOfMonth }, status: { not: 'REJECTED' } },
+            _sum: { amount: true, paidAmount: true, balanceAmount: true },
+            _count: { _all: true },
+          }),
+          prisma.expense.aggregate({
+            where: { expenseDate: { gte: startOfYear }, status: { not: 'REJECTED' } },
+            _sum: { amount: true, paidAmount: true, balanceAmount: true },
+          }),
+          prisma.expense.groupBy({
+            by: ['category'],
+            where: { expenseDate: { gte: startOfYear }, status: { not: 'REJECTED' } },
+            _sum: { amount: true },
+            _count: { _all: true },
+          }),
+          prisma.expense.count({ where: { status: 'PENDING' } }),
+          prisma.expense.aggregate({ where: { status: 'PENDING' }, _sum: { amount: true } }),
+        ]) as any[];
+      } else {
+        // Legacy schema without payment columns - use raw SQL
+        const [statusGroups, monthlyAgg, yearlyAgg, categoryGroups, pendingCount, pendingAgg] = await Promise.all([
+          prisma.$queryRaw<any[]>`
+            SELECT "status", COUNT(*)::int as count, COALESCE(SUM("amount"), 0) as amount
+            FROM "expenses" GROUP BY "status"
+          `,
+          prisma.$queryRaw<any[]>`
+            SELECT COUNT(*)::int as count, COALESCE(SUM("amount"), 0) as amount
+            FROM "expenses" WHERE "expense_date" >= ${startOfMonth} AND "status" != 'REJECTED'
+          `,
+          prisma.$queryRaw<any[]>`
+            SELECT COALESCE(SUM("amount"), 0) as amount
+            FROM "expenses" WHERE "expense_date" >= ${startOfYear} AND "status" != 'REJECTED'
+          `,
+          prisma.$queryRaw<any[]>`
+            SELECT "category", COUNT(*)::int as count, COALESCE(SUM("amount"), 0) as amount
+            FROM "expenses" WHERE "expense_date" >= ${startOfYear} AND "status" != 'REJECTED'
+            GROUP BY "category"
+          `,
+          prisma.$queryRaw<any[]>`SELECT COUNT(*)::int as count FROM "expenses" WHERE "status" = 'PENDING'`,
+          prisma.$queryRaw<any[]>`SELECT COALESCE(SUM("amount"), 0) as amount FROM "expenses" WHERE "status" = 'PENDING'`,
+        ]);
+
+        allExpenseGroups = statusGroups.map(g => ({
+          status: g.status,
+          _count: { _all: g.count },
+          _sum: { amount: Number(g.amount), paidAmount: g.status === 'PAID' ? Number(g.amount) : 0, balanceAmount: g.status === 'PAID' ? 0 : Number(g.amount) },
+        }));
+        monthlyExpenseTotal = {
+          _sum: { amount: Number(monthlyAgg[0]?.amount ?? 0), paidAmount: 0, balanceAmount: Number(monthlyAgg[0]?.amount ?? 0) },
+          _count: { _all: monthlyAgg[0]?.count ?? 0 },
+        };
+        yearlyExpenseTotal = {
+          _sum: { amount: Number(yearlyAgg[0]?.amount ?? 0), paidAmount: 0, balanceAmount: Number(yearlyAgg[0]?.amount ?? 0) },
+        };
+        expensesByCategory = categoryGroups.map(g => ({
+          category: g.category,
+          _count: { _all: g.count },
+          _sum: { amount: Number(g.amount) },
+        }));
+        pendingExpenseCount = pendingCount[0]?.count ?? 0;
+        pendingExpenseTotal = { _sum: { amount: Number(pendingAgg[0]?.amount ?? 0) } };
+      }
+    } catch (err) {
+      console.warn('Expense queries failed, using defaults:', err);
+    }
 
     const monthlyRevenue = Number(monthlyPaymentTotal._sum.amount ?? 0);
     const yearlyRevenue = Number(yearlyPaymentTotal._sum.amount ?? 0);
@@ -273,7 +365,7 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
     let otherIncomeReceived = 0;
     let otherIncomePending = 0;
     for (const group of incomeByStatus) {
-      const amount = Number(group._sum.amountINR ?? 0);
+      const amount = Number(group._sum?.amountINR ?? 0);
       if (group.status === 'RECEIVED') otherIncomeReceived += amount;
       if (group.status === 'PENDING') otherIncomePending += amount;
     }

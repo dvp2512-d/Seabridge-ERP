@@ -28,6 +28,28 @@ const router: Router = Router();
 
 router.use(authenticate);
 
+/**
+ * Check if the income table exists. 
+ * It was added in migration 20260820000000_other_income.
+ */
+let incomeTableExists: boolean | null = null;
+
+async function checkIncomeTableExists(): Promise<boolean> {
+  if (incomeTableExists !== null) return incomeTableExists;
+  
+  try {
+    const tables = await prisma.$queryRaw<{ tablename: string }[]>`
+      SELECT tablename FROM pg_tables 
+      WHERE schemaname = 'public' AND tablename = 'income'
+    `;
+    incomeTableExists = tables.length > 0;
+  } catch {
+    incomeTableExists = false;
+  }
+  
+  return incomeTableExists;
+}
+
 const CATEGORIES = [
   'DUTY_DRAWBACK',
   'RODTEP_MEIS',
@@ -85,6 +107,28 @@ async function assertRateConsistent(code: string, rate: number): Promise<void> {
 
 router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
   try {
+    // Check if income table exists
+    const tableExists = await checkIncomeTableExists();
+    
+    if (!tableExists) {
+      return res.json({
+        success: true,
+        data: [],
+        pagination: { page: 1, limit: 50, total: 0 },
+        summary: {
+          currency: 'INR',
+          period: { from: null, to: null, label: 'All time' },
+          financialYear: { label: financialYearLabel(), received: 0 },
+          totalReceived: 0,
+          totalPending: 0,
+          totalAll: 0,
+          countByStatus: {},
+          byCategory: [],
+        },
+        _migrationNeeded: true,
+      });
+    }
+
     const { category, status, search, from, to, page = 1, limit = 50 } = req.query;
 
     const where: any = {};
@@ -204,6 +248,11 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
 
 router.get('/:id', can('FINANCE_VIEW'), async (req, res, next) => {
   try {
+    const tableExists = await checkIncomeTableExists();
+    if (!tableExists) {
+      throw new NotFoundError('Income entry');
+    }
+    
     const entry = await prisma.income.findUnique({
       where: { id: req.params.id },
       include: {
@@ -301,6 +350,14 @@ const createSchema = z.object({
 
 router.post('/', can('FINANCE_MANAGE'), async (req: any, res, next) => {
   try {
+    const tableExists = await checkIncomeTableExists();
+    if (!tableExists) {
+      return res.status(503).json({
+        success: false,
+        message: 'Income tracking requires a database migration. Run deploy.cmd or npm run db:deploy to enable this feature.',
+      });
+    }
+    
     const validation = createSchema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
@@ -375,6 +432,11 @@ const updateSchema = z.object({
 
 router.put('/:id', can('FINANCE_MANAGE'), async (req, res, next) => {
   try {
+    const tableExists = await checkIncomeTableExists();
+    if (!tableExists) {
+      throw new NotFoundError('Income entry');
+    }
+    
     const validation = updateSchema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
@@ -419,6 +481,11 @@ router.put('/:id', can('FINANCE_MANAGE'), async (req, res, next) => {
 /** RECEIVED / PENDING toggle. */
 router.patch('/:id/status', can('FINANCE_MANAGE'), async (req, res, next) => {
   try {
+    const tableExists = await checkIncomeTableExists();
+    if (!tableExists) {
+      throw new NotFoundError('Income entry');
+    }
+    
     const schema = z.object({ status: z.enum(STATUSES) });
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
@@ -440,6 +507,11 @@ router.patch('/:id/status', can('FINANCE_MANAGE'), async (req, res, next) => {
 /** Founder only, matching every other business record. */
 router.delete('/:id', can('RECORD_DELETE'), async (req, res, next) => {
   try {
+    const tableExists = await checkIncomeTableExists();
+    if (!tableExists) {
+      throw new NotFoundError('Income entry');
+    }
+    
     const existing = await prisma.income.findUnique({ where: { id: req.params.id } });
     if (!existing) throw new NotFoundError('Income entry');
 

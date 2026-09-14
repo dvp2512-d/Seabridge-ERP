@@ -7,11 +7,12 @@ import { useAuthStore } from '@/store/authStore';
 import { can } from '@/lib/permissions';
 import Modal from '@/components/ui/Modal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import ErrorState from '@/components/ui/ErrorState';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import { refreshAggregates } from '@/lib/queryKeys';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
-import { Plus, TrendingUp, Search, Check, Trash2, Edit, Info, Link2 } from 'lucide-react';
+import { Plus, TrendingUp, Search, Check, Trash2, Edit, Info, Link2, AlertTriangle } from 'lucide-react';
 
 const CATEGORY_LABELS: Record<string, string> = {
   DUTY_DRAWBACK: 'Duty Drawback',
@@ -57,7 +58,7 @@ export default function Income() {
     setPage(1);
   }, 350);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['income', search, category, status, page],
     queryFn: () =>
       incomeApi
@@ -73,6 +74,7 @@ export default function Income() {
   const entries = data?.data ?? [];
   const pagination = data?.pagination;
   const summary = data?.summary;
+  const migrationNeeded = data?._migrationNeeded === true;
 
   const setStatusMutation = useMutation({
     mutationFn: ({ id, next }: { id: string; next: string }) => incomeApi.setStatus(id, next),
@@ -117,6 +119,29 @@ export default function Income() {
           </button>
         )}
       </div>
+
+      {/* Error state */}
+      {isError && (
+        <ErrorState error={error} onRetry={() => refetch()} />
+      )}
+
+      {/* Migration warning - shown when income table doesn't exist yet */}
+      {migrationNeeded && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+            <div>
+              <h3 className="font-medium text-amber-800">Database Migration Required</h3>
+              <p className="text-sm text-amber-700 mt-1">
+                The Income tracking feature requires a database migration that hasn't been applied yet.
+                Run <code className="bg-amber-100 px-1.5 py-0.5 rounded text-xs">deploy.cmd</code> or{' '}
+                <code className="bg-amber-100 px-1.5 py-0.5 rounded text-xs">npm run db:deploy</code> to
+                enable this feature.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <SummaryCard
