@@ -9,6 +9,7 @@ import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { ExportButton } from '@/components/ui/ExportButton';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { refreshAggregates } from '@/lib/queryKeys';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
@@ -102,7 +103,7 @@ export default function Expenses() {
     setPage(1);
   }, 350);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['expenses', search, category, status, origin, page],
     queryFn: () =>
       expensesApi
@@ -237,6 +238,12 @@ export default function Expenses() {
         )}
       </div>
 
+      {isError && (
+        <ErrorState error={error} onRetry={refetch} />
+      )}
+
+      {!isError && (
+        <>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <SummaryCard
           label="Total Spend"
@@ -427,6 +434,8 @@ export default function Expenses() {
             </button>
           </div>
         </div>
+      )}
+        </>
       )}
 
       {showForm && (
