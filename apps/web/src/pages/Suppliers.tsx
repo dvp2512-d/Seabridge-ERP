@@ -117,11 +117,11 @@ export default function Suppliers() {
                     </span>
                   </td>
                   <td>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => viewDetails(supplier)} className="text-navy-600 hover:text-navy-800" aria-label="View supplier details">
+                    <div className="flex items-center justify-end gap-1">
+                      <button onClick={() => viewDetails(supplier)} className="p-1 text-gray-400 hover:text-navy-600 rounded transition-colors" aria-label="View supplier details">
                         <Eye className="w-4 h-4" />
                       </button>
-                      <button onClick={() => { setEditSupplier(supplier); setShowModal(true); }} className="text-gray-400 hover:text-gray-600" aria-label="Edit supplier">
+                      <button onClick={() => { setEditSupplier(supplier); setShowModal(true); }} className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" aria-label="Edit supplier">
                         <Edit2 className="w-4 h-4" />
                       </button>
                       <DeleteRecordButton
@@ -195,15 +195,21 @@ function SupplierModal({ supplier, countries, onClose, onSuccess }: { supplier: 
   return (
     <Modal isOpen onClose={onClose} title={supplier ? 'Edit Supplier' : 'Add Supplier'} size="lg">
       <form onSubmit={(e) => { e.preventDefault(); mutation.mutate(formData); }} className="p-6 space-y-4">
+        <FormField label="Name" required value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} />
         <div className="grid grid-cols-2 gap-4">
-          <FormField label="Name" required value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="col-span-2" />
           <FormField label="Contact Person" value={formData.contactPerson} onChange={(e) => setFormData({ ...formData, contactPerson: e.target.value })} />
           <FormField label="Email" type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
           <FormField label="Phone" value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
           <SelectField label="Country" value={formData.countryId} onChange={(e) => setFormData({ ...formData, countryId: e.target.value })} options={countries.map((c: any) => ({ value: c.id, label: c.name }))} placeholder="Select Country" />
-          <FormField label="Address" className="col-span-2" value={formData.address} onChange={(e) => setFormData({ ...formData, address: e.target.value })} />
+        </div>
+        <FormField label="Address" value={formData.address} onChange={(e) => setFormData({ ...formData, address: e.target.value })} />
+        <div className="grid grid-cols-2 gap-4">
           <FormField label="GST Number" value={formData.gstNumber} onChange={(e) => setFormData({ ...formData, gstNumber: e.target.value })} />
           <FormField label="PAN Number" value={formData.panNumber} onChange={(e) => setFormData({ ...formData, panNumber: e.target.value })} />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
           <FormField label="Payment Terms" value={formData.paymentTerms} onChange={(e) => setFormData({ ...formData, paymentTerms: e.target.value })} />
           <div>
             <label className="label">Rating</label>
@@ -215,9 +221,9 @@ function SupplierModal({ supplier, countries, onClose, onSuccess }: { supplier: 
               ))}
             </div>
           </div>
-          <TextareaField label="Bank Details" className="col-span-2" value={formData.bankDetails} onChange={(e) => setFormData({ ...formData, bankDetails: e.target.value })} rows={2} />
-          <TextareaField label="Notes" className="col-span-2" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} rows={2} />
         </div>
+        <TextareaField label="Bank Details" value={formData.bankDetails} onChange={(e) => setFormData({ ...formData, bankDetails: e.target.value })} rows={2} />
+        <TextareaField label="Notes" value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} rows={2} />
         <div className="flex justify-end gap-3 pt-4 border-t">
           <button type="button" onClick={onClose} className="btn btn-secondary">Cancel</button>
           <button type="submit" className="btn btn-primary" disabled={mutation.isPending}>{mutation.isPending ? 'Saving...' : supplier ? 'Update' : 'Create'}</button>

@@ -3,9 +3,10 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { invoicesApi } from '@/lib/api';
+import { invoicesApi, exportApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { ExportButton } from '@/components/ui/ExportButton';
 import {
   INVOICE_TYPE_BADGE_CLASS,
   describeExcludedDocuments,
@@ -104,10 +105,20 @@ export default function Invoices() {
         title="Invoices & Receivables"
         subtitle={`${pagination?.total || invoices.length} invoices • Manage billing and payments`}
         actions={
-          <Link to="/invoices/new" className="btn btn-primary">
-            <Plus className="w-4 h-4 mr-2" />
-            New Invoice
-          </Link>
+          <div className="flex items-center gap-2">
+            <ExportButton
+              onExport={async () => {
+                const response = await exportApi.invoices();
+                return response.data;
+              }}
+              filename="invoices-export"
+              label="Export"
+            />
+            <Link to="/invoices/new" className="btn btn-primary">
+              <Plus className="w-4 h-4 mr-2" />
+              New Invoice
+            </Link>
+          </div>
         }
       />
 

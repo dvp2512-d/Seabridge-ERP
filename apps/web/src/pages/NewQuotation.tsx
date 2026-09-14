@@ -13,12 +13,10 @@ import { refreshAggregates } from '@/lib/queryKeys';import {
   Calculator,
   TrendingUp,
   AlertCircle,
-  Package,
   IndianRupee,
   Percent,
   FileText,
 } from 'lucide-react';
-import { PACKAGE_TYPE_OPTIONS } from '@/lib/packageTypes';
 
 interface QuotationItem {
   id: string;
@@ -43,10 +41,8 @@ interface QuotationItem {
   totalCost: number;
   totalPrice: number;
   /**
-   * The packing this line is quoted on, carried from the inquiry.
-   *
-   * Part of what is being quoted rather than a shipping detail: a price for 25kg bags
-   * is not a price for jumbo bags. Becomes the order line's packing when accepted.
+   * The packing this line is quoted on, auto-filled from the inquiry.
+   * Read-only on quotation - defined at inquiry stage, flows through to order.
    */
   packageType: string;
   packageWeight: string;
@@ -138,7 +134,7 @@ export default function NewQuotation() {
           unitPrice: 0,
           totalCost: 0,
           totalPrice: 0,
-          // Packing agreed at inquiry stage - carried through to the order.
+          // Auto-fill from inquiry - flows through to order
           packageType: item.packageType || '',
           packageWeight: item.packageWeight ? String(item.packageWeight) : '',
           specifications: item.specifications || '',
@@ -256,8 +252,7 @@ export default function NewQuotation() {
         unit: item.unit,
         unitCost: item.unitCost,
         unitPrice: item.unitPrice,
-        // Carried from the inquiry. Part of what is being quoted, and it becomes the
-        // order line's packing when the quotation is accepted.
+        // Auto-filled from inquiry, flows through to order
         packageType: item.packageType || undefined,
         packageWeight: item.packageWeight ? Number(item.packageWeight) : undefined,
         specifications: item.specifications,
@@ -393,7 +388,7 @@ export default function NewQuotation() {
           <div className="card">
             <div className="card-header flex items-center justify-between">
               <h2 className="font-semibold flex items-center gap-2">
-                <Package className="w-5 h-5" />
+                <FileText className="w-5 h-5" />
                 Line Items
               </h2>
               <button onClick={() => { setEditingItem(null); setShowItemModal(true); }} className="btn btn-secondary py-1 text-sm">
@@ -666,8 +661,7 @@ function ItemCostingModal({
     supplierPrice: item?.supplierPrice?.toString() || '',
     additionalCost: item?.additionalCost?.toString() || '0', // Packaging, handling, etc.
     margin: item?.margin?.toString() || '20',
-    // Packing specification: part of the agreement. A price for 25kg bags is not
-    // a price for jumbo bags. Carried onto the order when quotation is accepted.
+    // Package type from inquiry - read-only, just carried through
     packageType: item?.packageType || '',
     packageWeight: item?.packageWeight?.toString() || '',
     specifications: item?.specifications || '',
@@ -774,7 +768,7 @@ function ItemCostingModal({
       unitPrice: calculations.unitPrice,
       totalCost: calculations.totalCost,
       totalPrice: calculations.totalPrice,
-      // Packing the buyer agreed to - becomes the order line's packing when accepted.
+      // Carried from inquiry - flows through to order
       packageType: formData.packageType || '',
       packageWeight: formData.packageWeight || '',
       specifications: formData.specifications,
@@ -932,35 +926,26 @@ function ItemCostingModal({
           </div>
         </div>
 
-        {/* Packing Specification */}
-        <div className="bg-amber-50 rounded-lg p-4">
-          <h3 className="font-semibold text-amber-900 mb-3 flex items-center gap-2">
-            <Package className="w-5 h-5" />
-            Packing Specification
-          </h3>
-          <p className="text-xs text-amber-700 mb-3">
-            How the goods will be packed. Becomes the order's packing when this quotation is accepted.
-          </p>
-          <div className="grid grid-cols-2 gap-4">
-            <SelectField
-              label="Package Type"
-              value={formData.packageType}
-              onChange={(e) => setFormData({ ...formData, packageType: e.target.value })}
-              options={PACKAGE_TYPE_OPTIONS}
-              placeholder="Select type..."
-            />
-            <FormField
-              label="Weight per Package (KG)"
-              type="number"
-              step="0.001"
-              min={0}
-              value={formData.packageWeight}
-              onChange={(e) => setFormData({ ...formData, packageWeight: e.target.value })}
-              placeholder="e.g. 25"
-              hint="Net weight in each bag/carton"
-            />
+        {/* Package Info from Inquiry (read-only) */}
+        {(formData.packageType || formData.packageWeight) && (
+          <div className="bg-amber-50 rounded-lg p-4">
+            <h3 className="font-semibold text-amber-900 mb-2 text-sm">Packing (from Inquiry)</h3>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              {formData.packageType && (
+                <div>
+                  <span className="text-amber-700">Type: </span>
+                  <span className="font-medium">{formData.packageType}</span>
+                </div>
+              )}
+              {formData.packageWeight && (
+                <div>
+                  <span className="text-amber-700">Weight: </span>
+                  <span className="font-medium">{formData.packageWeight} kg/pkg</span>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Specifications */}
         <TextareaField

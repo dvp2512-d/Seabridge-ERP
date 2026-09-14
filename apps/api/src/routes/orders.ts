@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
-import { generateCode } from '../utils/helpers';
+import { generateCode, contentDisposition } from '../utils/helpers';
 import { createOrderFromQuotation, fillOrderPacking } from '../services/orderService';
 import { getBaseCurrency } from '../services/exchangeRateService';
 import { emitEvent } from '../services/eventService';
@@ -15,6 +15,7 @@ import {
 import { assessOrderDocuments } from '../services/documentReadiness';
 import { priceProcurementLines } from '../services/procurementPricing';
 import { PACKAGE_TYPES } from '../utils/packageTypes';
+import { logger } from '../utils/logger';
 
 const router: Router = Router();
 
@@ -452,7 +453,7 @@ router.post('/:id/procurements', can('OPERATIONS_MANAGE'), async (req, res, next
     // Ordering from a supplier is what creates the obligation, so the payable is
     // raised now rather than on delivery. Mirroring must not fail the save.
     const expense = await syncProcurementExpense(procurement.id).catch((error) => {
-      console.error(`[expense-sync] procurement ${procurement.id}:`, error);
+      logger.error('Expense sync failed for procurement', { procurementId: procurement.id, error: (error as Error).message });
       return null;
     });
 
@@ -566,7 +567,7 @@ router.put('/:orderId/procurements/:procId', can('OPERATIONS_MANAGE'), async (re
     });
 
     const expense = await syncProcurementExpense(procurement.id).catch((error) => {
-      console.error(`[expense-sync] procurement ${procurement.id}:`, error);
+      logger.error('Expense sync failed for procurement', { procurementId: procurement.id, error: (error as Error).message });
       return null;
     });
 
@@ -634,7 +635,7 @@ router.post('/:id/shipments', can('OPERATIONS_MANAGE'), async (req, res, next) =
     });
 
     const expenses = await syncShipmentExpenses(shipment.id).catch((error) => {
-      console.error(`[expense-sync] shipment ${shipment.id}:`, error);
+      logger.error('Expense sync failed for shipment', { shipmentId: shipment.id, error: (error as Error).message });
       return [];
     });
 
@@ -704,7 +705,7 @@ router.put('/:orderId/shipments/:shipmentId', can('OPERATIONS_MANAGE'), async (r
     });
 
     const expenses = await syncShipmentExpenses(shipment.id).catch((error) => {
-      console.error(`[expense-sync] shipment ${shipment.id}:`, error);
+      logger.error('Expense sync failed for shipment', { shipmentId: shipment.id, error: (error as Error).message });
       return [];
     });
 
@@ -970,7 +971,7 @@ router.get('/:orderId/procurements/:procId/pdf', can('OPERATIONS_VIEW'), async (
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename="${procurement.poNumber || 'PO-DRAFT'}.pdf"`
+      contentDisposition(`${procurement.poNumber || 'PO-DRAFT'}.pdf`)
     );
     res.send(pdfBuffer);
   } catch (error) {

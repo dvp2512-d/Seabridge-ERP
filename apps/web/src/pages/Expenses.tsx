@@ -2,12 +2,13 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { expensesApi } from '@/lib/api';
+import { expensesApi, exportApi } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { can } from '@/lib/permissions';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { ExportButton } from '@/components/ui/ExportButton';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { refreshAggregates } from '@/lib/queryKeys';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
@@ -29,13 +30,16 @@ const CATEGORY_LABELS: Record<string, string> = {
   SUPPLIER_PAYMENT: 'Supplier Payment',
   FREIGHT: 'Freight',
   CHA: 'CHA / Customs',
-  PACKAGING: 'Packaging',
   TRANSPORT: 'Transport',
+  PACKAGING: 'Packaging',
+  INSURANCE: 'Insurance',
   INSPECTION: 'Inspection',
+  COMMISSION: 'Commission',
   CERTIFICATION: 'Certification',
   TRAVEL: 'Travel',
   OFFICE: 'Office',
   BANK_CHARGES: 'Bank Charges',
+  FOREX_LOSS: 'Forex Loss',
   OTHER: 'Other',
 };
 
@@ -51,6 +55,12 @@ const SOURCE_LABELS: Record<string, string> = {
   SHIPMENT_FREIGHT: 'From shipment freight',
   SHIPMENT_CHA: 'From shipment CHA',
   SHIPMENT_TRANSPORT: 'From shipment transport',
+  SHIPMENT_PACKAGING: 'From shipment packaging',
+  SHIPMENT_INSURANCE: 'From shipment insurance',
+  SHIPMENT_INSPECTION: 'From shipment inspection',
+  SHIPMENT_COMMISSION: 'From shipment commission',
+  SHIPMENT_OTHER: 'From shipment other',
+  PAYMENT_FOREX_LOSS: 'From invoice payment',
 };
 
 const STATUS_STYLES: Record<string, string> = {
@@ -192,6 +202,14 @@ export default function Expenses() {
         </div>
         {canManage && (
           <div className="flex items-center gap-2">
+            <ExportButton
+              onExport={async () => {
+                const response = await exportApi.expenses();
+                return response.data;
+              }}
+              filename="expenses-export"
+              label="Export"
+            />
             <button
               onClick={() => syncSources.mutate()}
               disabled={syncSources.isPending}
@@ -491,7 +509,8 @@ function PaymentModal({
 
   return (
     <Modal isOpen title={`Record payment - ${expense.expenseNumber}`} onClose={onClose}>
-      <div className="space-y-4">
+      <div className="p-6 space-y-4">
+        {/* Summary section */}
         <div className="rounded-lg bg-gray-50 p-3 text-sm space-y-1">
           <div className="flex justify-between">
             <span className="text-gray-500">Expense total</span>
@@ -515,54 +534,66 @@ function PaymentModal({
           )}
         </div>
 
-        <FormField
-          label="Amount"
-          type="number"
-          step="0.01"
-          value={form.amount}
-          onChange={(e: any) => setForm({ ...form, amount: e.target.value })}
-          required
-        />
-        {!invalid && remainingAfter > 0 && (
-          <p className="-mt-2 text-xs text-gray-500">
-            {formatCurrency(remainingAfter)} will still be outstanding after this payment.
-          </p>
-        )}
-        {invalid && amount > outstanding && (
-          <p className="-mt-2 text-xs text-red-600">
-            That is more than the {formatCurrency(outstanding)} outstanding.
-          </p>
-        )}
+        {/* Row 1: Amount and Date */}
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <FormField
+              label="Amount (₹)"
+              type="number"
+              step="0.01"
+              value={form.amount}
+              onChange={(e: any) => setForm({ ...form, amount: e.target.value })}
+              required
+            />
+            {!invalid && remainingAfter > 0 && (
+              <p className="mt-1 text-xs text-gray-500">
+                {formatCurrency(remainingAfter)} will remain after this.
+              </p>
+            )}
+            {invalid && amount > outstanding && (
+              <p className="mt-1 text-xs text-red-600">
+                Exceeds the {formatCurrency(outstanding)} outstanding.
+              </p>
+            )}
+          </div>
+          <FormField
+            label="Payment Date"
+            type="date"
+            value={form.paymentDate}
+            onChange={(e: any) => setForm({ ...form, paymentDate: e.target.value })}
+            required
+          />
+        </div>
 
-        <FormField
-          label="Payment Date"
-          type="date"
-          value={form.paymentDate}
-          onChange={(e: any) => setForm({ ...form, paymentDate: e.target.value })}
-          required
-        />
-        <SelectField
-          label="Method"
-          value={form.method}
-          onChange={(e: any) => setForm({ ...form, method: e.target.value })}
-          options={[
-            { value: 'BANK_TRANSFER', label: 'Bank Transfer' },
-            { value: 'CHEQUE', label: 'Cheque' },
-            { value: 'CASH', label: 'Cash' },
-            { value: 'UPI', label: 'UPI' },
-            { value: 'CARD', label: 'Card' },
-          ]}
-        />
-        <FormField
-          label="Reference"
-          value={form.reference}
-          onChange={(e: any) => setForm({ ...form, reference: e.target.value })}
-          placeholder="UTR, cheque number..."
-        />
+        {/* Row 2: Method and Reference */}
+        <div className="grid grid-cols-2 gap-4">
+          <SelectField
+            label="Method"
+            value={form.method}
+            onChange={(e: any) => setForm({ ...form, method: e.target.value })}
+            options={[
+              { value: 'BANK_TRANSFER', label: 'Bank Transfer' },
+              { value: 'CHEQUE', label: 'Cheque' },
+              { value: 'CASH', label: 'Cash' },
+              { value: 'UPI', label: 'UPI' },
+              { value: 'CARD', label: 'Card' },
+            ]}
+          />
+          <FormField
+            label="Reference"
+            value={form.reference}
+            onChange={(e: any) => setForm({ ...form, reference: e.target.value })}
+            placeholder="UTR, cheque number..."
+          />
+        </div>
+
+        {/* Row 3: Notes */}
         <TextareaField
           label="Notes"
+          rows={2}
           value={form.notes}
           onChange={(e: any) => setForm({ ...form, notes: e.target.value })}
+          placeholder="Any additional details..."
         />
 
         <div className="flex justify-end gap-2 pt-2">
@@ -644,9 +675,9 @@ function ExpenseActions({
    */
   if (expense.status === 'PAID') {
     return canDelete ? (
-      <div className="inline-flex gap-1 items-center">
-        <span className="text-xs text-gray-400">paid</span>
-        <button onClick={onDelete} className="btn btn-ghost btn-sm text-red-600" title="Delete" aria-label="Delete expense">
+      <div className="flex items-center justify-end gap-1">
+        <span className="text-xs text-gray-400 mr-1">paid</span>
+        <button onClick={onDelete} className="p-1 text-gray-400 hover:text-red-600 rounded transition-colors" title="Delete" aria-label="Delete expense">
           <Trash2 className="w-4 h-4" />
         </button>
       </div>
@@ -656,13 +687,13 @@ function ExpenseActions({
   }
 
   return (
-    <div className="inline-flex gap-1">
+    <div className="flex items-center justify-end gap-1">
       {expense.status === 'PENDING' && (
         <>
-          <button onClick={onApprove} className="btn btn-ghost btn-sm text-blue-600" title="Approve">
+          <button onClick={onApprove} className="p-1 text-gray-400 hover:text-blue-600 rounded transition-colors" title="Approve">
             <Check className="w-4 h-4" />
           </button>
-          <button onClick={onReject} className="btn btn-ghost btn-sm text-red-600" title="Reject">
+          <button onClick={onReject} className="p-1 text-gray-400 hover:text-red-600 rounded transition-colors" title="Reject">
             <X className="w-4 h-4" />
           </button>
         </>
@@ -670,16 +701,15 @@ function ExpenseActions({
       {expense.status === 'APPROVED' && (
         <button
           onClick={onPay}
-          className="btn btn-ghost btn-sm text-green-600"
+          className="p-1 text-gray-400 hover:text-green-600 rounded transition-colors"
           title={`Record a payment. ${formatCurrency(Number(expense.balanceAmount ?? 0))} outstanding.`}
         >
           <Wallet className="w-4 h-4" />
-          Pay
         </button>
       )}
       <button
         onClick={onEdit}
-        className="btn btn-ghost btn-sm"
+        className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors"
         title={
           expense.isGenerated
             ? 'Edit description and notes. The amount is maintained on the linked record.'
@@ -688,10 +718,8 @@ function ExpenseActions({
       >
         <Edit className="w-4 h-4" />
       </button>
-      {/* Hidden for non-founders. The API also refuses, so this is presentation
-          rather than the security boundary. */}
       {canDelete && (
-        <button onClick={onDelete} className="btn btn-ghost btn-sm text-red-600" title="Delete" aria-label="Delete expense">
+        <button onClick={onDelete} className="p-1 text-gray-400 hover:text-red-600 rounded transition-colors" title="Delete" aria-label="Delete expense">
           <Trash2 className="w-4 h-4" />
         </button>
       )}
@@ -815,7 +843,7 @@ function ExpenseFormModal({
 
   return (
     <Modal isOpen onClose={onClose} title={isEdit ? 'Edit Expense' : 'Record Expense'} size="lg">
-      <form onSubmit={submit} className="space-y-4">
+      <form onSubmit={submit} className="p-6 space-y-4">
         {/* Auto-fill suggestions for FREIGHT, CHA, TRANSPORT */}
         {showLinkableRecords && suggestions.length > 0 && !isEdit && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
@@ -848,6 +876,7 @@ function ExpenseFormModal({
           </div>
         )}
 
+        {/* Row 1: Category and Date */}
         <div className="grid grid-cols-2 gap-4">
           <SelectField
             label="Category"
@@ -863,19 +892,19 @@ function ExpenseFormModal({
             value={form.expenseDate}
             onChange={(e) => setForm({ ...form, expenseDate: e.target.value })}
           />
-          <div className="col-span-2">
-            <FormField
-              label="Description"
-              required
-              value={form.description}
-              onChange={(e) => setForm({ ...form, description: e.target.value })}
-              placeholder="e.g. Ocean freight Nhava Sheva to Jebel Ali"
-            />
-          </div>
-          {/* A generated expense mirrors a purchase order or shipment, so its
-              amount belongs there. Editing it here would be silently overwritten
-              the next time that record is saved, so the field is read-only and says
-              where to make the change. The API refuses it too. */}
+        </div>
+
+        {/* Row 2: Description (full width) */}
+        <FormField
+          label="Description"
+          required
+          value={form.description}
+          onChange={(e) => setForm({ ...form, description: e.target.value })}
+          placeholder="e.g. Ocean freight Nhava Sheva to Jebel Ali"
+        />
+
+        {/* Row 3: Amount and Vendor */}
+        <div className="grid grid-cols-2 gap-4">
           <div>
             <FormField
               label="Amount (₹)"
@@ -941,21 +970,24 @@ function ExpenseFormModal({
               </div>
             )}
           </div>
-
-          <FormField
-            label="Invoice Reference"
-            value={form.invoiceRef}
-            onChange={(e) => setForm({ ...form, invoiceRef: e.target.value })}
-          />
-          <div className="col-span-2">
-            <TextareaField
-              label="Notes"
-              rows={2}
-              value={form.notes}
-              onChange={(e) => setForm({ ...form, notes: e.target.value })}
-            />
-          </div>
         </div>
+
+        {/* Row 4: Invoice Reference (full width) */}
+        <FormField
+          label="Invoice Reference"
+          value={form.invoiceRef}
+          onChange={(e) => setForm({ ...form, invoiceRef: e.target.value })}
+          placeholder="Invoice or PO number"
+        />
+
+        {/* Row 5: Notes (full width) */}
+        <TextareaField
+          label="Notes"
+          rows={2}
+          value={form.notes}
+          onChange={(e) => setForm({ ...form, notes: e.target.value })}
+          placeholder="Any additional details..."
+        />
 
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onClose} className="btn btn-secondary">

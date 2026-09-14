@@ -237,29 +237,33 @@ export default function Tasks() {
                         </select>
                       </td>
                       <td className="text-right whitespace-nowrap">
-                        <button
-                          onClick={() => {
-                            setEditing(t);
-                            setShowForm(true);
-                          }}
-                          className="btn btn-ghost btn-sm"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        {/* The server also enforces this; hiding it avoids offering
-                            an action that would be refused. */}
-                        {(t.createdById === user?.id ||
-                          user?.role === 'FOUNDER' ||
-                          user?.role === 'ADMIN') && (
+                        <div className="flex items-center justify-end gap-1">
                           <button
                             onClick={() => {
-                              if (confirm(`Delete "${t.title}"?`)) remove.mutate(t.id);
+                              setEditing(t);
+                              setShowForm(true);
                             }}
-                            className="btn btn-ghost btn-sm text-red-600"
+                            className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors"
+                            title="Edit"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Edit className="w-4 h-4" />
                           </button>
-                        )}
+                          {/* The server also enforces this; hiding it avoids offering
+                              an action that would be refused. */}
+                          {(t.createdById === user?.id ||
+                            user?.role === 'FOUNDER' ||
+                            user?.role === 'ADMIN') && (
+                            <button
+                              onClick={() => {
+                                if (confirm(`Delete "${t.title}"?`)) remove.mutate(t.id);
+                              }}
+                              className="p-1 text-gray-400 hover:text-red-600 rounded transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -372,7 +376,7 @@ function TaskFormModal({
 
   return (
     <Modal isOpen onClose={onClose} title={isEdit ? 'Edit Task' : 'New Task'} size="lg">
-      <form onSubmit={submit} className="space-y-4">
+      <form onSubmit={submit} className="p-6 space-y-4">
         <FormField
           label="Title"
           required

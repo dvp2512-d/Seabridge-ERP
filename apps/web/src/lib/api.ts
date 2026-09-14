@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore } from '@/store/authStore';
 
 /**
@@ -27,6 +27,24 @@ const api = axios.create({
   timeout: 30000,
 });
 
+// Track if we're currently refreshing to prevent multiple refresh attempts
+let isRefreshing = false;
+let failedQueue: Array<{
+  resolve: (token: string) => void;
+  reject: (error: any) => void;
+}> = [];
+
+const processQueue = (error: any, token: string | null = null) => {
+  failedQueue.forEach((promise) => {
+    if (error) {
+      promise.reject(error);
+    } else {
+      promise.resolve(token!);
+    }
+  });
+  failedQueue = [];
+};
+
 // Request interceptor - attach the bearer token to every call
 api.interceptors.request.use((config) => {
   const token = useAuthStore.getState().token;
@@ -36,17 +54,74 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Response interceptor - handle expired sessions once, globally
+// Response interceptor - handle token refresh on 401
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error: AxiosError) => {
+    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
     const status = error.response?.status;
 
-    // Only force a logout for genuine auth failures, and don't redirect if the
-    // user is already on the login page (prevents a reload loop).
-    if (status === 401 && window.location.pathname !== '/login') {
-      useAuthStore.getState().logout();
-      window.location.href = '/login';
+    // Skip refresh logic for login/refresh endpoints
+    if (originalRequest?.url?.includes('/auth/login') || 
+        originalRequest?.url?.includes('/auth/refresh')) {
+      return Promise.reject(error);
+    }
+
+    // Handle 401 with refresh token
+    if (status === 401 && !originalRequest._retry) {
+      const refreshToken = useAuthStore.getState().refreshToken;
+
+      // No refresh token available, logout
+      if (!refreshToken) {
+        if (window.location.pathname !== '/login') {
+          useAuthStore.getState().logout();
+          window.location.href = '/login';
+        }
+        return Promise.reject(error);
+      }
+
+      if (isRefreshing) {
+        // Queue this request while refresh is in progress
+        return new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
+        }).then((token) => {
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+          return api(originalRequest);
+        });
+      }
+
+      originalRequest._retry = true;
+      isRefreshing = true;
+
+      try {
+        // Call refresh endpoint
+        const response = await axios.post(`${resolveBaseUrl()}/auth/refresh`, {
+          refreshToken,
+        });
+
+        const { accessToken, refreshToken: newRefreshToken } = response.data.data;
+
+        // Update tokens in store
+        useAuthStore.getState().setTokens(accessToken, newRefreshToken);
+
+        // Process queued requests
+        processQueue(null, accessToken);
+
+        // Retry original request
+        originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+        return api(originalRequest);
+      } catch (refreshError) {
+        processQueue(refreshError, null);
+        
+        // Refresh failed, logout
+        if (window.location.pathname !== '/login') {
+          useAuthStore.getState().logout();
+          window.location.href = '/login';
+        }
+        return Promise.reject(refreshError);
+      } finally {
+        isRefreshing = false;
+      }
     }
 
     return Promise.reject(error);
@@ -85,6 +160,19 @@ export const authApi = {
   
   changePassword: (currentPassword: string, newPassword: string) =>
     api.post('/auth/change-password', { currentPassword, newPassword }),
+
+  /** Exchange refresh token for new token pair */
+  refresh: (refreshToken: string) =>
+    api.post('/auth/refresh', { refreshToken }),
+
+  /** Logout - revoke all sessions */
+  logout: () => api.post('/auth/logout'),
+
+  /** Get active sessions for current user */
+  getSessions: () => api.get('/auth/sessions'),
+
+  /** Revoke a specific session */
+  revokeSession: (sessionId: string) => api.delete(`/auth/sessions/${sessionId}`),
 };
 
 // ============================================
@@ -487,6 +575,99 @@ export const recordsApi = {
   /** Get list of deletable resource types */
   types: () => api.get('/records/types'),
 };
+
+// ============================================
+// SEARCH API
+// ============================================
+
+export const searchApi = {
+  /** Global search across all modules */
+  search: (query: string, params?: { limit?: number }) =>
+    api.get('/search', { params: { q: query, ...params } }),
+};
+
+// ============================================
+// EXPORT API
+// ============================================
+
+export const exportApi = {
+  /** Export invoices to CSV */
+  invoices: (params?: { startDate?: string; endDate?: string }) =>
+    api.get('/export/invoices', { params, responseType: 'blob' }),
+  /** Export orders to CSV */
+  orders: (params?: { startDate?: string; endDate?: string }) =>
+    api.get('/export/orders', { params, responseType: 'blob' }),
+  /** Export buyers to CSV */
+  buyers: () => api.get('/export/buyers', { responseType: 'blob' }),
+  /** Export expenses to CSV */
+  expenses: (params?: { startDate?: string; endDate?: string }) =>
+    api.get('/export/expenses', { params, responseType: 'blob' }),
+  /** Export receivables to CSV */
+  receivables: () => api.get('/export/receivables', { responseType: 'blob' }),
+  /** Export quotations to CSV */
+  quotations: (params?: { startDate?: string; endDate?: string }) =>
+    api.get('/export/quotations', { params, responseType: 'blob' }),
+  /** Export audit log to CSV (Founder only) */
+  audit: (params?: { startDate?: string; endDate?: string }) =>
+    api.get('/export/audit', { params, responseType: 'blob' }),
+};
+
+// ============================================
+// TIMELINE API
+// ============================================
+
+export const timelineApi = {
+  /** Get activity timeline for a buyer */
+  buyer: (id: string) => api.get(`/timeline/buyers/${id}`),
+  /** Get activity timeline for an order */
+  order: (id: string) => api.get(`/timeline/orders/${id}`),
+  /** Get activity timeline for an invoice */
+  invoice: (id: string) => api.get(`/timeline/invoices/${id}`),
+};
+
+// ============================================
+// BULK OPERATIONS API
+// ============================================
+
+export const bulkApi = {
+  /** Bulk update order statuses */
+  updateOrderStatus: (ids: string[], status: string) =>
+    api.put('/bulk/orders/status', { ids, status }),
+  /** Bulk update invoice statuses */
+  updateInvoiceStatus: (ids: string[], status: string) =>
+    api.put('/bulk/invoices/status', { ids, status }),
+  /** Bulk approve expenses */
+  approveExpenses: (ids: string[]) =>
+    api.put('/bulk/expenses/approve', { ids }),
+  /** Bulk update inquiry stages */
+  updateInquiryStage: (ids: string[], stage: string) =>
+    api.put('/bulk/inquiries/stage', { ids, stage }),
+  /** Bulk deactivate products */
+  deactivateProducts: (ids: string[]) =>
+    api.put('/bulk/products/deactivate', { ids }),
+  /** Bulk complete tasks */
+  completeTasks: (ids: string[]) =>
+    api.put('/bulk/tasks/complete', { ids }),
+};
+
+// ============================================
+// EMAIL API (Admin)
+// ============================================
+
+export const emailApi = {
+  /** Get email service status */
+  status: () => api.get('/email/status'),
+  /** List queued emails */
+  list: (params?: { status?: string; limit?: number }) =>
+    api.get('/email', { params }),
+  /** Send test email */
+  sendTest: (to: string) => api.post('/email/test', { to }),
+  /** Process email queue */
+  process: () => api.post('/email/process'),
+  /** Retry failed emails */
+  retryFailed: () => api.post('/email/retry-failed'),
+};
+
 
 // ============================================
 // ATTACHMENTS API

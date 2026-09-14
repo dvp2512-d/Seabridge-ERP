@@ -12,10 +12,12 @@ export interface User {
 interface AuthState {
   user: User | null;
   token: string | null;
+  refreshToken: string | null;
   isAuthenticated: boolean;
-  login: (token: string, user: User) => void;
+  login: (token: string, user: User, refreshToken?: string) => void;
   logout: () => void;
   updateUser: (user: Partial<User>) => void;
+  setTokens: (accessToken: string, refreshToken: string) => void;
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -23,14 +25,15 @@ export const useAuthStore = create<AuthState>()(
     (set) => ({
       user: null,
       token: null,
+      refreshToken: null,
       isAuthenticated: false,
       
-      login: (token, user) => {
-        set({ token, user, isAuthenticated: true });
+      login: (token, user, refreshToken) => {
+        set({ token, user, refreshToken: refreshToken || null, isAuthenticated: true });
       },
       
       logout: () => {
-        set({ token: null, user: null, isAuthenticated: false });
+        set({ token: null, refreshToken: null, user: null, isAuthenticated: false });
       },
       
       updateUser: (updates) => {
@@ -38,10 +41,19 @@ export const useAuthStore = create<AuthState>()(
           user: state.user ? { ...state.user, ...updates } : null,
         }));
       },
+
+      setTokens: (accessToken, refreshToken) => {
+        set({ token: accessToken, refreshToken });
+      },
     }),
     {
       name: 'seabridge-auth',
-      partialize: (state) => ({ token: state.token, user: state.user, isAuthenticated: state.isAuthenticated }),
+      partialize: (state) => ({ 
+        token: state.token, 
+        refreshToken: state.refreshToken,
+        user: state.user, 
+        isAuthenticated: state.isAuthenticated 
+      }),
     }
   )
 );

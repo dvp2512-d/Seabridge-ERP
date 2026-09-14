@@ -43,6 +43,12 @@ export const EXPENSE_SOURCE_TYPES = [
   'SHIPMENT_FREIGHT',
   'SHIPMENT_CHA',
   'SHIPMENT_TRANSPORT',
+  'SHIPMENT_PACKAGING',
+  'SHIPMENT_INSURANCE',
+  'SHIPMENT_INSPECTION',
+  'SHIPMENT_COMMISSION',
+  'SHIPMENT_OTHER',
+  'PAYMENT_FOREX_LOSS',
 ] as const;
 
 export type ExpenseSourceType = (typeof EXPENSE_SOURCE_TYPES)[number];
@@ -53,6 +59,12 @@ const SOURCE_CATEGORY: Record<Exclude<ExpenseSourceType, 'MANUAL'>, string> = {
   SHIPMENT_FREIGHT: 'FREIGHT',
   SHIPMENT_CHA: 'CHA',
   SHIPMENT_TRANSPORT: 'TRANSPORT',
+  SHIPMENT_PACKAGING: 'PACKAGING',
+  SHIPMENT_INSURANCE: 'INSURANCE',
+  SHIPMENT_INSPECTION: 'INSPECTION',
+  SHIPMENT_COMMISSION: 'COMMISSION',
+  SHIPMENT_OTHER: 'OTHER',
+  PAYMENT_FOREX_LOSS: 'FOREX_LOSS',
 };
 
 function round2(value: number): number {
@@ -90,10 +102,26 @@ async function syncOne(input: SyncInput): Promise<SyncResult> {
   const { sourceType, sourceId } = input;
   const amount = input.amount === null ? null : round2(input.amount);
 
-  const existing = await prisma.expense.findUnique({
-    where: { sourceType_sourceId: { sourceType, sourceId } },
-    select: { id: true, amount: true, paidAmount: true, status: true },
-  });
+  // Try to find existing expense by source. If the sourceType/sourceId columns don't
+  // exist (pre-migration database), fall back to not finding anything - which will
+  // cause a create attempt that will fail with a clear schema error.
+  let existing: { id: string; amount: unknown; paidAmount: unknown; status: string } | null = null;
+  try {
+    existing = await prisma.expense.findUnique({
+      where: { sourceType_sourceId: { sourceType, sourceId } },
+      select: { id: true, amount: true, paidAmount: true, status: true },
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // If the column doesn't exist, we're on an old schema. Let the caller handle it.
+    if (msg.includes('P2022') || msg.includes('column') || msg.includes('does not exist')) {
+      throw new Error(
+        'Database schema is out of date. The expense sync feature requires columns from recent migrations. ' +
+        'Please run: npm run db:deploy (or redeploy with deploy.cmd)'
+      );
+    }
+    throw err;
+  }
 
   // Nothing to record: remove a stale unpaid expense, keep a paid one.
   if (amount === null || amount <= 0) {
@@ -222,13 +250,15 @@ export async function syncProcurementExpense(procurementId: string): Promise<Syn
 }
 
 /**
- * Mirror a shipment's freight, CHA and transport costs into up to three expenses.
+ * Mirror a shipment's costs into expenses.
  *
- * Three separate expenses rather than one total, because they are owed to three
- * different parties and paid separately. A combined figure could never be marked
+ * Separate expenses for each cost type, because they are owed to different
+ * parties and paid separately. A combined figure could never be marked
  * paid correctly.
  */
 export async function syncShipmentExpenses(shipmentId: string): Promise<SyncResult[]> {
+  // Query only the core fields first; the additional cost fields may not exist
+  // in databases that haven't run the 20260912190000 migration yet.
   const shipment = await prisma.shipment.findUnique({
     where: { id: shipmentId },
     select: {
@@ -247,6 +277,46 @@ export async function syncShipmentExpenses(shipmentId: string): Promise<SyncResu
 
   if (!shipment) return [];
 
+  // Try to fetch additional cost fields if they exist. These were added in a later
+  // migration, so older databases may not have them. We do a raw query to check.
+  let additionalCosts: {
+    packagingCharges: number | null;
+    insuranceCharges: number | null;
+    inspectionCharges: number | null;
+    commissionCharges: number | null;
+    otherCharges: number | null;
+  } = {
+    packagingCharges: null,
+    insuranceCharges: null,
+    inspectionCharges: null,
+    commissionCharges: null,
+    otherCharges: null,
+  };
+
+  try {
+    const extra = await prisma.shipment.findUnique({
+      where: { id: shipmentId },
+      select: {
+        packagingCharges: true,
+        insuranceCharges: true,
+        inspectionCharges: true,
+        commissionCharges: true,
+        otherCharges: true,
+      },
+    });
+    if (extra) {
+      additionalCosts = {
+        packagingCharges: extra.packagingCharges === null ? null : Number(extra.packagingCharges),
+        insuranceCharges: extra.insuranceCharges === null ? null : Number(extra.insuranceCharges),
+        inspectionCharges: extra.inspectionCharges === null ? null : Number(extra.inspectionCharges),
+        commissionCharges: extra.commissionCharges === null ? null : Number(extra.commissionCharges),
+        otherCharges: extra.otherCharges === null ? null : Number(extra.otherCharges),
+      };
+    }
+  } catch {
+    // Columns don't exist yet - that's fine, we'll just skip these cost types
+  }
+
   const forOrder = shipment.order ? ` for order ${shipment.order.orderNumber}` : '';
   // The shipment's departure is when these costs belong to; falls back to when the
   // record was created if no ETD has been set yet.
@@ -255,19 +325,20 @@ export async function syncShipmentExpenses(shipmentId: string): Promise<SyncResu
 
   const results: SyncResult[] = [];
 
+  // Freight cost
   results.push(
     await syncOne({
       sourceType: 'SHIPMENT_FREIGHT',
       sourceId: shipment.id,
       amount: shipment.freightCost === null ? null : Number(shipment.freightCost),
       description: `Ocean/air freight - shipment ${ref}${forOrder}`,
-      // Freight is commonly billed by the transporter or forwarder when there is one.
       vendorName: shipment.transporter?.name ?? null,
       invoiceRef: ref,
       expenseDate: date,
     })
   );
 
+  // CHA charges
   results.push(
     await syncOne({
       sourceType: 'SHIPMENT_CHA',
@@ -280,6 +351,7 @@ export async function syncShipmentExpenses(shipmentId: string): Promise<SyncResu
     })
   );
 
+  // Transport charges
   results.push(
     await syncOne({
       sourceType: 'SHIPMENT_TRANSPORT',
@@ -287,6 +359,71 @@ export async function syncShipmentExpenses(shipmentId: string): Promise<SyncResu
       amount: shipment.transportCharges === null ? null : Number(shipment.transportCharges),
       description: `Inland transport - ${shipment.transporter?.name ?? 'transporter'} - shipment ${ref}${forOrder}`,
       vendorName: shipment.transporter?.name ?? null,
+      invoiceRef: ref,
+      expenseDate: date,
+    })
+  );
+
+  // Packaging charges (may not exist in older databases)
+  results.push(
+    await syncOne({
+      sourceType: 'SHIPMENT_PACKAGING',
+      sourceId: shipment.id,
+      amount: additionalCosts.packagingCharges,
+      description: `Packaging charges - shipment ${ref}${forOrder}`,
+      vendorName: null,
+      invoiceRef: ref,
+      expenseDate: date,
+    })
+  );
+
+  // Insurance charges
+  results.push(
+    await syncOne({
+      sourceType: 'SHIPMENT_INSURANCE',
+      sourceId: shipment.id,
+      amount: additionalCosts.insuranceCharges,
+      description: `Insurance charges - shipment ${ref}${forOrder}`,
+      vendorName: null,
+      invoiceRef: ref,
+      expenseDate: date,
+    })
+  );
+
+  // Inspection charges
+  results.push(
+    await syncOne({
+      sourceType: 'SHIPMENT_INSPECTION',
+      sourceId: shipment.id,
+      amount: additionalCosts.inspectionCharges,
+      description: `Inspection charges - shipment ${ref}${forOrder}`,
+      vendorName: null,
+      invoiceRef: ref,
+      expenseDate: date,
+    })
+  );
+
+  // Commission charges
+  results.push(
+    await syncOne({
+      sourceType: 'SHIPMENT_COMMISSION',
+      sourceId: shipment.id,
+      amount: additionalCosts.commissionCharges,
+      description: `Commission charges - shipment ${ref}${forOrder}`,
+      vendorName: null,
+      invoiceRef: ref,
+      expenseDate: date,
+    })
+  );
+
+  // Other charges
+  results.push(
+    await syncOne({
+      sourceType: 'SHIPMENT_OTHER',
+      sourceId: shipment.id,
+      amount: additionalCosts.otherCharges,
+      description: `Other charges - shipment ${ref}${forOrder}`,
+      vendorName: null,
       invoiceRef: ref,
       expenseDate: date,
     })

@@ -54,8 +54,18 @@ A complete business management system for Indian export trading companies — ma
 - **Audit Log** — Full system activity log with filtering (who did what, when)
 - **Record Deletion** — Founder-only permanent deletion with cascade preview
 - **Role-Based Access** — Founder, Admin, Sales, Operations, Finance roles
-- **Webhook Automation** — Event-driven integrations
+- **Webhook Automation** — Event-driven integrations with exponential backoff retry
 - **Master Data** — Countries, ports, currencies, Incoterms, product categories
+
+### Developer & Power User Features
+- **Global Search** — Search across buyers, inquiries, quotations, orders, invoices, products, and suppliers
+- **Data Export** — Export invoices, orders, buyers, expenses, receivables, quotations to CSV
+- **Activity Timeline** — View complete activity history for buyers, orders, and invoices
+- **Bulk Operations** — Batch update order status, invoice status, approve expenses, complete tasks
+- **Keyboard Shortcuts** — Navigate quickly with `g + key` shortcuts (press `?` for help)
+- **Request ID Tracking** — Every API request tagged with X-Request-ID for tracing
+- **Refresh Token Rotation** — Secure authentication with automatic token refresh
+- **Structured Logging** — JSON-formatted logs with request correlation
 
 ---
 
@@ -86,7 +96,7 @@ A complete business management system for Indian export trading companies — ma
 | TanStack Query | 5.17 | Server state |
 | Zustand | 4.5 | Client state |
 | React Hook Form | 7.49 | Forms |
-| Recharts | 2.10 | Charts & graphs |
+| Recharts | 2.10 | Charts (available for future use) |
 | Lucide React | 0.316 | Icons |
 | react-hot-toast | 2.4 | Notifications |
 
@@ -95,7 +105,6 @@ A complete business management system for Indian export trading companies — ma
 |------------|---------|
 | Docker | Containerization |
 | Docker Compose | Multi-container orchestration |
-| Redis | Reserved for caching (not yet active) |
 | nginx | Reverse proxy (web container) |
 
 ---
@@ -171,7 +180,7 @@ Set these required variables in `.env`:
 
 **3. Start database**
 ```bash
-docker compose up -d postgres redis
+docker compose up -d postgres
 ```
 
 **4. Build database package**
@@ -214,6 +223,25 @@ The verification scripts live in `scripts/`:
 - `check-api-contract.mjs` — Cross-references frontend API calls against backend routes
 - `verify-pdf.ts` — Renders all 7 document types from mock data
 - `verify-logic.ts` — Tests pure calculation functions (30 tests)
+
+### E2E Testing (Optional)
+
+End-to-end tests using Playwright cover critical user workflows:
+
+```bash
+# Install Playwright (one-time setup)
+npm install @playwright/test --save-dev
+npx playwright install chromium
+
+# Run E2E tests (requires running application)
+npm run test:e2e         # Headless
+npm run test:e2e:ui      # Interactive UI mode
+```
+
+E2E test files in `e2e/`:
+- `auth.spec.ts` — Login, logout, session persistence, role access
+- `workflow.spec.ts` — Buyer → Inquiry → Quotation → Order → Invoice flow
+- `dashboard.spec.ts` — KPIs, navigation, role-based views
 
 ---
 
@@ -411,7 +439,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 | Module | Prefix | Key Operations |
 |--------|--------|----------------|
-| Auth | `/auth` | login, logout, me |
+| Auth | `/auth` | login, logout, me, refresh, sessions |
 | Buyers | `/buyers` | CRUD, contacts, communications |
 | Products | `/products` | CRUD, categories |
 | Suppliers | `/suppliers` | CRUD, pricing |
@@ -423,7 +451,7 @@ Authorization: Bearer <JWT_TOKEN>
 | Invoices | `/invoices` | CRUD, payments, PDF, receivables report |
 | Exchange Rates | `/exchange-rates` | current, history, notification entry, market check |
 | Dashboard | `/dashboard` | main, sales, operations, finance |
-| Expenses | `/expenses` | CRUD, status |
+| Expenses | `/expenses` | CRUD, status, payments |
 | Income | `/income` | CRUD, forex gain |
 | Tasks | `/tasks` | CRUD, complete, reopen |
 | Users | `/users` | CRUD, deactivate, reactivate |
@@ -433,6 +461,11 @@ Authorization: Bearer <JWT_TOKEN>
 | Records | `/records` | preview delete, permanent delete (Founder only) |
 | Lifecycle | `/lifecycle` | deactivate, reactivate master data |
 | Automation | `/automation` | webhooks, rules |
+| Search | `/search` | global search across all modules |
+| Export | `/export` | CSV export for invoices, orders, buyers, expenses |
+| Timeline | `/timeline` | activity history for buyers, orders, invoices |
+| Bulk | `/bulk` | batch operations for orders, invoices, expenses, tasks |
+| Email | `/email` | queue status, send test, process queue (Admin) |
 
 ### Health Check
 ```
@@ -479,21 +512,28 @@ GET /health
 | Master Data Lifecycle | Soft delete with cascade preview, reactivation |
 | Audit Log | Full activity tracking with UI viewer |
 | Record Deletion | Founder-only permanent delete with cascade preview |
-| Webhooks | Create, test, SSRF-protected |
+| Webhooks | Create, test, SSRF-protected, exponential backoff retry |
 | PDF Generation | Quotation, Purchase Order, Invoice (4 types), Packing List |
 | Deployment | Single `deploy.cmd` script (Windows) |
 | Verification Scripts | TypeScript, API contract, PDF, and logic verification |
 | Error Handling | Friendly error states with retry on all major pages |
 | Smart Defaults | Auto-fill from buyer (payment terms), order (ports), creditDays (due date) |
 | Seeded Ports | 27 major Indian and international ports pre-loaded |
+| Refresh Token Rotation | Secure auth with automatic token refresh, theft detection |
+| Global Search | Search across buyers, inquiries, quotations, orders, invoices, products, suppliers |
+| Data Export | CSV export for invoices, orders, buyers, expenses, receivables, quotations |
+| Activity Timeline | View complete activity history for buyers, orders, invoices |
+| Bulk Operations | Batch update order status, invoice status, approve expenses, complete tasks |
+| Keyboard Shortcuts | Navigate quickly with `g + key` shortcuts (press `?` for help) |
+| Request ID Tracking | Every API request tagged with X-Request-ID for tracing |
+| Structured Logging | JSON-formatted logs with request correlation |
 
 ### Partial / Not Yet Complete ⚠️
 | Feature | Status |
 |---------|--------|
-| Automation Rules | Stored in DB, no visual builder, rules don't fire yet |
+| Automation Rules | CREATE_TASK action works; other action types not implemented. No visual rule builder. |
 | Email Notifications | `EmailQueue` model exists, SMTP not configured |
-| API Keys | Settings UI shows mock data, not wired to real keys |
-| Redis | Container runs, no application code uses it yet |
+| API Keys | Not implemented (Settings UI shows honest "not available" message) |
 | Tally Export | Not implemented |
 | GST e-Invoice | Not implemented |
 | Mobile App | Web-only |

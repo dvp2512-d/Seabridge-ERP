@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
+import { revokeAllUserTokens } from '../services/refreshTokenService';
 
 const router: Router = Router();
 
@@ -76,9 +77,17 @@ router.get('/:id', can('USER_VIEW'), async (req, res, next) => {
 // Create user
 router.post('/', can('USER_MANAGE'), async (req, res, next) => {
   try {
+    // Password complexity: 8+ chars, uppercase, lowercase, number
+    const passwordSchema = z
+      .string()
+      .min(8, 'Password must be at least 8 characters')
+      .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+      .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
+      .regex(/[0-9]/, 'Password must contain at least one number');
+
     const schema = z.object({
       email: z.string().email(),
-      password: z.string().min(8),
+      password: passwordSchema,
       firstName: z.string().min(1),
       lastName: z.string().min(1),
       role: z.enum(['FOUNDER', 'SALES', 'OPERATIONS', 'FINANCE', 'ADMIN']),
@@ -87,6 +96,13 @@ router.post('/', can('USER_MANAGE'), async (req, res, next) => {
 
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
+
+    const { role } = validation.data;
+
+    // Only FOUNDER can create other FOUNDERs (prevent privilege escalation)
+    if (role === 'FOUNDER' && req.user?.role !== 'FOUNDER') {
+      throw new AppError('Only a Founder can create another Founder account', 403);
+    }
 
     const { password, ...data } = validation.data;
     const passwordHash = await bcrypt.hash(password, 12);
@@ -125,6 +141,11 @@ router.put('/:id', can('USER_MANAGE'), async (req, res, next) => {
 
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
+
+    // Only FOUNDER can promote users to FOUNDER (prevent privilege escalation)
+    if (validation.data.role === 'FOUNDER' && req.user?.role !== 'FOUNDER') {
+      throw new AppError('Only a Founder can promote a user to Founder', 403);
+    }
 
     // The same two lock-yourself-out cases the deactivate route guards against
     // are reachable through this route by sending status/role directly, so they
@@ -170,6 +191,11 @@ router.put('/:id', can('USER_MANAGE'), async (req, res, next) => {
         status: true,
       },
     });
+
+    // If user was deactivated/suspended, revoke all their tokens immediately
+    if (newStatus && newStatus !== 'ACTIVE') {
+      await revokeAllUserTokens(req.params.id);
+    }
 
     res.json({ success: true, data: user });
   } catch (error) {
@@ -232,6 +258,9 @@ router.delete('/:id', can('USER_MANAGE'), async (req, res, next) => {
         status: true,
       },
     });
+
+    // Revoke all tokens so the user is logged out immediately
+    await revokeAllUserTokens(targetId);
 
     res.json({ success: true, data: user, message: 'User deactivated' });
   } catch (error) {

@@ -3,9 +3,10 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { quotationsApi } from '@/lib/api';
+import { quotationsApi, exportApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { ExportButton } from '@/components/ui/ExportButton';
 import { formatCurrency, formatDate, getStatusColor, downloadFile, isPastDue, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import { Plus, Search, Eye, Download, FileText, Clock, CheckCircle } from 'lucide-react';
@@ -77,10 +78,20 @@ export default function Quotations() {
         title="Quotations"
         subtitle={`${pagination?.total || quotations.length} quotations`}
         actions={
-          <Link to="/quotations/new" className="btn btn-primary">
-            <Plus className="w-4 h-4 mr-2" />
-            New Quotation
-          </Link>
+          <div className="flex items-center gap-2">
+            <ExportButton
+              onExport={async () => {
+                const response = await exportApi.quotations();
+                return response.data;
+              }}
+              filename="quotations-export"
+              label="Export"
+            />
+            <Link to="/quotations/new" className="btn btn-primary">
+              <Plus className="w-4 h-4 mr-2" />
+              New Quotation
+            </Link>
+          </div>
         }
       />
 

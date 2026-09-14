@@ -2,9 +2,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ordersApi } from '@/lib/api';
+import { ordersApi, exportApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { ErrorState } from '@/components/ui/ErrorState';
+import { ExportButton } from '@/components/ui/ExportButton';
 import { formatCurrency, formatDate, getStatusColor, isPastDue, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import {
@@ -82,6 +83,16 @@ export default function Orders() {
       <PageHeader
         title="Export Orders"
         subtitle={`${pagination?.total || orders.length} orders • Track order lifecycle from confirmation to delivery`}
+        actions={
+          <ExportButton
+            onExport={async () => {
+              const response = await exportApi.orders();
+              return response.data;
+            }}
+            filename="orders-export"
+            label="Export CSV"
+          />
+        }
       />
 
       {/* Pipeline Summary Cards */}

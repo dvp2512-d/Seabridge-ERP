@@ -40,11 +40,14 @@ const CATEGORIES = [
   'CHA',
   'TRANSPORT',
   'PACKAGING',
+  'INSURANCE',
   'INSPECTION',
+  'COMMISSION',
   'CERTIFICATION',
   'TRAVEL',
   'OFFICE',
   'BANK_CHARGES',
+  'FOREX_LOSS',
   'OTHER',
 ] as const;
 
@@ -530,6 +533,25 @@ router.delete('/:id/payments/:paymentId', can('FINANCE_MANAGE'), async (req, res
  */
 router.post('/sync', can('FINANCE_MANAGE'), async (_req, res, next) => {
   try {
+    // First verify the database has the required columns by doing a minimal query.
+    // This gives a clear error message rather than failing mid-sync.
+    try {
+      await prisma.expense.findFirst({
+        select: { sourceType: true, sourceId: true, isGenerated: true, paidAmount: true, balanceAmount: true },
+        take: 1,
+      });
+    } catch (schemaError: unknown) {
+      const msg = schemaError instanceof Error ? schemaError.message : String(schemaError);
+      if (msg.includes('P2022') || msg.includes('column') || msg.includes('does not exist')) {
+        return res.status(500).json({
+          success: false,
+          error: 'Database schema is out of date. Please run migrations: npm run db:deploy (or deploy.cmd to redeploy)',
+          details: 'The expense sync feature requires columns that were added in recent migrations.',
+        });
+      }
+      throw schemaError;
+    }
+
     const [procurements, shipments] = await Promise.all([
       prisma.procurement.findMany({ select: { id: true } }),
       prisma.shipment.findMany({

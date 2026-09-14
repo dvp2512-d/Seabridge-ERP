@@ -102,9 +102,9 @@ export default function Transporters() {
                   </td>
                   <td><span className={`badge ${t.isActive ? 'badge-success' : 'badge-gray'}`}>{t.isActive ? 'Active' : 'Inactive'}</span></td>
                   <td>
-                    <div className="flex gap-2">
-                      <button onClick={() => { setSelectedTransporter(t); setShowDetailModal(true); }} className="text-navy-600" aria-label="View transporter details"><Eye className="w-4 h-4" /></button>
-                      <button onClick={() => { setEditTransporter(t); setShowModal(true); }} className="text-gray-400" aria-label="Edit transporter"><Edit2 className="w-4 h-4" /></button>
+                    <div className="flex items-center justify-end gap-1">
+                      <button onClick={() => { setSelectedTransporter(t); setShowDetailModal(true); }} className="p-1 text-gray-400 hover:text-navy-600 rounded transition-colors" aria-label="View transporter details"><Eye className="w-4 h-4" /></button>
+                      <button onClick={() => { setEditTransporter(t); setShowModal(true); }} className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" aria-label="Edit transporter"><Edit2 className="w-4 h-4" /></button>
                       <DeleteRecordButton
                         resourceType="transporter"
                         recordId={t.id}
@@ -287,12 +287,14 @@ function AddTransportRateModal({ transporterId, onClose, onSuccess }: { transpor
           <FormField label="Destination" required value={formData.destination} onChange={(e) => setFormData({ ...formData, destination: e.target.value })} placeholder="e.g., Mundra Port" />
           <FormField label="Rate" required type="number" step="0.01" value={formData.rate} onChange={(e) => setFormData({ ...formData, rate: e.target.value })} />
           <SelectField label="Currency" value={formData.currency} onChange={(e) => setFormData({ ...formData, currency: e.target.value })} options={[{ value: 'INR', label: 'INR' }, { value: 'USD', label: 'USD' }]} />
-          <SelectField label="Container Type" value={formData.containerType} onChange={(e) => setFormData({ ...formData, containerType: e.target.value })} options={[
-            { value: '', label: 'All Types' },
-            { value: '20FT', label: '20FT' },
-            { value: '40FT', label: '40FT' },
-            { value: '40HC', label: '40HC' },
-          ]} />
+          <div className="col-span-2">
+            <SelectField label="Container Type" value={formData.containerType} onChange={(e) => setFormData({ ...formData, containerType: e.target.value })} options={[
+              { value: '', label: 'All Types' },
+              { value: '20FT', label: '20FT' },
+              { value: '40FT', label: '40FT' },
+              { value: '40HC', label: '40HC' },
+            ]} />
+          </div>
           <FormField label="Transit Days" type="number" value={formData.transitDays} onChange={(e) => setFormData({ ...formData, transitDays: e.target.value })} />
           <FormField label="Valid From" required type="date" value={formData.validFrom} onChange={(e) => setFormData({ ...formData, validFrom: e.target.value })} />
         </div>

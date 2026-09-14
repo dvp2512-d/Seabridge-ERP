@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { prisma, UserRole } from '@seabridge/database';
 import { UnauthorizedError, ForbiddenError } from './errorHandler';
+import { logger } from '../utils/logger';
 
 export interface AuthUser {
   id: string;
@@ -35,7 +36,7 @@ export const authenticate = async (
     const secret = process.env.JWT_SECRET;
 
     if (!secret) {
-      console.error('FATAL: JWT_SECRET is not configured');
+      logger.error('FATAL: JWT_SECRET is not configured');
       throw new UnauthorizedError('Authentication configuration error');
     }
 

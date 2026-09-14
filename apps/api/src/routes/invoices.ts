@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
-import { generateCode } from '../utils/helpers';
+import { generateCode, contentDisposition } from '../utils/helpers';
 import { generateInvoicePDF, generatePackingListPDF } from '../services/pdfService';
 import { fillOrderPacking } from '../services/orderService';
 import {
@@ -19,6 +19,7 @@ import {
   INVOICE_TYPE_LABELS,
   isDocumentOnlyInvoice,
 } from '../utils/invoiceTypes';
+import { logger } from '../utils/logger';
 
 const router: Router = Router();
 
@@ -223,7 +224,7 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
     let packingFilled: { filled: number; skipped: number; unavailable: string[] } | null = null;
     if (type === 'PACKING_LIST') {
       packingFilled = await fillOrderPacking(order.id).catch((error) => {
-        console.error(`[packing-fill] order ${order.id}:`, error);
+        logger.error('Packing fill failed for order', { orderId: order.id, error: (error as Error).message });
         return null;
       });
     }
@@ -449,13 +450,18 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
       receivedAmount !== undefined && exchangeRate !== undefined
         ? Math.round((receivedAmount * exchangeRate + Number.EPSILON) * 100) / 100
         : null;
-    const exchangeGain =
+    const exchangeDiff =
       remittanceWorth !== null
         ? Math.round((remittanceWorth - validation.data.amount + Number.EPSILON) * 100) / 100
         : 0;
-    // Under a rupee is rounding, not a gain worth booking.
-    const gainToBook = exchangeGain > 1 ? exchangeGain : 0;
+    
+    // Positive difference = gain, negative = loss
+    // Under a rupee is rounding, not worth booking.
+    const gainToBook = exchangeDiff > 1 ? exchangeDiff : 0;
+    const lossToBook = exchangeDiff < -1 ? Math.abs(exchangeDiff) : 0;
+    
     const incomeNumber = gainToBook > 0 ? await generateCode('INCOME', 'INC') : null;
+    const expenseNumber = lossToBook > 0 ? await generateCode('EXPENSE', 'EXP') : null;
 
     // Payment, invoice rollup and buyer revenue must all move together.
     const payment = await prisma.$transaction(async (tx) => {
@@ -468,6 +474,7 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
         },
       });
 
+      // Auto-create forex gain as income when rate moved favorably
       if (gainToBook > 0 && incomeNumber) {
         await tx.income.create({
           data: {
@@ -486,6 +493,30 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
             linkedInvoiceId: invoice.id,
             status: 'RECEIVED',
             createdById: req.user!.id,
+          },
+        });
+      }
+
+      // Auto-create forex loss as expense when rate moved unfavorably
+      if (lossToBook > 0 && expenseNumber) {
+        await tx.expense.create({
+          data: {
+            expenseNumber,
+            category: 'FOREX_LOSS',
+            description: `Exchange loss on ${invoice.invoiceNumber} (${paymentNumber})`,
+            amount: lossToBook,
+            expenseDate: validation.data.paymentDate,
+            vendorName: null,
+            invoiceRef: invoice.invoiceNumber,
+            // Auto-approved since it's a realized loss, not a discretionary spend
+            status: 'APPROVED',
+            sourceType: 'PAYMENT_FOREX_LOSS',
+            sourceId: created.id, // Link to the payment record
+            isGenerated: true,
+            paidAmount: lossToBook, // It's already "paid" - the money was lost
+            balanceAmount: 0,
+            linkedInvoiceId: invoice.id,
+            notes: `Forex loss: Expected ₹${validation.data.amount.toLocaleString()} but remittance of ${receivedAmount} ${receivedCurrency?.toUpperCase()} at rate ${exchangeRate} = ₹${remittanceWorth?.toLocaleString()}`,
           },
         });
       }
@@ -614,7 +645,7 @@ router.get('/:id/pdf', can('FINANCE_VIEW'), async (req, res, next) => {
       : await generateInvoicePDF(updated, pdfOptions);
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${invoice.invoiceNumber}.pdf"`);
+    res.setHeader('Content-Disposition', contentDisposition(`${invoice.invoiceNumber}.pdf`));
     res.send(pdfBuffer);
   } catch (error) {
     next(error);

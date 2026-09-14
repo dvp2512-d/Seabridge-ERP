@@ -87,7 +87,7 @@ export default function DeleteRecordButton({
   };
 
   const btnClass = iconOnly
-    ? 'text-red-500 hover:text-red-700 p-1'
+    ? 'text-gray-400 hover:text-red-600 p-1 rounded transition-colors'
     : size === 'sm' 
       ? 'btn btn-sm text-red-600 hover:bg-red-50 border-red-200'
       : 'btn text-red-600 hover:bg-red-50 border-red-200';
@@ -98,8 +98,9 @@ export default function DeleteRecordButton({
         onClick={() => setShowConfirm(true)}
         className={btnClass}
         title="Permanently delete this record"
+        aria-label={`Delete ${recordName}`}
       >
-        <Trash2 className={size === 'sm' || iconOnly ? 'w-4 h-4' : 'w-4 h-4'} />
+        <Trash2 className="w-4 h-4" />
         {!iconOnly && size !== 'sm' && <span className="ml-1">Delete</span>}
       </button>
 
@@ -113,7 +114,7 @@ export default function DeleteRecordButton({
           title="⚠️ Permanent Deletion"
           size="md"
         >
-          <div className="space-y-4">
+          <div className="p-6 space-y-4">
             {/* Warning Banner */}
             <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
               <AlertTriangle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />

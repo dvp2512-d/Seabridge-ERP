@@ -147,7 +147,7 @@ export default function Income() {
         />
       </div>
 
-      {(summary?.byCategory?.length ?? 0) > 0 && (
+      {summary?.byCategory && summary.byCategory.length > 0 && (
         <div className="card">
           <div className="card-header">
             <h2 className="font-semibold">By category</h2>
@@ -278,41 +278,43 @@ export default function Income() {
                         </span>
                       </td>
                       <td className="text-right whitespace-nowrap">
-                        {canManage && (
-                          <>
-                            {e.status === 'PENDING' && (
+                        <div className="flex items-center justify-end gap-1">
+                          {canManage && (
+                            <>
+                              {e.status === 'PENDING' && (
+                                <button
+                                  onClick={() =>
+                                    setStatusMutation.mutate({ id: e.id, next: 'RECEIVED' })
+                                  }
+                                  className="p-1 text-gray-400 hover:text-green-600 rounded transition-colors"
+                                  title="Mark received"
+                                >
+                                  <Check className="w-4 h-4" />
+                                </button>
+                              )}
                               <button
-                                onClick={() =>
-                                  setStatusMutation.mutate({ id: e.id, next: 'RECEIVED' })
-                                }
-                                className="btn btn-ghost btn-sm text-green-600"
-                                title="Mark received"
+                                onClick={() => {
+                                  setEditing(e);
+                                  setShowForm(true);
+                                }}
+                                className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors"
+                                title="Edit"
                               >
-                                <Check className="w-4 h-4" />
+                                <Edit className="w-4 h-4" />
                               </button>
-                            )}
+                            </>
+                          )}
+                          {canDelete && (
                             <button
-                              onClick={() => {
-                                setEditing(e);
-                                setShowForm(true);
-                              }}
-                              className="btn btn-ghost btn-sm"
-                              title="Edit"
+                              onClick={() => setPendingDelete(e)}
+                              className="p-1 text-gray-400 hover:text-red-600 rounded transition-colors"
+                              title="Delete"
+                              aria-label="Delete income"
                             >
-                              <Edit className="w-4 h-4" />
+                              <Trash2 className="w-4 h-4" />
                             </button>
-                          </>
-                        )}
-                        {canDelete && (
-                          <button
-                            onClick={() => setPendingDelete(e)}
-                            className="btn btn-ghost btn-sm text-red-600"
-                            title="Delete"
-                            aria-label="Delete income"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -514,7 +516,8 @@ function IncomeFormModal({
 
   return (
     <Modal isOpen onClose={onClose} title={isEdit ? 'Edit Income' : 'Record Income'} size="lg">
-      <form onSubmit={submit} className="space-y-4">
+      <form onSubmit={submit} className="p-6 space-y-4">
+        {/* Row 1: Category and Date */}
         <div className="grid grid-cols-2 gap-4">
           <SelectField
             label="Category"
@@ -608,6 +611,7 @@ function IncomeFormModal({
           </div>
         )}
 
+        {/* Row 2: Description (full width) */}
         <FormField
           label="Description"
           required
@@ -616,9 +620,10 @@ function IncomeFormModal({
           placeholder="e.g. Duty drawback on shipping bill 1234567"
         />
 
+        {/* Row 3: Amount, Currency, Exchange Rate */}
         <div className="grid grid-cols-3 gap-4">
           <FormField
-            label="Original Amount"
+            label="Amount"
             required
             type="number"
             step="0.01"
@@ -627,12 +632,16 @@ function IncomeFormModal({
             onChange={(e) => setForm({ ...form, originalAmount: e.target.value })}
           />
           {isEdit ? (
-            <FormField
-              label="Currency"
-              value={form.originalCurrency}
-              disabled
-              hint="Cannot change after recording"
-            />
+            <div>
+              <label className="label">Currency</label>
+              <input
+                type="text"
+                className="input bg-gray-50"
+                value={form.originalCurrency}
+                disabled
+              />
+              <p className="mt-1 text-xs text-gray-500">Cannot change after recording</p>
+            </div>
           ) : (
             <SelectField
               label="Currency"
@@ -644,28 +653,33 @@ function IncomeFormModal({
               }))}
             />
           )}
-          <FormField
-            label={`Exchange Rate (${baseCode} per unit)`}
-            required
-            type="number"
-            step="0.0001"
-            min="0"
-            value={form.exchangeRate}
-            onChange={(e) => setForm({ ...form, exchangeRate: e.target.value })}
-            disabled={isBase}
-            hint={isBase ? `${baseCode} needs no conversion` : 'Enter the rate you actually got'}
-          />
+          <div>
+            <FormField
+              label="Exchange Rate"
+              required
+              type="number"
+              step="0.0001"
+              min="0"
+              value={form.exchangeRate}
+              onChange={(e) => setForm({ ...form, exchangeRate: e.target.value })}
+              disabled={isBase}
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              {isBase ? `${baseCode} needs no conversion` : `${baseCode} per 1 ${form.originalCurrency}`}
+            </p>
+          </div>
         </div>
 
-        {/* Shown before saving so the stored figure is never a surprise. */}
+        {/* INR Preview - shown before saving so the stored figure is never a surprise */}
         <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 text-sm">
           <span className="text-gray-600">
             Will be recorded as{' '}
-            {isBase ? '' : `${form.originalAmount || 0} ${form.originalCurrency} x ${form.exchangeRate} = `}
+            {isBase ? '' : `${form.originalAmount || 0} ${form.originalCurrency} × ${form.exchangeRate} = `}
           </span>
           <span className="font-bold text-navy-900">{formatCurrency(previewINR, 'INR')}</span>
         </div>
 
+        {/* Row 4: Reference and Status */}
         <div className="grid grid-cols-2 gap-4">
           <FormField
             label="Reference"
@@ -684,11 +698,13 @@ function IncomeFormModal({
           />
         </div>
 
+        {/* Row 5: Notes (full width) */}
         <TextareaField
           label="Notes"
           rows={2}
           value={form.notes}
           onChange={(e) => setForm({ ...form, notes: e.target.value })}
+          placeholder="Any additional details..."
         />
 
         <div className="flex justify-end gap-2 pt-2">

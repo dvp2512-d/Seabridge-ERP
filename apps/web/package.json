@@ -20,7 +20,6 @@
     "@hookform/resolvers": "^3.3.4",
     "zod": "^3.22.4",
     "dayjs": "^1.11.10",
-    "recharts": "^2.10.4",
     "react-hot-toast": "^2.4.1",
     "lucide-react": "^0.316.0",
     "clsx": "^2.1.0",

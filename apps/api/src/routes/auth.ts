@@ -5,23 +5,26 @@ import { z } from 'zod';
 import { prisma } from '@seabridge/database';
 import { AppError, ValidationError } from '../middleware/errorHandler';
 import { authenticate, can } from '../middleware/auth';
+import {
+  createTokenPair,
+  refreshTokens,
+  revokeAllUserTokens,
+  signAccessToken,
+  getUserSessions,
+} from '../services/refreshTokenService';
 
 const router: Router = Router();
 
 /**
- * Sign a JWT for a user. Centralised so token contents/expiry stay consistent
- * between login and register, and so the types are handled in one place.
+ * Extract client info from request for session tracking
  */
-function signToken(userId: string): string {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error('JWT_SECRET is not configured');
-  }
-  const options: jwt.SignOptions = {
-    algorithm: 'HS256',
-    expiresIn: (process.env.JWT_EXPIRES_IN || '7d') as jwt.SignOptions['expiresIn'],
+function getClientInfo(req: any) {
+  return {
+    userAgent: req.headers['user-agent'] as string | undefined,
+    ipAddress:
+      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+      req.socket?.remoteAddress,
   };
-  return jwt.sign({ userId }, secret, options);
 }
 
 const loginSchema = z.object({
@@ -29,9 +32,25 @@ const loginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+/**
+ * Password complexity requirements:
+ * - Minimum 8 characters
+ * - At least one uppercase letter
+ * - At least one lowercase letter
+ * - At least one number
+ * 
+ * These requirements balance security with usability for business users.
+ */
+const passwordSchema = z
+  .string()
+  .min(8, 'Password must be at least 8 characters')
+  .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+  .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
+  .regex(/[0-9]/, 'Password must contain at least one number');
+
 const registerSchema = z.object({
   email: z.string().email('Invalid email'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
+  password: passwordSchema,
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
   role: z.enum(['FOUNDER', 'SALES', 'OPERATIONS', 'FINANCE', 'ADMIN']).optional(),
@@ -72,13 +91,17 @@ router.post('/login', async (req, res, next) => {
       data: { lastLoginAt: new Date() },
     });
 
-    const token = signToken(user.id);
-
+    // Create token pair (access + refresh)
+    const { userAgent, ipAddress } = getClientInfo(req);
+    const tokens = await createTokenPair(user.id, undefined, userAgent, ipAddress);
 
     res.json({
       success: true,
       data: {
-        token,
+        token: tokens.accessToken, // For backward compatibility
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: tokens.expiresIn,
         user: {
           id: user.id,
           email: user.email,
@@ -130,13 +153,17 @@ router.post('/register', authenticate, can('USER_MANAGE'), async (req: any, res,
       },
     });
 
-    const token = signToken(user.id);
-
+    // Create token pair for the new user
+    const { userAgent, ipAddress } = getClientInfo(req);
+    const tokens = await createTokenPair(user.id, undefined, userAgent, ipAddress);
 
     res.status(201).json({
       success: true,
       data: {
-        token,
+        token: tokens.accessToken,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: tokens.expiresIn,
         user: {
           id: user.id,
           email: user.email,
@@ -220,7 +247,7 @@ router.post('/change-password', authenticate, async (req, res, next) => {
   try {
     const schema = z.object({
       currentPassword: z.string().min(1),
-      newPassword: z.string().min(8),
+      newPassword: passwordSchema,
     });
 
     const validation = schema.safeParse(req.body);
@@ -250,9 +277,115 @@ router.post('/change-password', authenticate, async (req, res, next) => {
       data: { passwordHash },
     });
 
+    // Revoke all existing tokens (security: password change invalidates all sessions)
+    await revokeAllUserTokens(user.id);
+
+    // Create new token pair so user stays logged in
+    const { userAgent, ipAddress } = getClientInfo(req);
+    const tokens = await createTokenPair(user.id, undefined, userAgent, ipAddress);
+
     res.json({
       success: true,
       message: 'Password changed successfully',
+      data: {
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: tokens.expiresIn,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Refresh tokens - exchange refresh token for new token pair
+router.post('/refresh', async (req, res, next) => {
+  try {
+    const schema = z.object({
+      refreshToken: z.string().min(1, 'Refresh token is required'),
+    });
+
+    const validation = schema.safeParse(req.body);
+    if (!validation.success) {
+      throw new ValidationError(validation.error.errors);
+    }
+
+    const { userAgent, ipAddress } = getClientInfo(req);
+    const tokens = await refreshTokens(validation.data.refreshToken, userAgent, ipAddress);
+
+    if (!tokens) {
+      throw new AppError('Invalid or expired refresh token', 401);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        token: tokens.accessToken,
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: tokens.expiresIn,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Logout - revoke all refresh tokens for the user
+router.post('/logout', authenticate, async (req, res, next) => {
+  try {
+    const revokedCount = await revokeAllUserTokens(req.user!.id);
+
+    res.json({
+      success: true,
+      message: 'Logged out successfully',
+      data: { revokedSessions: revokedCount },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get active sessions for current user
+router.get('/sessions', authenticate, async (req, res, next) => {
+  try {
+    const sessions = await getUserSessions(req.user!.id);
+
+    res.json({
+      success: true,
+      data: sessions,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Revoke a specific session
+router.delete('/sessions/:sessionId', authenticate, async (req, res, next) => {
+  try {
+    const { sessionId } = req.params;
+
+    // Find the session and verify it belongs to the user
+    const session = await prisma.refreshToken.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!session || session.userId !== req.user!.id) {
+      throw new AppError('Session not found', 404);
+    }
+
+    if (session.revokedAt) {
+      throw new AppError('Session already revoked', 400);
+    }
+
+    await prisma.refreshToken.update({
+      where: { id: sessionId },
+      data: { revokedAt: new Date() },
+    });
+
+    res.json({
+      success: true,
+      message: 'Session revoked successfully',
     });
   } catch (error) {
     next(error);

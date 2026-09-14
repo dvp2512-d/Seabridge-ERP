@@ -12,13 +12,34 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      # Bind to localhost only - prevents external access to database
+      # Remove this line entirely in production if direct DB access is not needed
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test:
         [
           "CMD-SHELL",
           "pg_isready -U ${POSTGRES_USER:-seabridge} -d ${POSTGRES_DB:-seabridge_erp}",
         ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - seabridge-network
+
+  # Redis for caching and distributed rate limiting
+  redis:
+    image: redis:7-alpine
+    container_name: seabridge-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      # Bind to localhost only for security
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -35,6 +56,8 @@ services:
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-seabridge}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-seabridge_erp}
+      # Redis connection for caching and rate limiting
+      REDIS_URL: redis://redis:6379
       # Anyone who knows this value can forge a login token for any user.
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is not set - copy .env.example to .env first}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
@@ -42,10 +65,26 @@ services:
       # The browser reaches the API through the web container's nginx proxy, so
       # requests are same-origin. This only matters for direct cross-origin calls.
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      # Email configuration (optional)
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-SeaBridge ERP}
     ports:
       - "4000:4000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - seabridge-network
@@ -64,13 +103,21 @@ services:
     restart: unless-stopped
     ports:
       - "3000:80"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     networks:
       - seabridge-network
 
 volumes:
   postgres_data:
+  redis_data:
 
 networks:
   seabridge-network:

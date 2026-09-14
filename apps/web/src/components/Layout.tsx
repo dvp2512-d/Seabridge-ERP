@@ -3,6 +3,10 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
 import { cn, getInitials } from '@/lib/utils';
 import { can, type Permission } from '@/lib/permissions';
+import { useNavigationShortcuts, useGoToShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { KeyboardShortcutsModal, useKeyboardShortcutsModal } from './KeyboardShortcutsModal';
+import { GlobalSearch } from './GlobalSearch';
+import { SessionExpiryWarning } from './SessionExpiryWarning';
 import {
   LayoutDashboard,
   Users,
@@ -25,6 +29,7 @@ import {
   CheckSquare,
   UserCog,
   History,
+  Keyboard,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -72,6 +77,11 @@ export default function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuthStore();
+  const shortcutsModal = useKeyboardShortcutsModal();
+
+  // Enable keyboard shortcuts
+  useNavigationShortcuts();
+  useGoToShortcuts();
 
   const visibleNavigation = navigation.filter((item) =>
     can(user?.role, item.permission)
@@ -174,8 +184,13 @@ export default function Layout({ children }: LayoutProps) {
               <Menu className="w-6 h-6" />
             </button>
 
-            {/* Page title area - can be used for breadcrumbs */}
-            <div className="flex-1" />
+            {/* Global Search */}
+            <div className="hidden md:block flex-1 max-w-md mx-4">
+              <GlobalSearch />
+            </div>
+
+            {/* Spacer for mobile */}
+            <div className="flex-1 md:hidden" />
 
             {/* User menu */}
             <div className="relative">
@@ -212,6 +227,17 @@ export default function Layout({ children }: LayoutProps) {
                         Settings
                       </Link>
                       <button
+                        className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                        onClick={() => {
+                          setUserMenuOpen(false);
+                          shortcutsModal.open();
+                        }}
+                      >
+                        <Keyboard className="w-4 h-4" />
+                        Keyboard shortcuts
+                        <span className="ml-auto text-xs text-gray-400">?</span>
+                      </button>
+                      <button
                         className="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 hover:bg-gray-50"
                         onClick={handleLogout}
                       >
@@ -229,6 +255,15 @@ export default function Layout({ children }: LayoutProps) {
         {/* Page content */}
         <main className="p-6">{children}</main>
       </div>
+
+      {/* Keyboard shortcuts modal */}
+      <KeyboardShortcutsModal 
+        isOpen={shortcutsModal.isOpen} 
+        onClose={shortcutsModal.close} 
+      />
+
+      {/* Session expiry warning */}
+      <SessionExpiryWarning />
     </div>
   );
 }

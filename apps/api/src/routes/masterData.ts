@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
+import { cache, CACHE_TTL, CACHE_KEYS } from '../services/cacheService';
 
 const router: Router = Router();
 
@@ -100,6 +101,7 @@ router.post('/countries', can('MASTER_MANAGE'), async (req, res, next) => {
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
     const country = await prisma.country.create({ data: validation.data });
+    cache.invalidateMasterData(); // Invalidate cache
     res.status(201).json({ success: true, data: country });
   } catch (error) {
     next(error);
@@ -121,6 +123,7 @@ router.put('/countries/:id', can('MASTER_MANAGE'), async (req, res, next) => {
       where: { id: req.params.id },
       data: validation.data,
     });
+    cache.invalidateMasterData(); // Invalidate cache
     res.json({ success: true, data: country });
   } catch (error) {
     next(error);
@@ -169,6 +172,7 @@ router.post('/ports', can('MASTER_MANAGE'), async (req, res, next) => {
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
     const port = await prisma.port.create({ data: validation.data });
+    cache.invalidateMasterData(); // Invalidate cache
     res.status(201).json({ success: true, data: port });
   } catch (error) {
     next(error);
@@ -192,6 +196,7 @@ router.put('/ports/:id', can('MASTER_MANAGE'), async (req, res, next) => {
       data: validation.data,
       include: { country: { select: { name: true, code: true } } },
     });
+    cache.invalidateMasterData(); // Invalidate cache
     res.json({ success: true, data: port });
   } catch (error) {
     next(error);
@@ -260,6 +265,7 @@ router.post('/currencies', can('MASTER_MANAGE'), async (req, res, next) => {
     assertSensibleRate(validation.data.exchangeRate, validation.data.code);
 
     const currency = await prisma.currency.create({ data: validation.data });
+    cache.invalidateMasterData(); // Invalidate cache
     res.status(201).json({ success: true, data: currency });
   } catch (error) {
     next(error);
@@ -287,6 +293,7 @@ router.put('/currencies/:id', can('MASTER_MANAGE'), async (req, res, next) => {
       where: { id: req.params.id },
       data: validation.data,
     });
+    cache.invalidateMasterData(); // Invalidate cache
     res.json({ success: true, data: currency });
   } catch (error) {
     next(error);
@@ -326,6 +333,7 @@ router.post('/incoterms', can('MASTER_MANAGE'), async (req, res, next) => {
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
     const incoterm = await prisma.incoterm.create({ data: validation.data });
+    cache.invalidateMasterData(); // Invalidate cache
     res.status(201).json({ success: true, data: incoterm });
   } catch (error) {
     next(error);
@@ -347,6 +355,7 @@ router.put('/incoterms/:id', can('MASTER_MANAGE'), async (req, res, next) => {
       where: { id: req.params.id },
       data: validation.data,
     });
+    cache.invalidateMasterData(); // Invalidate cache
     res.json({ success: true, data: incoterm });
   } catch (error) {
     next(error);
@@ -385,6 +394,7 @@ router.post('/product-categories', can('MASTER_MANAGE'), async (req, res, next) 
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
     const category = await prisma.productCategory.create({ data: validation.data });
+    cache.invalidateMasterData(); // Invalidate cache
     res.status(201).json({ success: true, data: category });
   } catch (error) {
     next(error);
@@ -405,6 +415,7 @@ router.put('/product-categories/:id', can('MASTER_MANAGE'), async (req, res, nex
       where: { id: req.params.id },
       data: validation.data,
     });
+    cache.invalidateMasterData(); // Invalidate cache
     res.json({ success: true, data: category });
   } catch (error) {
     next(error);
@@ -417,6 +428,12 @@ router.put('/product-categories/:id', can('MASTER_MANAGE'), async (req, res, nex
 
 router.get('/dropdowns', can('MASTER_VIEW'), async (req, res, next) => {
   try {
+    // Try cache first
+    const cached = cache.get<any>(CACHE_KEYS.DROPDOWNS);
+    if (cached) {
+      return res.json({ success: true, data: cached });
+    }
+
     const [countries, currencies, incoterms, categories, users, ports] = await Promise.all([
       prisma.country.findMany({ where: { isActive: true }, select: { id: true, name: true, code: true }, orderBy: { name: 'asc' } }),
       prisma.currency.findMany({ where: { isActive: true }, select: { id: true, code: true, symbol: true }, orderBy: { code: 'asc' } }),
@@ -426,27 +443,29 @@ router.get('/dropdowns', can('MASTER_VIEW'), async (req, res, next) => {
       prisma.port.findMany({ where: { isActive: true }, select: { id: true, name: true, code: true, type: true, country: { select: { name: true } } }, orderBy: { name: 'asc' } }),
     ]);
 
-    res.json({
-      success: true,
-      data: {
-        countries,
-        currencies,
-        incoterms,
-        productCategories: categories,
-        users,
-        ports,
-        buyerStatuses: ['LEAD', 'PROSPECT', 'ACTIVE', 'INACTIVE', 'CHURNED'],
-        inquiryStages: ['NEW', 'REQUIREMENT_GATHERED', 'PRICING_IN_PROGRESS', 'QUOTATION_SENT', 'NEGOTIATION', 'WON', 'LOST', 'ON_HOLD'],
-        inquiryPriorities: ['LOW', 'MEDIUM', 'HIGH', 'URGENT'],
-        quotationStatuses: ['DRAFT', 'SENT', 'REVISED', 'ACCEPTED', 'REJECTED', 'EXPIRED'],
-        orderStatuses: ['CONFIRMED', 'IN_PRODUCTION', 'READY_TO_SHIP', 'SHIPPED', 'DELIVERED', 'CANCELLED'],
-        invoiceStatuses: ['DRAFT', 'SENT', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED'],
-        containerTypes: ['20FT', '40FT', '40HC', 'LCL'],
-        paymentModes: ['WIRE', 'LC', 'TT', 'CHEQUE', 'CASH'],
-        communicationTypes: ['EMAIL', 'CALL', 'MEETING', 'WHATSAPP', 'VISIT'],
-        units: ['KG', 'MT', 'LBS', 'PCS', 'CTN', 'BAGS', 'DRUMS'],
-      },
-    });
+    const data = {
+      countries,
+      currencies,
+      incoterms,
+      productCategories: categories,
+      users,
+      ports,
+      buyerStatuses: ['LEAD', 'PROSPECT', 'ACTIVE', 'INACTIVE', 'CHURNED'],
+      inquiryStages: ['NEW', 'REQUIREMENT_GATHERED', 'PRICING_IN_PROGRESS', 'QUOTATION_SENT', 'NEGOTIATION', 'WON', 'LOST', 'ON_HOLD'],
+      inquiryPriorities: ['LOW', 'MEDIUM', 'HIGH', 'URGENT'],
+      quotationStatuses: ['DRAFT', 'SENT', 'REVISED', 'ACCEPTED', 'REJECTED', 'EXPIRED'],
+      orderStatuses: ['CONFIRMED', 'IN_PRODUCTION', 'READY_TO_SHIP', 'SHIPPED', 'DELIVERED', 'CANCELLED'],
+      invoiceStatuses: ['DRAFT', 'SENT', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'CANCELLED'],
+      containerTypes: ['20FT', '40FT', '40HC', 'LCL'],
+      paymentModes: ['WIRE', 'LC', 'TT', 'CHEQUE', 'CASH'],
+      communicationTypes: ['EMAIL', 'CALL', 'MEETING', 'WHATSAPP', 'VISIT'],
+      units: ['KG', 'MT', 'LBS', 'PCS', 'CTN', 'BAGS', 'DRUMS'],
+    };
+
+    // Cache for 30 minutes
+    cache.set(CACHE_KEYS.DROPDOWNS, data, CACHE_TTL.DROPDOWNS);
+
+    res.json({ success: true, data });
   } catch (error) {
     next(error);
   }

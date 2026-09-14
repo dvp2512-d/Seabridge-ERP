@@ -5,7 +5,7 @@ import { masterApi, lifecycleApi } from '@/lib/api';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
-import { FormField, SelectField } from '@/components/ui/FormFields';
+import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import { Plus, Edit2, Search, ChevronLeft, ChevronRight, Power, PowerOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
@@ -631,8 +631,10 @@ function MasterDataModal({ type, item, onClose }: { type: TabType; item: any; on
 
         {type === 'currencies' && (
           <>
-            <FormField label="Code" required value={formData.code || ''} onChange={(e) => setFormData({ ...formData, code: e.target.value })} placeholder="e.g., USD" maxLength={3} disabled={!!item} />
-            <FormField label="Name" required value={formData.name || ''} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="e.g., US Dollar" disabled={!!item} />
+            <div className="grid grid-cols-2 gap-4">
+              <FormField label="Code" required value={formData.code || ''} onChange={(e) => setFormData({ ...formData, code: e.target.value })} placeholder="e.g., USD" maxLength={3} disabled={!!item} />
+              <FormField label="Name" required value={formData.name || ''} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="e.g., US Dollar" disabled={!!item} />
+            </div>
             <FormField label="Symbol" required value={formData.symbol || ''} onChange={(e) => setFormData({ ...formData, symbol: e.target.value })} placeholder="e.g., $" disabled={!!item} />
             <p className="text-xs text-gray-500">
               No exchange rate is stored. All amounts are held in INR; you choose a
@@ -645,45 +647,43 @@ function MasterDataModal({ type, item, onClose }: { type: TabType; item: any; on
           <>
             <FormField label="Code" required value={formData.code || ''} onChange={(e) => setFormData({ ...formData, code: e.target.value })} placeholder="e.g., FOB" />
             <FormField label="Name" required value={formData.name || ''} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="e.g., Free on Board" />
-            <div>
-              <label className="label">Description</label>
-              <textarea className="input" rows={3} value={formData.description || ''} onChange={(e) => setFormData({ ...formData, description: e.target.value })} />
-            </div>
+            <TextareaField label="Description" rows={3} value={formData.description || ''} onChange={(e) => setFormData({ ...formData, description: e.target.value })} />
           </>
         )}
 
         {type === 'categories' && (
           <>
             <FormField label="Name" required value={formData.name || ''} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="e.g., Spices" />
-            <div>
-              <label className="label">Description</label>
-              <textarea className="input" rows={3} value={formData.description || ''} onChange={(e) => setFormData({ ...formData, description: e.target.value })} />
-            </div>
+            <TextareaField label="Description" rows={3} value={formData.description || ''} onChange={(e) => setFormData({ ...formData, description: e.target.value })} />
           </>
         )}
 
         {type === 'ports' && (
           <>
-            <FormField label="Code" required value={formData.code || ''} onChange={(e) => setFormData({ ...formData, code: e.target.value })} placeholder="e.g., INMUN" />
-            <FormField label="Name" required value={formData.name || ''} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="e.g., Mundra Port" />
-            <SelectField
-              label="Country"
-              required
-              value={formData.countryId || ''}
-              onChange={(e) => setFormData({ ...formData, countryId: e.target.value })}
-              options={(countries?.data?.data || []).map((c: any) => ({ value: c.id, label: c.name }))}
-              placeholder="Select Country"
-            />
-            <SelectField
-              label="Type"
-              value={formData.type || 'SEA'}
-              onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-              options={[
-                { value: 'SEA', label: 'Sea Port' },
-                { value: 'AIR', label: 'Airport' },
-                { value: 'LAND', label: 'Land Border' },
-              ]}
-            />
+            <div className="grid grid-cols-2 gap-4">
+              <FormField label="Code" required value={formData.code || ''} onChange={(e) => setFormData({ ...formData, code: e.target.value })} placeholder="e.g., INMUN" />
+              <FormField label="Name" required value={formData.name || ''} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="e.g., Mundra Port" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <SelectField
+                label="Country"
+                required
+                value={formData.countryId || ''}
+                onChange={(e) => setFormData({ ...formData, countryId: e.target.value })}
+                options={(countries?.data?.data || []).map((c: any) => ({ value: c.id, label: c.name }))}
+                placeholder="Select Country"
+              />
+              <SelectField
+                label="Type"
+                value={formData.type || 'SEA'}
+                onChange={(e) => setFormData({ ...formData, type: e.target.value })}
+                options={[
+                  { value: 'SEA', label: 'Sea Port' },
+                  { value: 'AIR', label: 'Airport' },
+                  { value: 'LAND', label: 'Land Border' },
+                ]}
+              />
+            </div>
           </>
         )}
 

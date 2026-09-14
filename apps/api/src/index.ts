@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import { prisma } from '@seabridge/database';
@@ -28,32 +29,66 @@ import { lifecycleRouter } from './routes/lifecycle';
 import { auditRouter } from './routes/audit';
 import { recordDeletionRouter } from './routes/recordDeletion';
 import { attachmentRouter } from './routes/attachments';
+import { emailRouter } from './routes/email';
+import { exportRouter } from './routes/export';
+import { searchRouter } from './routes/search';
+import { timelineRouter } from './routes/timeline';
+import { bulkRouter } from './routes/bulk';
 import { auditLog } from './middleware/auditLog';
+import { logger, requestIdMiddleware } from './utils/logger';
+import { cleanupExpiredTokens } from './services/refreshTokenService';
+import { getRedisClient, RedisStore } from './services/redisService';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// Rate limiting - protect against brute force and API abuse
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // 20 attempts per window for auth endpoints
-  message: { success: false, message: 'Too many attempts. Please try again in 15 minutes.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+/**
+ * Create rate limiter with Redis store for distributed deployments.
+ * Falls back to in-memory store if Redis is not available.
+ */
+async function createRateLimiters() {
+  const redisClient = await getRedisClient();
+  
+  const storeOptions = redisClient ? {
+    store: new RedisStore({
+      sendCommand: (command: string, ...args: string[]) => 
+        redisClient.call(command, ...args) as Promise<number>,
+    }),
+  } : {};
 
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 500, // 500 requests per window for general API
-  message: { success: false, message: 'Too many requests. Please try again shortly.' },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+  // Auth endpoints: strict rate limiting to prevent brute force
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 20, // 20 attempts per window
+    message: { success: false, message: 'Too many attempts. Please try again in 15 minutes.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => {
+      // Use IP + email for auth endpoints to prevent distributed attacks
+      const email = req.body?.email || '';
+      return `${req.ip}-${email}`;
+    },
+    ...storeOptions,
+  });
+
+  // General API: more permissive but still protective
+  const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 500, // 500 requests per window
+    message: { success: false, message: 'Too many requests. Please try again shortly.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+    ...storeOptions,
+  });
+
+  return { authLimiter, apiLimiter, isDistributed: !!redisClient };
+}
 
 // Middleware
 app.use(helmet());
+app.use(compression()); // Enable gzip compression for all responses
 app.use(cors({
   origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
   credentials: true,
@@ -61,70 +96,103 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Request ID tracking - adds unique ID to each request for tracing
+app.use(requestIdMiddleware);
+
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), requestId: (req as any).requestId });
 });
-
-// API Routes
-// Auth routes have stricter rate limiting to prevent brute force attacks
-app.use('/api/auth', authLimiter, authRouter);
-
-// All other API routes use general rate limiting
-app.use('/api', apiLimiter);
-
-// Record every successful create/update/delete. Mounted after /api/auth on
-// purpose: login bodies carry passwords, and a failed login changes nothing.
-// The middleware reads req.user inside the response 'finish' handler, so the
-// per-router authenticate call has already run by the time it needs the actor.
-app.use('/api', auditLog);
-
-app.use('/api/users', userRouter);
-app.use('/api/buyers', buyerRouter);
-app.use('/api/products', productRouter);
-app.use('/api/suppliers', supplierRouter);
-app.use('/api/cha', chaRouter);
-app.use('/api/transporters', transporterRouter);
-app.use('/api/inquiries', inquiryRouter);
-app.use('/api/quotations', quotationRouter);
-app.use('/api/orders', orderRouter);
-app.use('/api/invoices', invoiceRouter);
-app.use('/api/dashboard', dashboardRouter);
-app.use('/api/master', masterDataRouter);
-app.use('/api/automation', automationRouter);
-app.use('/api/expenses', expenseRouter);
-app.use('/api/income', incomeRouter);
-app.use('/api/tasks', taskRouter);
-app.use('/api/exchange-rates', exchangeRateRouter);
-app.use('/api/settings', settingsRouter);
-app.use('/api/lifecycle', lifecycleRouter);
-app.use('/api/audit', auditRouter);
-app.use('/api/records', recordDeletionRouter);
-app.use('/api/attachments', attachmentRouter);
-
-// Error handling
-// 404 for anything that didn't match a route above, then the error handler.
-app.use(notFoundHandler);
-app.use(errorHandler);
 
 // Start server
 const startServer = async () => {
   try {
     // Validate critical security configuration
     if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32) {
-      console.error('❌ FATAL: JWT_SECRET must be set and at least 32 characters');
+      logger.error('FATAL: JWT_SECRET must be set and at least 32 characters');
       process.exit(1);
     }
 
     await prisma.$connect();
-    console.log('✅ Database connected');
+    logger.info('Database connected');
+
+    // Initialize rate limiters (with Redis if available)
+    const { authLimiter, apiLimiter, isDistributed } = await createRateLimiters();
+    logger.info('Rate limiting initialized', { distributed: isDistributed });
+
+    // API Routes
+    // Auth routes have stricter rate limiting to prevent brute force attacks
+    app.use('/api/auth', authLimiter, authRouter);
+
+    // All other API routes use general rate limiting
+    app.use('/api', apiLimiter);
+
+    // Record every successful create/update/delete. Mounted after /api/auth on
+    // purpose: login bodies carry passwords, and a failed login changes nothing.
+    // The middleware reads req.user inside the response 'finish' handler, so the
+    // per-router authenticate call has already run by the time it needs the actor.
+    app.use('/api', auditLog);
+
+    app.use('/api/users', userRouter);
+    app.use('/api/buyers', buyerRouter);
+    app.use('/api/products', productRouter);
+    app.use('/api/suppliers', supplierRouter);
+    app.use('/api/cha', chaRouter);
+    app.use('/api/transporters', transporterRouter);
+    app.use('/api/inquiries', inquiryRouter);
+    app.use('/api/quotations', quotationRouter);
+    app.use('/api/orders', orderRouter);
+    app.use('/api/invoices', invoiceRouter);
+    app.use('/api/dashboard', dashboardRouter);
+    app.use('/api/master', masterDataRouter);
+    app.use('/api/automation', automationRouter);
+    app.use('/api/expenses', expenseRouter);
+    app.use('/api/income', incomeRouter);
+    app.use('/api/tasks', taskRouter);
+    app.use('/api/exchange-rates', exchangeRateRouter);
+    app.use('/api/settings', settingsRouter);
+    app.use('/api/lifecycle', lifecycleRouter);
+    app.use('/api/audit', auditRouter);
+    app.use('/api/records', recordDeletionRouter);
+    app.use('/api/attachments', attachmentRouter);
+    app.use('/api/email', emailRouter);
+    app.use('/api/export', exportRouter);
+    app.use('/api/search', searchRouter);
+    app.use('/api/timeline', timelineRouter);
+    app.use('/api/bulk', bulkRouter);
+
+    // Error handling
+    // 404 for anything that didn't match a route above, then the error handler.
+    app.use(notFoundHandler);
+    app.use(errorHandler);
+
+    // Schedule token cleanup - runs daily at startup and every 24 hours
+    const runTokenCleanup = async () => {
+      try {
+        const count = await cleanupExpiredTokens();
+        if (count > 0) {
+          logger.info('Token cleanup completed', { deletedCount: count });
+        }
+      } catch (error) {
+        logger.error('Token cleanup failed', { error: (error as Error).message });
+      }
+    };
+
+    // Run cleanup on startup (after a short delay to let the server start)
+    setTimeout(runTokenCleanup, 10000);
+    
+    // Schedule cleanup to run every 24 hours
+    setInterval(runTokenCleanup, 24 * 60 * 60 * 1000);
+    logger.info('Token cleanup scheduled (daily)');
     
     app.listen(PORT, () => {
-      console.log(`🚀 SeaBridge API running on port ${PORT}`);
-      console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+      logger.info('SeaBridge API started', {
+        port: PORT,
+        environment: process.env.NODE_ENV || 'development',
+      });
     });
   } catch (error) {
-    console.error('❌ Failed to start server:', error);
+    logger.error('Failed to start server', { error: (error as Error).message });
     process.exit(1);
   }
 };

@@ -11,6 +11,7 @@
  */
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '@seabridge/database';
+import { logger } from '../utils/logger';
 
 /** Field names whose values must never be written to the log. */
 const SENSITIVE_KEYS = [
@@ -100,6 +101,9 @@ function entityIdFor(req: Request, body: any): string {
  *
  * Only 2xx responses are logged: a rejected request changed nothing, and logging
  * it would fill the trail with noise that hides the real changes.
+ * 
+ * For UPDATE/DELETE operations, attempts to capture oldValues by fetching the
+ * record before the handler runs.
  */
 export function auditLog(req: Request, res: Response, next: NextFunction) {
   const action = actionFor(req.method);
@@ -109,42 +113,103 @@ export function auditLog(req: Request, res: Response, next: NextFunction) {
   // record is only known once the handler has produced it.
   const originalJson = res.json.bind(res);
   let captured: any = null;
+  let oldValues: any = null;
 
   res.json = (body: any) => {
     captured = body;
     return originalJson(body);
   };
 
-  res.on('finish', () => {
-    if (res.statusCode < 200 || res.statusCode >= 300) return;
+  // For UPDATE/DELETE, try to fetch the record before modification
+  const captureOldValues = async () => {
+    if (action !== 'UPDATE' && action !== 'DELETE') return;
+    
+    const entityType = entityTypeFor(req.path);
+    const entityId = req.params?.id ?? Object.values(req.params ?? {})[0];
+    
+    if (!entityId) return;
 
-    const user = (req as any).user;
+    // Map entity types to Prisma models
+    const modelMap: Record<string, string> = {
+      BUYERS: 'buyer',
+      INVOICES: 'invoice',
+      ORDERS: 'exportOrder',
+      QUOTATIONS: 'quotation',
+      INQUIRIES: 'inquiry',
+      PRODUCTS: 'product',
+      SUPPLIERS: 'supplier',
+      USERS: 'user',
+      EXPENSES: 'expense',
+      INCOME: 'income',
+      TASKS: 'task',
+      WEBHOOKS: 'webhook',
+      CHA: 'cha',
+      TRANSPORTERS: 'transporter',
+      COUNTRIES: 'country',
+      PORTS: 'port',
+      CURRENCIES: 'currency',
+      INCOTERMS: 'incoterm',
+      PRODUCT_CATEGORIES: 'productCategory',
+      EXCHANGE_RATES: 'exchangeRate',
+    };
 
-    // Fire and forget. The response has already gone out, so nothing here can
-    // affect the caller.
-    void prisma.auditLog
-      .create({
-        data: {
-          userId: user?.id ?? null,
-          action,
-          entityType: entityTypeFor(req.path),
-          entityId: String(entityIdFor(req, captured)),
-          // The request body is what was asked for; the response is what
-          // resulted. Storing the request keeps the log useful even when the
-          // handler returns only an id.
-          newValues: redact(req.body) as any,
-          ipAddress:
-            (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ??
-            req.socket?.remoteAddress ??
-            null,
-          userAgent: (req.headers['user-agent'] as string) ?? null,
-        },
-      })
-      .catch((error) => {
-        // Never rethrow: the operation itself already succeeded.
-        console.error('[audit] failed to record entry:', (error as Error).message);
+    const model = modelMap[entityType];
+    if (!model) return;
+
+    try {
+      // @ts-ignore - Dynamic model access
+      const record = await (prisma as any)[model]?.findUnique({
+        where: { id: entityId },
       });
-  });
+      if (record) {
+        oldValues = redact(record);
+      }
+    } catch (err) {
+      // Silent fail - old values are nice to have, not critical
+      logger.warn('Audit log failed to capture old values', { 
+        entityType, 
+        entityId, 
+        error: (err as Error).message 
+      });
+    }
+  };
 
-  next();
+  // Capture old values asynchronously, then proceed
+  captureOldValues()
+    .catch(() => {}) // Swallow any errors
+    .finally(() => {
+      res.on('finish', () => {
+        if (res.statusCode < 200 || res.statusCode >= 300) return;
+
+        const user = (req as any).user;
+
+        // Fire and forget. The response has already gone out, so nothing here can
+        // affect the caller.
+        void prisma.auditLog
+          .create({
+            data: {
+              userId: user?.id ?? null,
+              action,
+              entityType: entityTypeFor(req.path),
+              entityId: String(entityIdFor(req, captured)),
+              // The request body is what was asked for; the response is what
+              // resulted. Storing the request keeps the log useful even when the
+              // handler returns only an id.
+              newValues: redact(req.body) as any,
+              oldValues: oldValues as any,
+              ipAddress:
+                (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ??
+                req.socket?.remoteAddress ??
+                null,
+              userAgent: (req.headers['user-agent'] as string) ?? null,
+            },
+          })
+          .catch((error) => {
+            // Never rethrow: the operation itself already succeeded.
+            logger.error('Audit log failed to record entry', { error: (error as Error).message });
+          });
+      });
+
+      next();
+    });
 }

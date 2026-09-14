@@ -44,6 +44,8 @@ model User {
 
   // Relations
   employee         Employee?
+  sessions         Session[]
+  refreshTokens    RefreshToken[]
   createdInquiries Inquiry[]       @relation("InquiryCreatedBy")
   ownedInquiries   Inquiry[]       @relation("InquirySalesOwner")
   tasks            Task[]          @relation("TaskAssignee")
@@ -64,7 +66,30 @@ model Session {
   expiresAt DateTime @map("expires_at")
   createdAt DateTime @default(now()) @map("created_at")
 
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@map("sessions")
+}
+
+/// Refresh tokens for JWT rotation. Each token can only be used once.
+/// When used, a new refresh token is issued and the old one is revoked.
+model RefreshToken {
+  id          String    @id @default(cuid())
+  userId      String    @map("user_id")
+  token       String    @unique
+  family      String    // Token family for rotation detection
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  replacedBy  String?   @map("replaced_by") // ID of the token that replaced this one
+  userAgent   String?   @map("user_agent")
+  ipAddress   String?   @map("ip_address")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([family])
+  @@map("refresh_tokens")
 }
 
 // ============================================
@@ -405,6 +430,9 @@ model Buyer {
   billedOrders   ExportOrder[]   @relation("OrderBillToBuyer")
   invoices       Invoice[]
 
+  @@index([status])
+  @@index([countryId])
+  @@index([companyName])
   @@map("buyers")
 }
 
@@ -497,6 +525,10 @@ model Inquiry {
   quotations  Quotation[]
   followUps   FollowUp[]
 
+  // Indexes for pipeline/kanban queries
+  @@index([stage])
+  @@index([salesOwnerId])
+  @@index([buyerId])
   @@map("inquiries")
 }
 
@@ -764,7 +796,15 @@ model ExportOrder {
   shipments       Shipment[]
   invoices        Invoice[]
 
+  // Unique constraint prevents duplicate orders from the same quotation.
+  // Without this, concurrent "Convert to Order" clicks could both pass the
+  // findFirst check in orderService.ts and create duplicate orders.
+  @@unique([quotationId])
   @@index([billToBuyerId])
+  @@index([status])
+  @@index([buyerId])
+  @@index([orderDate])
+  @@index([status, orderDate])
   @@map("export_orders")
 }
 
@@ -1043,8 +1083,14 @@ model Invoice {
   order    ExportOrder @relation(fields: [orderId], references: [id])
   buyer    Buyer       @relation(fields: [buyerId], references: [id])
   payments Payment[]
-  incomeEntries Income[]
+  incomeEntries Income[] @relation("InvoiceIncomeEntries")
+  forexLossExpenses Expense[] @relation("InvoiceForexLossExpenses")
 
+  // Indexes for dashboard and receivables queries
+  @@index([status])
+  @@index([dueDate])
+  @@index([buyerId])
+  @@index([status, dueDate])
   @@map("invoices")
 }
 
@@ -1080,7 +1126,7 @@ model Payment {
 model Expense {
   id           String   @id @default(cuid())
   expenseNumber String  @unique @map("expense_number")
-  category     String   // SUPPLIER_PAYMENT, FREIGHT, CHA, TRANSPORT, PACKAGING, TRAVEL, OFFICE, OTHER
+  category     String   // SUPPLIER_PAYMENT, FREIGHT, CHA, TRANSPORT, PACKAGING, INSURANCE, INSPECTION, COMMISSION, CERTIFICATION, TRAVEL, OFFICE, BANK_CHARGES, FOREX_LOSS, OTHER
   description  String
   // INR.
   amount       Decimal  @db.Decimal(12, 2)
@@ -1120,13 +1166,18 @@ model Expense {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
+  // Optional link to invoice (for forex loss tracking)
+  linkedInvoiceId String? @map("linked_invoice_id")
+
   // Relations
   payments ExpensePayment[]
+  linkedInvoice Invoice? @relation("InvoiceForexLossExpenses", fields: [linkedInvoiceId], references: [id])
 
   @@unique([sourceType, sourceId])
   @@index([category])
   @@index([status])
   @@index([expenseDate])
+  @@index([linkedInvoiceId])
   @@map("expenses")
 }
 
@@ -1177,7 +1228,7 @@ model Income {
   updatedAt        DateTime @updatedAt @map("updated_at")
 
   // Relations
-  linkedInvoice Invoice? @relation(fields: [linkedInvoiceId], references: [id])
+  linkedInvoice Invoice? @relation("InvoiceIncomeEntries", fields: [linkedInvoiceId], references: [id])
   createdBy     User     @relation(fields: [createdById], references: [id])
 
   @@map("income")
@@ -1277,6 +1328,11 @@ model Task {
   assignee  User @relation("TaskAssignee", fields: [assigneeId], references: [id])
   createdBy User @relation("TaskCreatedBy", fields: [createdById], references: [id])
 
+  // Indexes for task list and dashboard queries
+  @@index([assigneeId])
+  @@index([status])
+  @@index([dueDate])
+  @@index([assigneeId, status])
   @@map("tasks")
 }
 
@@ -1299,6 +1355,12 @@ model AuditLog {
   // Relations
   user User? @relation(fields: [userId], references: [id])
 
+  // Indexes for audit log filtering - entityType and createdAt are filtered on every query
+  @@index([entityType])
+  @@index([entityId])
+  @@index([createdAt])
+  @@index([userId])
+  @@index([entityType, createdAt])
   @@map("audit_logs")
 }
 
@@ -1345,6 +1407,9 @@ model Webhook {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  // Relations
+  logs WebhookLog[]
+
   @@map("webhooks")
 }
 
@@ -1359,6 +1424,10 @@ model WebhookLog {
   duration    Int?     // Response time in ms
   createdAt   DateTime @default(now()) @map("created_at")
 
+  // Relations
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
   @@map("webhook_logs")
 }
 

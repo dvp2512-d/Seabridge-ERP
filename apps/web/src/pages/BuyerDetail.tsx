@@ -8,13 +8,14 @@ import { formatCurrency, formatDate, formatDateTime, getStatusColor, cn, BASE_CU
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import DeleteRecordButton from '@/components/DeleteRecordButton';
+import { ActivityTimeline } from '@/components/ActivityTimeline';
 import {
   ArrowLeft, Mail, Phone, Globe, Building2, Edit2, Plus,
   User, MessageSquare, FileText, ShoppingCart, IndianRupee,
-  Calendar, MapPin, CreditCard, TrendingUp
+  Calendar, MapPin, CreditCard, TrendingUp, Clock
 } from 'lucide-react';
 
-type TabType = 'overview' | 'contacts' | 'communications' | 'inquiries' | 'orders' | 'invoices';
+type TabType = 'overview' | 'contacts' | 'communications' | 'inquiries' | 'orders' | 'invoices' | 'activity';
 
 export default function BuyerDetail() {
   const { id } = useParams<{ id: string }>();
@@ -67,6 +68,7 @@ export default function BuyerDetail() {
     { id: 'inquiries', label: 'Inquiries', icon: FileText, count: buyer.inquiries?.length },
     { id: 'orders', label: 'Orders', icon: ShoppingCart, count: buyer.orders?.length },
     { id: 'invoices', label: 'Invoices', icon: IndianRupee, count: buyer.invoices?.length },
+    { id: 'activity', label: 'Activity', icon: Clock },
   ];
 
   return (
@@ -182,6 +184,12 @@ export default function BuyerDetail() {
       {activeTab === 'inquiries' && <InquiriesTab inquiries={buyer.inquiries || []} />}
       {activeTab === 'orders' && <OrdersTab orders={buyer.orders || []} />}
       {activeTab === 'invoices' && <InvoicesTab invoices={buyer.invoices || []} />}
+      {activeTab === 'activity' && (
+        <div className="card p-6">
+          <h3 className="text-lg font-medium text-gray-900 mb-4">Activity History</h3>
+          <ActivityTimeline entityType="buyer" entityId={id!} />
+        </div>
+      )}
 
       {/* Modals */}
       {showEditModal && (

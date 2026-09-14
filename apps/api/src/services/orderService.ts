@@ -2,6 +2,7 @@ import { prisma } from '@seabridge/database';
 import { AppError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
 import { calculateInclusiveUnitPrices } from './inclusivePricing';
+import { logger } from '../utils/logger';
 
 /**
  * Default export documentation checklist created with every new order.
@@ -59,7 +60,7 @@ function packingFromProduct(
   product: { defaultPackageType?: string | null; defaultPackageWeight?: unknown } | null,
   quoted: { packageType?: string | null; packageWeight?: unknown } = {}
 ) {
-  // Priority: quotation > product default > null
+  // Priority: quotation (from inquiry) > product default > null
   const packageType =
     quoted.packageType ??
     product?.defaultPackageType ??
@@ -254,10 +255,11 @@ export async function createOrderFromQuotation(
   // That is logged rather than refused: blocking a legitimate order over a
   // rounding difference would be worse than the difference itself.
   if (!pricing.reconciled) {
-    console.warn(
-      `[order] ${quotation.quotationNumber}: additional costs leave a rounding remainder of ` +
-        `${pricing.remainder}; order total is ${pricing.total}`
-    );
+    logger.warn('Order conversion has rounding remainder', {
+      quotationNumber: quotation.quotationNumber,
+      remainder: pricing.remainder,
+      orderTotal: pricing.total,
+    });
   }
 
   return prisma.$transaction(async (tx) => {

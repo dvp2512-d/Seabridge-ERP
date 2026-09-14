@@ -13,6 +13,7 @@
 import { Router } from 'express';
 import { authenticate, can } from '../middleware/auth';
 import { getBaseCurrency } from '../services/exchangeRateService';
+import { cache, CACHE_TTL, CACHE_KEYS } from '../services/cacheService';
 
 const router: Router = Router();
 
@@ -20,6 +21,12 @@ router.use(authenticate);
 
 router.get('/market-check', can('MASTER_VIEW'), async (_req, res, next) => {
   try {
+    // Try cache first (15-minute TTL for exchange rates)
+    const cached = cache.get<any>(CACHE_KEYS.EXCHANGE_RATES);
+    if (cached) {
+      return res.json({ success: true, data: cached });
+    }
+
     const base = await getBaseCurrency();
 
     // No API key needed, and a failure here must not block rate entry.
@@ -28,10 +35,10 @@ router.get('/market-check', can('MASTER_VIEW'), async (_req, res, next) => {
     });
 
     if (!response.ok) {
-      return res.json({
-        success: true,
-        data: { available: false, reason: `provider returned ${response.status}` },
-      });
+      const errorData = { available: false, reason: `provider returned ${response.status}` };
+      // Cache errors for 1 minute to prevent hammering a failing provider
+      cache.set(CACHE_KEYS.EXCHANGE_RATES, errorData, CACHE_TTL.SHORT);
+      return res.json({ success: true, data: errorData });
     }
 
     const payload: any = await response.json();
@@ -46,21 +53,23 @@ router.get('/market-check', can('MASTER_VIEW'), async (_req, res, next) => {
       }
     }
 
-    res.json({
-      success: true,
-      data: {
-        available: true,
-        baseCode: base.code,
-        asOf: payload?.time_last_update_utc ?? null,
-        ratesPerForeignUnit: inverted,
-      },
-    });
+    const data = {
+      available: true,
+      baseCode: base.code,
+      asOf: payload?.time_last_update_utc ?? null,
+      ratesPerForeignUnit: inverted,
+    };
+
+    // Cache for 15 minutes
+    cache.set(CACHE_KEYS.EXCHANGE_RATES, data, CACHE_TTL.EXCHANGE_RATES);
+
+    res.json({ success: true, data });
   } catch (error) {
     // Advisory only, so a provider outage returns "unavailable" rather than 500.
-    res.json({
-      success: true,
-      data: { available: false, reason: (error as Error).message },
-    });
+    const errorData = { available: false, reason: (error as Error).message };
+    // Cache errors for 1 minute
+    cache.set(CACHE_KEYS.EXCHANGE_RATES, errorData, CACHE_TTL.SHORT);
+    res.json({ success: true, data: errorData });
   }
 });
 

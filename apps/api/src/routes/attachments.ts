@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { ValidationError, NotFoundError, AppError } from '../middleware/errorHandler';
+import { contentDisposition } from '../utils/helpers';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
@@ -172,7 +173,7 @@ router.get('/:id/download', can('OPERATIONS_VIEW'), async (req, res, next) => {
     }
 
     res.setHeader('Content-Type', attachment.mimeType);
-    res.setHeader('Content-Disposition', `attachment; filename="${attachment.originalName}"`);
+    res.setHeader('Content-Disposition', contentDisposition(attachment.originalName));
     res.setHeader('Content-Length', attachment.fileSize);
 
     const fileStream = fs.createReadStream(filePath);

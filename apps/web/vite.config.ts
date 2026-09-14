@@ -28,7 +28,6 @@ export default defineConfig({
         manualChunks: {
           react: ['react', 'react-dom', 'react-router-dom'],
           query: ['@tanstack/react-query', 'axios', 'zustand'],
-          charts: ['recharts'],
           ui: ['lucide-react', 'react-hot-toast', 'clsx', 'tailwind-merge'],
           forms: ['react-hook-form', '@hookform/resolvers', 'zod'],
         },

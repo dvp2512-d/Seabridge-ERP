@@ -10,6 +10,7 @@ import Modal from '@/components/ui/Modal';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import DeleteRecordButton from '@/components/DeleteRecordButton';
+import { ActivityTimeline } from '@/components/ActivityTimeline';
 import { formatCurrency, formatDate, getStatusColor, isPastDue, cn, BASE_CURRENCY_CODE } from '@/lib/utils';
 import { refreshAggregates } from '@/lib/queryKeys';
 import { PACKAGE_TYPE_OPTIONS, packageCountLabel } from '@/lib/packageTypes';
@@ -42,6 +43,7 @@ import {
   Upload,
   Trash2,
   Paperclip,
+  Clock as ClockIcon,
 } from 'lucide-react';
 
 const ORDER_STAGES = ['CONFIRMED', 'IN_PRODUCTION', 'READY_TO_SHIP', 'SHIPPED', 'DELIVERED'];
@@ -64,7 +66,7 @@ export default function OrderDetail() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const [activeTab, setActiveTab] = useState<'items' | 'procurement' | 'documents' | 'shipments' | 'invoices'>('items');
+  const [activeTab, setActiveTab] = useState<'items' | 'procurement' | 'documents' | 'shipments' | 'invoices' | 'activity'>('items');
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   /** The header fields every document raised against this order prints. */
@@ -283,6 +285,7 @@ export default function OrderDetail() {
                   { key: 'documents', label: 'Documents', icon: FileText, count: order.documents?.length },
                   { key: 'shipments', label: 'Shipments', icon: Ship, count: order.shipments?.length },
                   { key: 'invoices', label: 'Invoices', icon: Receipt, count: order.invoices?.length },
+                  { key: 'activity', label: 'Activity', icon: ClockIcon },
                 ].map((tab) => (
                   <button
                     key={tab.key}
@@ -329,6 +332,11 @@ export default function OrderDetail() {
                 />
               )}
               {activeTab === 'invoices' && <InvoicesTab order={order} currency={currency} />}
+              {activeTab === 'activity' && (
+                <div className="p-6">
+                  <ActivityTimeline entityType="order" entityId={id!} />
+                </div>
+              )}
             </div>
           </div>
 

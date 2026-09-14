@@ -4,7 +4,7 @@ import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { getBaseCurrency } from '../services/exchangeRateService';
-import { generateCode } from '../utils/helpers';
+import { generateCode, contentDisposition } from '../utils/helpers';
 import { optionalEmail } from '../utils/validators';
 
 const router: Router = Router();
@@ -360,7 +360,7 @@ router.get('/export/csv', can('BUYER_VIEW'), async (req, res, next) => {
     // Send as file download
     const filename = `buyers-export-${new Date().toISOString().split('T')[0]}.csv`;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Disposition', contentDisposition(filename));
     res.send(csvContent);
   } catch (error) {
     next(error);

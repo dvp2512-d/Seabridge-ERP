@@ -3,8 +3,7 @@ import { z } from 'zod';
 import { prisma, Prisma, InquiryStage } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
-import { generateCode, calculateMarginPercent } from '../utils/helpers';
-import { PACKAGE_TYPES } from '../utils/packageTypes';
+import { generateCode, calculateMarginPercent, contentDisposition } from '../utils/helpers';
 import { generateQuotationPDF } from '../services/pdfService';
 import {
   BASE_CURRENCY_CODE,
@@ -132,9 +131,8 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
         // margin: price = cost / (1 - margin). Each line carries its own price,
         // so a cheap line and an expensive line are never priced alike.
         unitPrice: z.number().finite().positive(),
-        // The packing this line is quoted on, carried from the inquiry. Part of the
-        // agreement: a price for 25kg bags is not a price for jumbo bags.
-        packageType: z.enum(PACKAGE_TYPES).optional(),
+        // Auto-filled from inquiry, flows through to order for packing list
+        packageType: z.string().optional(),
         packageWeight: z.number().positive().optional(),
         specifications: z.string().optional(),
       })).min(1),
@@ -458,7 +456,7 @@ router.get('/:id/pdf', can('SALES_VIEW'), async (req, res, next) => {
     });
 
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${quotation.quotationNumber}.pdf"`);
+    res.setHeader('Content-Disposition', contentDisposition(`${quotation.quotationNumber}.pdf`));
     res.send(pdfBuffer);
   } catch (error) {
     next(error);
@@ -511,6 +509,7 @@ router.post('/:id/revise', can('SALES_MANAGE'), async (req, res, next) => {
         unit: z.string().optional(),
         unitCost: z.number().min(0),
         unitPrice: z.number().min(0),
+        // Carried from inquiry
         packageType: z.string().optional().nullable(),
         packageWeight: z.number().optional().nullable(),
         specifications: z.string().optional().nullable(),

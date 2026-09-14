@@ -16,10 +16,12 @@
  *    call came from us.
  *  - Repeatedly failing webhooks are deactivated rather than retried forever.
  *  - URLs are validated to prevent SSRF attacks against internal networks.
+ *  - Failed deliveries are retried with exponential backoff.
  */
 import crypto from 'crypto';
 import { prisma } from '@seabridge/database';
 import { isObviouslyUnsafeUrl } from '../utils/urlValidator';
+import { logger } from '../utils/logger';
 
 /** Events the rest of the application can raise. */
 export type DomainEvent =
@@ -44,6 +46,23 @@ const TIMEOUT_MS = 10_000;
 /** A webhook failing this many times in a row is switched off. */
 const MAX_CONSECUTIVE_FAILURES = 10;
 
+/** Retry delays in milliseconds: 1m, 5m, 30m, 2h, 12h */
+const RETRY_DELAYS_MS = [
+  60 * 1000,        // 1 minute
+  5 * 60 * 1000,    // 5 minutes
+  30 * 60 * 1000,   // 30 minutes
+  2 * 60 * 60 * 1000,  // 2 hours
+  12 * 60 * 60 * 1000, // 12 hours
+];
+
+/**
+ * Calculate next retry time with exponential backoff
+ */
+function getNextRetryDelay(failCount: number): number {
+  const index = Math.min(failCount, RETRY_DELAYS_MS.length - 1);
+  return RETRY_DELAYS_MS[index];
+}
+
 /**
  * Sign the payload so the receiver can confirm it came from us.
  * HMAC-SHA256 over the exact body, which is the convention receivers expect.
@@ -56,7 +75,7 @@ function sign(body: string, secret: string): string {
 async function deliver(webhook: any, event: DomainEvent, payload: unknown): Promise<void> {
   // SSRF Protection: Validate URL before making request
   if (isObviouslyUnsafeUrl(webhook.url)) {
-    console.warn(`[webhook] "${webhook.name}" blocked: URL failed SSRF validation`);
+    logger.warn('Webhook blocked: URL failed SSRF validation', { webhookName: webhook.name });
     // Log the blocked attempt
     try {
       await prisma.webhookLog.create({
@@ -139,12 +158,13 @@ async function deliver(webhook: any, event: DomainEvent, payload: unknown): Prom
     });
 
     if (!succeeded && webhook.failCount + 1 >= MAX_CONSECUTIVE_FAILURES) {
-      console.warn(
-        `[webhook] "${webhook.name}" deactivated after ${MAX_CONSECUTIVE_FAILURES} consecutive failures`
-      );
+      logger.warn('Webhook deactivated due to consecutive failures', {
+        webhookName: webhook.name,
+        failCount: MAX_CONSECUTIVE_FAILURES,
+      });
     }
   } catch (error) {
-    console.error('[webhook] failed to record delivery:', (error as Error).message);
+    logger.error('Webhook failed to record delivery', { error: (error as Error).message });
   }
 }
 
@@ -167,7 +187,7 @@ export function emitEvent(event: DomainEvent, payload: unknown): void {
       // Deliver in parallel; one bad endpoint should not hold up the others.
       await Promise.allSettled(webhooks.map((w) => deliver(w, event, payload)));
     } catch (error) {
-      console.error(`[webhook] dispatch failed for ${event}:`, (error as Error).message);
+      logger.error('Webhook dispatch failed', { event, error: (error as Error).message });
     }
   })();
 
@@ -198,23 +218,22 @@ async function runAutomations(event: DomainEvent, payload: any): Promise<void> {
       if (!action || action.type !== 'CREATE_TASK') {
         // Unsupported action types are skipped loudly rather than silently, so a
         // rule that will never do anything is discoverable.
-        console.warn(
-          `[automation] rule "${rule.name}" has unsupported action type "${action?.type}" - skipped`
-        );
+        logger.warn('Automation rule has unsupported action type - skipped', {
+          ruleName: rule.name,
+          actionType: action?.type,
+        });
         continue;
       }
 
       if (!action.assigneeId) {
-        console.warn(`[automation] rule "${rule.name}" has no assigneeId - skipped`);
+        logger.warn('Automation rule has no assigneeId - skipped', { ruleName: rule.name });
         continue;
       }
 
       // The assignee may have been deactivated since the rule was written.
       const assignee = await prisma.user.findUnique({ where: { id: action.assigneeId } });
       if (!assignee || assignee.status !== 'ACTIVE') {
-        console.warn(
-          `[automation] rule "${rule.name}" targets an unavailable user - skipped`
-        );
+        logger.warn('Automation rule targets an unavailable user - skipped', { ruleName: rule.name });
         continue;
       }
 
@@ -243,7 +262,7 @@ async function runAutomations(event: DomainEvent, payload: any): Promise<void> {
       });
     }
   } catch (error) {
-    console.error(`[automation] failed for ${event}:`, (error as Error).message);
+    logger.error('Automation failed', { event, error: (error as Error).message });
   }
 }
 
@@ -262,3 +281,81 @@ export const DOMAIN_EVENTS: DomainEvent[] = [
   'payment.recorded',
   'expense.approved',
 ];
+
+/**
+ * Retry failed webhook deliveries with exponential backoff.
+ * Should be called periodically (e.g., every minute via cron).
+ * 
+ * Checks WebhookLog entries that failed and schedules retries based on
+ * the fail count and time since last attempt.
+ */
+export async function retryFailedWebhooks(): Promise<{ retried: number; succeeded: number }> {
+  // Find webhooks with recent failures that are due for retry
+  const failedLogs = await prisma.webhookLog.findMany({
+    where: {
+      status: { lt: 200 }, // Failed requests
+      createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) }, // Last 24 hours
+    },
+    include: {
+      webhook: true,
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  });
+
+  // Group by webhook and get the most recent failure for each
+  const webhookFailures = new Map<string, typeof failedLogs[0]>();
+  for (const log of failedLogs) {
+    if (!webhookFailures.has(log.webhookId)) {
+      webhookFailures.set(log.webhookId, log);
+    }
+  }
+
+  let retried = 0;
+  let succeeded = 0;
+
+  for (const [webhookId, lastFailure] of webhookFailures) {
+    const webhook = lastFailure.webhook;
+    
+    // Skip if webhook is deactivated
+    if (!webhook.isActive) continue;
+    
+    // Check if enough time has passed for retry
+    const retryDelay = getNextRetryDelay(webhook.failCount);
+    const timeSinceLastAttempt = Date.now() - lastFailure.createdAt.getTime();
+    
+    if (timeSinceLastAttempt < retryDelay) {
+      continue; // Not yet time for retry
+    }
+
+    // Get the original payload from the failed log
+    const payload = lastFailure.payload as any;
+    if (!payload?.event || !payload?.data) continue;
+
+    retried++;
+    
+    // Attempt redelivery
+    try {
+      await deliver(webhook, payload.event as DomainEvent, payload.data);
+      
+      // Check if it succeeded (by looking at the latest log)
+      const latestLog = await prisma.webhookLog.findFirst({
+        where: { webhookId },
+        orderBy: { createdAt: 'desc' },
+      });
+      
+      if (latestLog && latestLog.status >= 200 && latestLog.status < 300) {
+        succeeded++;
+        logger.info('Webhook retry succeeded', { webhookId, webhookName: webhook.name });
+      }
+    } catch (error) {
+      logger.error('Webhook retry failed', { webhookId, error: (error as Error).message });
+    }
+  }
+
+  if (retried > 0) {
+    logger.info('Webhook retry batch completed', { retried, succeeded });
+  }
+
+  return { retried, succeeded };
+}

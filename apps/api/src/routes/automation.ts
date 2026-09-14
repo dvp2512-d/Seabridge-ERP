@@ -142,7 +142,7 @@ router.post('/webhooks/:id/test', can('SETTINGS_MANAGE'), async (req, res, next)
       throw new AppError('Webhook URL failed security validation', 400);
     }
 
-    // Send test payload
+    // Send test payload with timeout
     const testPayload = {
       event: 'test',
       timestamp: new Date().toISOString(),
@@ -150,6 +150,10 @@ router.post('/webhooks/:id/test', can('SETTINGS_MANAGE'), async (req, res, next)
     };
 
     try {
+      // Create AbortController for timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
       const response = await fetch(webhook.url, {
         method: 'POST',
         headers: {
@@ -158,7 +162,10 @@ router.post('/webhooks/:id/test', can('SETTINGS_MANAGE'), async (req, res, next)
           'X-Webhook-Event': 'test',
         },
         body: JSON.stringify(testPayload),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeoutId);
 
       res.json({
         success: true,
@@ -169,11 +176,13 @@ router.post('/webhooks/:id/test', can('SETTINGS_MANAGE'), async (req, res, next)
         },
       });
     } catch (fetchError: any) {
+      const isTimeout = fetchError.name === 'AbortError';
       res.json({
         success: false,
         data: {
           delivered: false,
-          error: fetchError.message,
+          error: isTimeout ? 'Request timed out after 10 seconds' : fetchError.message,
+          timedOut: isTimeout,
         },
       });
     }

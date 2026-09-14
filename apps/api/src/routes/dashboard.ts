@@ -8,6 +8,7 @@ import {
   financialYearLabel,
 } from '../utils/period';
 import { getBaseCurrency } from '../services/exchangeRateService';
+import { cache, CACHE_TTL, CACHE_KEYS } from '../services/cacheService';
 
 /**
  * Reshape a Prisma groupBy into the { key, count, value } rows the charts read.
@@ -37,6 +38,13 @@ router.use(authenticate);
 // Main founder dashboard
 router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
   try {
+    // Try cache first (2-minute TTL for dashboard data)
+    const cacheKey = `${CACHE_KEYS.DASHBOARD_MAIN}:${req.user?.id || 'anon'}`;
+    const cached = cache.get<any>(cacheKey);
+    if (cached) {
+      return res.json(cached);
+    }
+
     const today = new Date();
     const startOfMonth = monthStart(today);
     /**
@@ -317,7 +325,7 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
     const totalExpenses = round2(expensesPaid);
     const netBalance = round2(totalIncome - totalExpenses);
 
-    res.json({
+    const response = {
       success: true,
       data: {
         // Every money figure below is expressed in this currency.
@@ -431,7 +439,12 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
         pendingTasks,
         alerts: await getAlerts(),
       },
-    });
+    };
+
+    // Cache the response for 2 minutes
+    cache.set(cacheKey, response, CACHE_TTL.DASHBOARD);
+
+    res.json(response);
   } catch (error) {
     next(error);
   }

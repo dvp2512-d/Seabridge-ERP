@@ -277,6 +277,15 @@ function UserFormModal({
     phone: user?.phone ?? '',
   });
 
+  // Password complexity validation (only for new users)
+  const passwordChecks = {
+    length: form.password.length >= 8,
+    uppercase: /[A-Z]/.test(form.password),
+    lowercase: /[a-z]/.test(form.password),
+    number: /[0-9]/.test(form.password),
+  };
+  const isPasswordValid = isEdit || Object.values(passwordChecks).every(Boolean);
+
   const save = useMutation({
     mutationFn: (payload: any) =>
       isEdit ? usersApi.update(user.id, payload) : usersApi.create(payload),
@@ -301,10 +310,9 @@ function UserFormModal({
       toast.error('Enter an email address');
       return;
     }
-    // A weak password on an account that can see every buyer and price is not
-    // worth saving.
-    if (!isEdit && form.password.length < 8) {
-      toast.error('Set a password of at least 8 characters');
+    // Check password complexity for new users
+    if (!isEdit && !isPasswordValid) {
+      toast.error('Password does not meet complexity requirements');
       return;
     }
 
@@ -328,7 +336,7 @@ function UserFormModal({
 
   return (
     <Modal isOpen onClose={onClose} title={isEdit ? 'Edit User' : 'Add User'} size="lg">
-      <form onSubmit={submit} className="space-y-4">
+      <form onSubmit={submit} className="p-6 space-y-4">
         {isSelf && (
           <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 text-blue-800 text-sm">
             <ShieldAlert className="w-4 h-4 mt-0.5 flex-shrink-0" />
@@ -339,6 +347,7 @@ function UserFormModal({
           </div>
         )}
 
+        {/* Row 1: First Name + Last Name */}
         <div className="grid grid-cols-2 gap-4">
           <FormField
             label="First Name"
@@ -352,28 +361,55 @@ function UserFormModal({
             value={form.lastName}
             onChange={(e) => setForm({ ...form, lastName: e.target.value })}
           />
-          <div className="col-span-2">
+        </div>
+
+        {/* Row 2: Email (full width) */}
+        <FormField
+          label="Email"
+          required
+          type="email"
+          value={form.email}
+          onChange={(e) => setForm({ ...form, email: e.target.value })}
+          hint="Used to sign in"
+        />
+
+        {/* Row 3: Password (full width, only for new users) */}
+        {!isEdit && (
+          <div>
             <FormField
-              label="Email"
+              label="Password"
               required
-              type="email"
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-              hint="Used to sign in"
+              type="password"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
             />
+            {/* Password complexity hints */}
+            {form.password ? (
+              <div className="mt-2 space-y-1">
+                <p className={`text-xs flex items-center gap-1 ${passwordChecks.length ? 'text-green-600' : 'text-gray-500'}`}>
+                  {passwordChecks.length ? '✓' : '○'} At least 8 characters
+                </p>
+                <p className={`text-xs flex items-center gap-1 ${passwordChecks.uppercase ? 'text-green-600' : 'text-gray-500'}`}>
+                  {passwordChecks.uppercase ? '✓' : '○'} One uppercase letter
+                </p>
+                <p className={`text-xs flex items-center gap-1 ${passwordChecks.lowercase ? 'text-green-600' : 'text-gray-500'}`}>
+                  {passwordChecks.lowercase ? '✓' : '○'} One lowercase letter
+                </p>
+                <p className={`text-xs flex items-center gap-1 ${passwordChecks.number ? 'text-green-600' : 'text-gray-500'}`}>
+                  {passwordChecks.number ? '✓' : '○'} One number
+                </p>
+                <p className="text-xs text-gray-500 mt-2">Ask the user to change it after first sign-in.</p>
+              </div>
+            ) : (
+              <p className="mt-1 text-xs text-gray-500">
+                Must be 8+ characters with uppercase, lowercase, and a number
+              </p>
+            )}
           </div>
-          {!isEdit && (
-            <div className="col-span-2">
-              <FormField
-                label="Password"
-                required
-                type="password"
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                hint="At least 8 characters. Ask the user to change it after first sign-in."
-              />
-            </div>
-          )}
+        )}
+
+        {/* Row 4: Role + Status (edit) / Phone (2 cols) */}
+        <div className="grid grid-cols-2 gap-4">
           <SelectField
             label="Role"
             value={form.role}
@@ -403,7 +439,7 @@ function UserFormModal({
           <button type="button" onClick={onClose} className="btn btn-secondary">
             Cancel
           </button>
-          <button type="submit" className="btn btn-primary" disabled={save.isPending}>
+          <button type="submit" className="btn btn-primary" disabled={save.isPending || !isPasswordValid}>
             {save.isPending ? 'Saving...' : isEdit ? 'Save Changes' : 'Create User'}
           </button>
         </div>

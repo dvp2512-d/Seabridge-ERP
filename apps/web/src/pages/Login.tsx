@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import toast from 'react-hot-toast';
-import { Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff, HelpCircle } from 'lucide-react';
 import { authApi } from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 
@@ -17,6 +17,7 @@ type LoginForm = z.infer<typeof loginSchema>;
 
 export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const login = useAuthStore((state) => state.login);
@@ -33,8 +34,8 @@ export default function Login() {
     setLoading(true);
     try {
       const response = await authApi.login(data.email, data.password);
-      const { token, user } = response.data.data;
-      login(token, user);
+      const { token, refreshToken, user } = response.data.data;
+      login(token, user, refreshToken);
       toast.success(`Welcome back, ${user.firstName}!`);
       navigate('/');
     } catch (error: any) {
@@ -102,7 +103,16 @@ export default function Login() {
               </div>
 
               <div>
-                <label className="label">Password</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="label mb-0">Password</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotPassword(true)}
+                    className="text-sm text-navy-600 hover:text-navy-800"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
                 <div className="relative">
                   <input
                     type={showPassword ? 'text' : 'password'}
@@ -149,6 +159,40 @@ export default function Login() {
           </p>
         </div>
       </div>
+
+      {/* Forgot Password Modal */}
+      {showForgotPassword && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                <HelpCircle className="w-5 h-5 text-blue-600" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                  Reset Your Password
+                </h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  To reset your password, please contact your system administrator or a user with 
+                  Founder/Admin privileges. They can update your password from the Users section 
+                  in Settings.
+                </p>
+                <p className="text-sm text-gray-500 mb-4">
+                  If you're a Founder and have lost access, contact SeaBridge support for assistance.
+                </p>
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => setShowForgotPassword(false)}
+                    className="btn btn-primary"
+                  >
+                    Got it
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

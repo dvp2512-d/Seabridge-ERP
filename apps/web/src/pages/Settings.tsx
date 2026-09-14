@@ -13,8 +13,6 @@ import {
   Webhook,
   FileText,
   Zap,
-  Key,
-  Shield,
   Plus,
   Edit,
   Trash2,
@@ -26,7 +24,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 
-type SettingsTab = 'profile' | 'company' | 'templates' | 'webhooks' | 'automations' | 'api';
+type SettingsTab = 'profile' | 'company' | 'templates' | 'webhooks' | 'automations';
 
 /**
  * Every field accepted by the profileSchema on PUT /api/settings/company.
@@ -65,13 +63,14 @@ export default function Settings() {
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
 
+  // API Keys tab hidden until feature is implemented
   const tabs = [
     { key: 'profile', label: 'Profile', icon: User },
     { key: 'company', label: 'Company', icon: Building2 },
     { key: 'templates', label: 'Templates', icon: FileText },
     { key: 'webhooks', label: 'Webhooks', icon: Webhook },
     { key: 'automations', label: 'Automations', icon: Zap },
-    { key: 'api', label: 'API Keys', icon: Key },
+    // { key: 'api', label: 'API Keys', icon: Key }, // Coming soon
   ];
 
   return (
@@ -110,7 +109,6 @@ export default function Settings() {
           {activeTab === 'templates' && <TemplatesSettings />}
           {activeTab === 'webhooks' && <WebhooksSettings />}
           {activeTab === 'automations' && <AutomationsSettings />}
-          {activeTab === 'api' && <ApiKeysSettings />}
         </div>
       </div>
     </div>
@@ -207,16 +205,29 @@ function PasswordChangeModal({ onClose }: { onClose: () => void }) {
     confirmPassword: '',
   });
 
+  // Password complexity validation
+  const passwordChecks = {
+    length: formData.newPassword.length >= 8,
+    uppercase: /[A-Z]/.test(formData.newPassword),
+    lowercase: /[a-z]/.test(formData.newPassword),
+    number: /[0-9]/.test(formData.newPassword),
+  };
+  const isPasswordValid = Object.values(passwordChecks).every(Boolean);
+
   const mutation = useMutation({
     mutationFn: () => authApi.changePassword(formData.currentPassword, formData.newPassword),
     onSuccess: () => {
       toast.success('Password changed successfully');
       onClose();
     },
-    onError: () => toast.error('Failed to change password'),
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Failed to change password'),
   });
 
   const handleSubmit = () => {
+    if (!isPasswordValid) {
+      toast.error('Password does not meet complexity requirements');
+      return;
+    }
     if (formData.newPassword !== formData.confirmPassword) {
       toast.error('Passwords do not match');
       return;
@@ -233,21 +244,52 @@ function PasswordChangeModal({ onClose }: { onClose: () => void }) {
           value={formData.currentPassword}
           onChange={(e) => setFormData({ ...formData, currentPassword: e.target.value })}
         />
-        <FormField
-          label="New Password"
-          type="password"
-          value={formData.newPassword}
-          onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
-        />
+        <div>
+          <FormField
+            label="New Password"
+            type="password"
+            value={formData.newPassword}
+            onChange={(e) => setFormData({ ...formData, newPassword: e.target.value })}
+          />
+          {/* Password complexity hints */}
+          {formData.newPassword && (
+            <div className="mt-2 space-y-1">
+              <p className={`text-xs flex items-center gap-1 ${passwordChecks.length ? 'text-green-600' : 'text-gray-500'}`}>
+                {passwordChecks.length ? '✓' : '○'} At least 8 characters
+              </p>
+              <p className={`text-xs flex items-center gap-1 ${passwordChecks.uppercase ? 'text-green-600' : 'text-gray-500'}`}>
+                {passwordChecks.uppercase ? '✓' : '○'} One uppercase letter
+              </p>
+              <p className={`text-xs flex items-center gap-1 ${passwordChecks.lowercase ? 'text-green-600' : 'text-gray-500'}`}>
+                {passwordChecks.lowercase ? '✓' : '○'} One lowercase letter
+              </p>
+              <p className={`text-xs flex items-center gap-1 ${passwordChecks.number ? 'text-green-600' : 'text-gray-500'}`}>
+                {passwordChecks.number ? '✓' : '○'} One number
+              </p>
+            </div>
+          )}
+          {!formData.newPassword && (
+            <p className="mt-1 text-xs text-gray-500">
+              Must be 8+ characters with uppercase, lowercase, and a number
+            </p>
+          )}
+        </div>
         <FormField
           label="Confirm New Password"
           type="password"
           value={formData.confirmPassword}
           onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
         />
+        {formData.confirmPassword && formData.newPassword !== formData.confirmPassword && (
+          <p className="text-xs text-red-600">Passwords do not match</p>
+        )}
         <div className="flex justify-end gap-3 pt-4">
           <button onClick={onClose} className="btn btn-secondary">Cancel</button>
-          <button onClick={handleSubmit} className="btn btn-primary" disabled={mutation.isPending}>
+          <button 
+            onClick={handleSubmit} 
+            className="btn btn-primary" 
+            disabled={mutation.isPending || !isPasswordValid || formData.newPassword !== formData.confirmPassword}
+          >
             {mutation.isPending ? 'Changing...' : 'Change Password'}
           </button>
         </div>
@@ -1037,6 +1079,18 @@ function AutomationsSettings() {
         </button>
       </div>
 
+      {/* Email System Notice */}
+      <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+        <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+        <div className="text-sm">
+          <p className="font-medium text-amber-800">Email notifications not yet configured</p>
+          <p className="text-amber-700 mt-1">
+            Automations can create tasks and trigger webhooks. Email notifications require SMTP 
+            configuration which is not yet set up. Contact your system administrator to enable email features.
+          </p>
+        </div>
+      </div>
+
       {/* Quick Templates */}
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
         <h3 className="font-medium text-blue-900 mb-3">Quick Setup Templates</h3>
@@ -1117,14 +1171,36 @@ function AutomationsSettings() {
           title={selectedAutomation ? `Automation: ${selectedAutomation.name}` : 'New Automation Rule'}
           size="md"
         >
-          <div className="p-6 text-center text-gray-500">
+          <div className="p-6 text-gray-500">
             <Zap className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-            <p className="font-medium text-gray-700">Rule builder not available yet</p>
-            <p className="text-sm mt-2">
-              Triggers, conditions and actions are stored by the API, but the visual builder
-              is still to come. Until then rules can be managed via the API.
-            </p>
-            <button onClick={() => setShowModal(false)} className="btn btn-primary mt-4">Close</button>
+            <p className="font-medium text-gray-700 text-center">Visual rule builder not available yet</p>
+            
+            <div className="mt-4 text-left bg-green-50 border border-green-200 rounded-lg p-4">
+              <h4 className="font-medium text-green-800 text-sm">What works now</h4>
+              <p className="text-sm text-green-700 mt-1">
+                <strong>CREATE_TASK</strong> actions fire automatically when events occur.
+                Rules can be created and managed via the API.
+              </p>
+              <div className="mt-2 text-xs font-mono bg-white rounded p-2 border">
+                POST /api/automation/rules<br/>
+                {`{ "name": "...", "trigger": "inquiry.created",`}<br/>
+                {`  "actions": { "type": "CREATE_TASK", "title": "Follow up",`}<br/>
+                {`    "assigneeId": "...", "dueInDays": 3 } }`}
+              </div>
+            </div>
+
+            <div className="mt-3 text-left bg-gray-50 border border-gray-200 rounded-lg p-4">
+              <h4 className="font-medium text-gray-700 text-sm">Not yet implemented</h4>
+              <ul className="text-sm text-gray-600 mt-1 list-disc list-inside space-y-1">
+                <li>Visual drag-and-drop rule builder</li>
+                <li>SEND_EMAIL action (requires SMTP configuration)</li>
+                <li>CALL_WEBHOOK action</li>
+                <li>UPDATE_RECORD action</li>
+                <li>Conditional logic (if/then)</li>
+              </ul>
+            </div>
+
+            <button onClick={() => setShowModal(false)} className="btn btn-primary mt-4 w-full">Close</button>
           </div>
         </Modal>
       )}
@@ -1132,48 +1208,7 @@ function AutomationsSettings() {
   );
 }
 
-// API Keys Settings
-/**
- * API keys are not implemented.
- *
- * There is an ApiKey model in the schema but no routes behind it, so this tab
- * previously showed a hardcoded fake key with invented dates and five buttons
- * that did nothing. An honest empty state is better than a convincing mock-up
- * someone might rely on.
- */
-function ApiKeysSettings() {
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold">API Keys</h2>
-        <p className="text-sm text-gray-500">For external integrations</p>
-      </div>
-
-      <div className="card">
-        <div className="card-body text-center text-gray-500 py-10">
-          <Key className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-          <p className="font-medium text-gray-700">Not available yet</p>
-          <p className="text-sm mt-2 max-w-md mx-auto">
-            Issuing and revoking API keys has not been built. Until then, integrations
-            should authenticate with a normal user account over{' '}
-            <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">POST /api/auth/login</code>.
-          </p>
-        </div>
-      </div>
-
-      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-        <div className="flex items-start gap-3">
-          <Shield className="w-5 h-5 text-yellow-600 flex-shrink-0" />
-          <div>
-            <h3 className="font-medium text-yellow-800">When this is built</h3>
-            <p className="text-sm text-yellow-700 mt-1">
-              An API key will carry the full access of the account that created it. Keys will
-              need to be stored securely, scoped to the minimum required role, and rotated
-              periodically.
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+// NOTE: ApiKeysSettings was removed because the API Keys feature is not implemented.
+// The tab is hidden in the tabs array and the component used an un-imported icon.
+// When the feature is built, add back the tab, import Key from lucide-react, and
+// implement the component properly.

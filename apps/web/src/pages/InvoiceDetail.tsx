@@ -8,6 +8,7 @@ import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import DeleteRecordButton from '@/components/DeleteRecordButton';
 import GenerateDocumentDialog from '@/components/modals/GenerateDocumentDialog';
+import { ActivityTimeline } from '@/components/ActivityTimeline';
 import {
   INVOICE_TYPE_BADGE_CLASS,
   INVOICE_TYPE_EXPLANATIONS,
@@ -94,7 +95,7 @@ export default function InvoiceDetail() {
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<'items' | 'payments'>('items');
+  const [activeTab, setActiveTab] = useState<'items' | 'payments' | 'activity'>('items');
 
   // Fetch invoice details
   const { data: response, isLoading } = useQuery({
@@ -349,6 +350,7 @@ export default function InvoiceDetail() {
                 {[
                   { key: 'items', label: 'Invoice Items', icon: Package },
                   { key: 'payments', label: 'Payment History', icon: CreditCard, count: invoice.payments?.length },
+                  { key: 'activity', label: 'Activity', icon: Clock },
                 ].map((tab) => (
                   <button
                     key={tab.key}
@@ -528,9 +530,14 @@ export default function InvoiceDetail() {
                 )}
               </div>
             )}
-          </div>
 
-          {/* Notes & Terms */}
+            {/* Activity Tab */}
+            {activeTab === 'activity' && (
+              <div className="p-6">
+                <ActivityTimeline entityType="invoice" entityId={id!} />
+              </div>
+            )}
+          </div>
           {(invoice.notes || invoice.termsConditions) && (
             <div className="card">
               <div className="card-header">
