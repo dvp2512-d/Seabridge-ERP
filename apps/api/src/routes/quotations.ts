@@ -221,6 +221,7 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
     }
 
     emitEvent('quotation.created', quotation);
+    
     res.status(201).json({ success: true, data: quotation });
   } catch (error) {
     next(error);

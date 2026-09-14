@@ -259,6 +259,7 @@ router.delete('/:id', can('OPERATIONS_MANAGE'), async (req: any, res, next) => {
     }
 
     await prisma.task.delete({ where: { id: req.params.id } });
+    
     res.json({ success: true, data: { id: existing.id } });
   } catch (error) {
     next(error);

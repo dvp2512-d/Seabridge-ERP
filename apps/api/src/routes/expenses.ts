@@ -10,13 +10,13 @@
  */
 import { Router } from 'express';
 import { z } from 'zod';
+import crypto from 'crypto';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
 import { getBaseCurrency } from '../services/exchangeRateService';
 import { emitEvent } from '../services/eventService';
-import { cache, CACHE_KEYS } from '../services/cacheService';
 import {
   EXPENSE_SOURCE_TYPES,
   recalculateExpensePayment,
@@ -27,12 +27,6 @@ import {
 const router: Router = Router();
 
 router.use(authenticate);
-
-/** Invalidate dashboard cache so changes reflect immediately */
-function invalidateDashboardCache() {
-  cache.deletePattern(CACHE_KEYS.DASHBOARD_MAIN);
-  cache.deletePattern(CACHE_KEYS.DASHBOARD_FINANCE);
-}
 
 /**
  * Expense categories.
@@ -72,6 +66,7 @@ const STATUSES = ['PENDING', 'APPROVED', 'PAID', 'REJECTED'] as const;
 interface SchemaState {
   hasPaymentColumns: boolean;  // paid_amount, balance_amount, source_type, etc.
   hasCurrencyColumn: boolean;  // legacy 'currency' column
+  hasExpensePaymentsTable: boolean; // expense_payments table exists
 }
 
 let schemaState: SchemaState | null = null;
@@ -90,13 +85,20 @@ async function detectSchemaState(): Promise<SchemaState> {
     
     const columnNames = columns.map(c => c.column_name);
     
+    // Also check if expense_payments table exists
+    const tables = await prisma.$queryRaw<{ tablename: string }[]>`
+      SELECT tablename FROM pg_tables 
+      WHERE schemaname = 'public' AND tablename = 'expense_payments'
+    `;
+    
     schemaState = {
       hasPaymentColumns: columnNames.includes('paid_amount'),
       hasCurrencyColumn: columnNames.includes('currency'),
+      hasExpensePaymentsTable: tables.length > 0,
     };
   } catch (err) {
     // Fallback: assume newest schema
-    schemaState = { hasPaymentColumns: true, hasCurrencyColumn: false };
+    schemaState = { hasPaymentColumns: true, hasCurrencyColumn: false, hasExpensePaymentsTable: true };
   }
   
   return schemaState;
@@ -407,9 +409,6 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
       updatedAt: now,
     };
 
-    // Invalidate dashboard cache so the new expense reflects immediately
-    invalidateDashboardCache();
-
     res.status(201).json({ success: true, data: expense });
   } catch (error) {
     next(error);
@@ -515,9 +514,6 @@ router.put('/:id', can('FINANCE_MANAGE'), async (req, res, next) => {
     
     const expense = results[0] ? addDefaultValues(results[0], state) : null;
 
-    // Invalidate dashboard cache so the changes reflect immediately
-    invalidateDashboardCache();
-
     res.json({ success: true, data: expense });
   } catch (error) {
     next(error);
@@ -586,9 +582,6 @@ router.patch('/:id/status', can('FINANCE_MANAGE'), async (req, res, next) => {
       emitEvent('expense.approved', expense);
     }
 
-    // Invalidate dashboard cache so the status change reflects immediately
-    invalidateDashboardCache();
-
     res.json({ success: true, data: expense });
   } catch (error) {
     next(error);
@@ -606,9 +599,6 @@ router.delete('/:id', can('RECORD_DELETE'), async (req, res, next) => {
 
     // Always use raw SQL to avoid schema mismatch
     await prisma.$executeRaw`DELETE FROM "expenses" WHERE "id" = ${req.params.id}`;
-    
-    // Invalidate dashboard cache so the deletion reflects immediately
-    invalidateDashboardCache();
     
     res.json({ success: true, data: { id: req.params.id } });
   } catch (error) {
@@ -641,7 +631,7 @@ router.get('/:id/payments', can('FINANCE_VIEW'), async (req, res, next) => {
   try {
     const state = await detectSchemaState();
     
-    if (!state.hasPaymentColumns) {
+    if (!state.hasPaymentColumns || !state.hasExpensePaymentsTable) {
       return res.status(503).json({
         success: false,
         message: 'Payment tracking requires a database migration. Run deploy.cmd or npm run db:deploy to enable this feature.',
@@ -675,7 +665,7 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
   try {
     const state = await detectSchemaState();
     
-    if (!state.hasPaymentColumns) {
+    if (!state.hasPaymentColumns || !state.hasExpensePaymentsTable) {
       return res.status(503).json({
         success: false,
         message: 'Payment tracking requires a database migration. Run deploy.cmd or npm run db:deploy to enable this feature.',
@@ -715,29 +705,51 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
       );
     }
 
-    // One transaction: the payment and the recalculated totals must not part company.
-    const payment = await prisma.$transaction(async (tx) => {
-      const created = await tx.expensePayment.create({
-        data: {
-          expenseId: expense.id,
-          amount: data.amount,
-          paymentDate: new Date(data.paymentDate),
-          method: data.method ?? 'BANK_TRANSFER',
-          reference: data.reference,
-          notes: data.notes,
-        },
-      });
+    // Use raw SQL to avoid Prisma schema mismatch
+    const paymentId = crypto.randomUUID();
+    const paymentDate = new Date(data.paymentDate);
+    const method = data.method ?? 'BANK_TRANSFER';
+    const now = new Date();
 
-      await recalculateExpensePayment(expense.id, tx as any);
-      return created;
-    });
+    // Create payment using raw SQL
+    await prisma.$executeRaw`
+      INSERT INTO "expense_payments" ("id", "expense_id", "amount", "payment_date", "method", "reference", "notes", "created_at", "updated_at")
+      VALUES (${paymentId}, ${expense.id}, ${data.amount}, ${paymentDate}, ${method}, ${data.reference || null}, ${data.notes || null}, ${now}, ${now})
+    `;
 
-    const updated = await prisma.expense.findUnique({ where: { id: expense.id } });
+    // Recalculate expense totals using raw SQL
+    const newPaidAmount = alreadyPaid + data.amount;
+    const newBalanceAmount = Math.round((amount - newPaidAmount + Number.EPSILON) * 100) / 100;
+    let newStatus = expense.status;
+    
+    if (newBalanceAmount <= 0) {
+      newStatus = 'PAID';
+    } else if (newPaidAmount > 0) {
+      newStatus = 'APPROVED';
+    }
+
+    await prisma.$executeRaw`
+      UPDATE "expenses" 
+      SET "paid_amount" = ${newPaidAmount}, "balance_amount" = ${newBalanceAmount}, "status" = ${newStatus}, "updated_at" = ${now}
+      WHERE "id" = ${expense.id}
+    `;
+
+    // Fetch the created payment
+    const paymentResult = await prisma.$queryRaw<any[]>`
+      SELECT "id", "expense_id" as "expenseId", "amount", "payment_date" as "paymentDate", "method", "reference", "notes", "created_at" as "createdAt"
+      FROM "expense_payments" WHERE "id" = ${paymentId}
+    `;
+    const payment = paymentResult[0];
+
+    // Fetch updated expense
+    const selectColumns = getSelectColumns(state);
+    const updatedResult = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT ${selectColumns} FROM "expenses" WHERE "id" = $1`,
+      expense.id
+    );
+    const updated = updatedResult[0] ? addDefaultValues(updatedResult[0], state) : null;
 
     if (updated?.status === 'PAID') emitEvent('expense.paid', updated);
-
-    // Invalidate dashboard cache so the payment reflects immediately
-    invalidateDashboardCache();
 
     res.status(201).json({ success: true, data: { payment, expense: updated } });
   } catch (error) {
@@ -757,7 +769,7 @@ router.delete('/:id/payments/:paymentId', can('FINANCE_MANAGE'), async (req, res
   try {
     const state = await detectSchemaState();
     
-    if (!state.hasPaymentColumns) {
+    if (!state.hasPaymentColumns || !state.hasExpensePaymentsTable) {
       return res.status(503).json({
         success: false,
         message: 'Payment tracking requires a database migration. Run deploy.cmd or npm run db:deploy to enable this feature.',
@@ -777,10 +789,43 @@ router.delete('/:id/payments/:paymentId', can('FINANCE_MANAGE'), async (req, res
       throw new NotFoundError('Payment not found for this expense');
     }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.expensePayment.delete({ where: { id: payment.id } });
-      await recalculateExpensePayment(payment.expenseId, tx as any);
-    });
+    // Get the payment amount before deleting
+    const paymentAmountResult = await prisma.$queryRaw<any[]>`
+      SELECT "amount" FROM "expense_payments" WHERE "id" = ${payment.id}
+    `;
+    const paymentAmount = Number(paymentAmountResult[0]?.amount ?? 0);
+
+    // Delete the payment using raw SQL
+    await prisma.$executeRaw`DELETE FROM "expense_payments" WHERE "id" = ${payment.id}`;
+
+    // Get current expense data
+    const expenseResult = await prisma.$queryRaw<any[]>`
+      SELECT "amount", "paid_amount" as "paidAmount", "status"
+      FROM "expenses" WHERE "id" = ${payment.expenseId}
+    `;
+    const expense = expenseResult[0];
+    
+    if (expense) {
+      const amount = Number(expense.amount);
+      const currentPaid = Number(expense.paidAmount);
+      const newPaidAmount = Math.max(0, currentPaid - paymentAmount);
+      const newBalanceAmount = Math.round((amount - newPaidAmount + Number.EPSILON) * 100) / 100;
+      
+      let newStatus = expense.status;
+      if (newPaidAmount <= 0) {
+        if (expense.status === 'PAID') newStatus = 'APPROVED';
+      } else if (newBalanceAmount <= 0) {
+        newStatus = 'PAID';
+      } else {
+        newStatus = 'APPROVED';
+      }
+
+      await prisma.$executeRaw`
+        UPDATE "expenses" 
+        SET "paid_amount" = ${newPaidAmount}, "balance_amount" = ${newBalanceAmount}, "status" = ${newStatus}, "updated_at" = ${new Date()}
+        WHERE "id" = ${payment.expenseId}
+      `;
+    }
 
     // Fetch updated expense
     const selectColumns = getSelectColumns(state);
@@ -790,9 +835,6 @@ router.delete('/:id/payments/:paymentId', can('FINANCE_MANAGE'), async (req, res
     );
     
     const updated = results[0] ? addDefaultValues(results[0], state) : null;
-    
-    // Invalidate dashboard cache so the payment deletion reflects immediately
-    invalidateDashboardCache();
     
     res.json({ success: true, data: updated });
   } catch (error) {

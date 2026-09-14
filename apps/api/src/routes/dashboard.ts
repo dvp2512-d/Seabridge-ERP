@@ -8,7 +8,6 @@ import {
   financialYearLabel,
 } from '../utils/period';
 import { getBaseCurrency } from '../services/exchangeRateService';
-import { cache, CACHE_TTL, CACHE_KEYS } from '../services/cacheService';
 
 /**
  * Check which optional tables exist in the database.
@@ -85,13 +84,7 @@ router.use(authenticate);
 // Main founder dashboard
 router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
   try {
-    // Try cache first (2-minute TTL for dashboard data)
-    const cacheKey = `${CACHE_KEYS.DASHBOARD_MAIN}:${req.user?.id || 'anon'}`;
-    const cached = cache.get<any>(cacheKey);
-    if (cached) {
-      return res.json(cached);
-    }
-
+    // Real-time data - no caching for guaranteed fresh data on every load
     const today = new Date();
     const startOfMonth = monthStart(today);
     /**
@@ -532,9 +525,6 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
         alerts: await getAlerts(),
       },
     };
-
-    // Cache the response for 2 minutes
-    cache.set(cacheKey, response, CACHE_TTL.DASHBOARD);
 
     res.json(response);
   } catch (error) {

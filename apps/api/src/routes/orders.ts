@@ -149,6 +149,7 @@ router.post('/', can('OPERATIONS_MANAGE'), async (req, res, next) => {
     });
 
     emitEvent('order.created', order);
+    
     res.status(201).json({ success: true, data: order });
   } catch (error) {
     next(error);

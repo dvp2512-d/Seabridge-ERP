@@ -274,6 +274,7 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
     });
 
     emitEvent('invoice.created', invoice);
+    
     res.status(201).json({ success: true, data: invoice, packingFilled });
   } catch (error) {
     next(error);
