@@ -25,6 +25,7 @@ import {
   Loader2,
   RefreshCw,
   Wallet,
+  AlertTriangle,
 } from 'lucide-react';
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -120,6 +121,7 @@ export default function Expenses() {
   const expenses = data?.data ?? [];
   const pagination = data?.pagination;
   const summary = data?.summary;
+  const migrationNeeded = data?._migrationNeeded;
 
   const setStatusMutation = useMutation({
     mutationFn: ({ id, next }: { id: string; next: string }) => expensesApi.setStatus(id, next),
@@ -244,6 +246,19 @@ export default function Expenses() {
 
       {!isError && (
         <>
+      {migrationNeeded && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-medium text-amber-800">Database migration needed</p>
+            <p className="text-sm text-amber-700 mt-1">
+              Some expense features (payment tracking, auto-sync from orders) require a database update.
+              Run <code className="bg-amber-100 px-1 rounded">deploy.cmd</code> or <code className="bg-amber-100 px-1 rounded">npm run db:deploy</code> to apply migrations.
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <SummaryCard
           label="Total Spend"

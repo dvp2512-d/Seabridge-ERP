@@ -55,6 +55,32 @@ const STATUSES = ['PENDING', 'APPROVED', 'PAID', 'REJECTED'] as const;
 
 // ---------------------------------------------------------------- list
 
+/**
+ * Check if the expense payment tracking columns exist.
+ * These were added in migration 20260911120000_expense_sources_and_payments.
+ * If they don't exist, we fall back to simpler queries.
+ */
+let paymentColumnsExist: boolean | null = null;
+
+async function checkPaymentColumnsExist(): Promise<boolean> {
+  if (paymentColumnsExist !== null) return paymentColumnsExist;
+  
+  try {
+    // Try to query one of the new columns
+    await prisma.$queryRaw`SELECT "paid_amount" FROM "expenses" LIMIT 1`;
+    paymentColumnsExist = true;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('column') || msg.includes('does not exist') || msg.includes('P2022')) {
+      paymentColumnsExist = false;
+    } else {
+      // Some other error - assume columns exist and let normal error handling take over
+      paymentColumnsExist = true;
+    }
+  }
+  return paymentColumnsExist;
+}
+
 router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
   try {
     const {
@@ -70,14 +96,21 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
       limit = 50,
     } = req.query;
 
+    const hasPaymentColumns = await checkPaymentColumnsExist();
+
     const where: any = {};
     if (category) where.category = String(category);
     if (status) where.status = String(status);
-    if (sourceType && EXPENSE_SOURCE_TYPES.includes(String(sourceType) as any)) {
-      where.sourceType = String(sourceType);
+    
+    // Only filter by sourceType/origin if the columns exist
+    if (hasPaymentColumns) {
+      if (sourceType && EXPENSE_SOURCE_TYPES.includes(String(sourceType) as any)) {
+        where.sourceType = String(sourceType);
+      }
+      if (origin === 'generated') where.isGenerated = true;
+      if (origin === 'manual') where.isGenerated = false;
     }
-    if (origin === 'generated') where.isGenerated = true;
-    if (origin === 'manual') where.isGenerated = false;
+    
     if (from || to) {
       where.expenseDate = {};
       if (from) where.expenseDate.gte = new Date(String(from));
@@ -94,6 +127,7 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
 
     const skip = (Number(page) - 1) * Number(limit);
 
+    // Build queries based on whether payment columns exist
     const [expenses, total, statusGroups, categoryGroups] = await Promise.all([
       prisma.expense.findMany({
         where,
@@ -102,12 +136,19 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
         take: Number(limit),
       }),
       prisma.expense.count({ where }),
-      prisma.expense.groupBy({
-        by: ['status'],
-        where,
-        _count: { _all: true },
-        _sum: { amount: true, paidAmount: true, balanceAmount: true },
-      }),
+      hasPaymentColumns
+        ? prisma.expense.groupBy({
+            by: ['status'],
+            where,
+            _count: { _all: true },
+            _sum: { amount: true, paidAmount: true, balanceAmount: true },
+          })
+        : prisma.expense.groupBy({
+            by: ['status'],
+            where,
+            _count: { _all: true },
+            _sum: { amount: true },
+          }),
       prisma.expense.groupBy({
         by: ['category'],
         where,
@@ -132,8 +173,17 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
       // Rejected expenses are not spend.
       if (group.status !== 'REJECTED') {
         totalSpend += amount;
-        outstanding += Number(group._sum.balanceAmount ?? 0);
-        paid += Number(group._sum.paidAmount ?? 0);
+        if (hasPaymentColumns) {
+          outstanding += Number((group._sum as any).balanceAmount ?? 0);
+          paid += Number((group._sum as any).paidAmount ?? 0);
+        } else {
+          // Legacy mode: estimate based on status
+          if (group.status === 'PAID') {
+            paid += amount;
+          } else {
+            outstanding += amount;
+          }
+        }
       }
       if (group.status === 'PENDING') pendingApproval += amount;
     }
@@ -162,6 +212,8 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
           .map(([category, value]) => ({ category, value: round2(value) }))
           .sort((a, b) => b.value - a.value),
       },
+      // Flag to indicate if advanced features are available
+      _migrationNeeded: !hasPaymentColumns,
     });
   } catch (error) {
     next(error);
@@ -170,10 +222,13 @@ router.get('/', can('FINANCE_VIEW'), async (req, res, next) => {
 
 router.get('/:id', can('FINANCE_VIEW'), async (req, res, next) => {
   try {
+    const hasPaymentColumns = await checkPaymentColumnsExist();
+    
     const expense = await prisma.expense.findUnique({
       where: { id: req.params.id },
       // The payment history is what the detail view is for, so it comes with it.
-      include: { payments: { orderBy: { paymentDate: 'desc' } } },
+      // Only include payments if the migration has been applied.
+      ...(hasPaymentColumns ? { include: { payments: { orderBy: { paymentDate: 'desc' } } } } : {}),
     });
     if (!expense) throw new NotFoundError('Expense');
     res.json({ success: true, data: expense });
@@ -201,6 +256,7 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
     const data = validation.data;
+    const hasPaymentColumns = await checkPaymentColumnsExist();
 
     const expenseNumber = await generateCode('EXPENSE', 'EXP');
 
@@ -216,8 +272,8 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
         notes: data.notes,
         // Nothing paid yet, so the whole amount is outstanding. Without this the
         // payables total would read zero for every newly recorded expense.
-        paidAmount: 0,
-        balanceAmount: data.amount,
+        // Only set these if the columns exist.
+        ...(hasPaymentColumns ? { paidAmount: 0, balanceAmount: data.amount } : {}),
       },
     });
 
@@ -244,6 +300,7 @@ router.put('/:id', can('FINANCE_MANAGE'), async (req, res, next) => {
     const validation = updateSchema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
+    const hasPaymentColumns = await checkPaymentColumnsExist();
     const existing = await prisma.expense.findUnique({ where: { id: req.params.id } });
     if (!existing) throw new NotFoundError('Expense');
 
@@ -264,9 +321,9 @@ router.put('/:id', can('FINANCE_MANAGE'), async (req, res, next) => {
      * Descriptive fields are still editable - a note explaining a charge is useful
      * and nothing regenerates it.
      */
-    if (existing.isGenerated && validation.data.amount !== undefined) {
+    if (hasPaymentColumns && (existing as any).isGenerated && validation.data.amount !== undefined) {
       const source =
-        existing.sourceType === 'PROCUREMENT'
+        (existing as any).sourceType === 'PROCUREMENT'
           ? 'the supplier purchase order'
           : 'the shipment';
       throw new AppError(
@@ -284,10 +341,11 @@ router.put('/:id', can('FINANCE_MANAGE'), async (req, res, next) => {
         ...rest,
         ...(expenseDate ? { expenseDate: new Date(expenseDate) } : {}),
         // The outstanding balance follows a changed amount, less anything paid.
-        ...(rest.amount !== undefined
+        // Only update if columns exist.
+        ...(hasPaymentColumns && rest.amount !== undefined
           ? {
               balanceAmount:
-                Math.round((rest.amount - Number(existing.paidAmount) + Number.EPSILON) * 100) / 100,
+                Math.round((rest.amount - Number((existing as any).paidAmount ?? 0) + Number.EPSILON) * 100) / 100,
             }
           : {}),
       },
@@ -402,6 +460,15 @@ const paymentSchema = z.object({
 
 router.get('/:id/payments', can('FINANCE_VIEW'), async (req, res, next) => {
   try {
+    const hasPaymentColumns = await checkPaymentColumnsExist();
+    
+    if (!hasPaymentColumns) {
+      return res.status(503).json({
+        success: false,
+        message: 'Payment tracking requires a database migration. Run deploy.cmd or npm run db:deploy to enable this feature.',
+      });
+    }
+    
     const expense = await prisma.expense.findUnique({
       where: { id: req.params.id },
       select: { id: true, amount: true, paidAmount: true, balanceAmount: true },
@@ -421,6 +488,15 @@ router.get('/:id/payments', can('FINANCE_VIEW'), async (req, res, next) => {
 
 router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
   try {
+    const hasPaymentColumns = await checkPaymentColumnsExist();
+    
+    if (!hasPaymentColumns) {
+      return res.status(503).json({
+        success: false,
+        message: 'Payment tracking requires a database migration. Run deploy.cmd or npm run db:deploy to enable this feature.',
+      });
+    }
+    
     const validation = paymentSchema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
@@ -496,6 +572,15 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
  */
 router.delete('/:id/payments/:paymentId', can('FINANCE_MANAGE'), async (req, res, next) => {
   try {
+    const hasPaymentColumns = await checkPaymentColumnsExist();
+    
+    if (!hasPaymentColumns) {
+      return res.status(503).json({
+        success: false,
+        message: 'Payment tracking requires a database migration. Run deploy.cmd or npm run db:deploy to enable this feature.',
+      });
+    }
+    
     const payment = await prisma.expensePayment.findUnique({
       where: { id: req.params.paymentId },
       select: { id: true, expenseId: true },
