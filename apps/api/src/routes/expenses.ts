@@ -16,6 +16,7 @@ import { AppError, ValidationError, NotFoundError } from '../middleware/errorHan
 import { generateCode } from '../utils/helpers';
 import { getBaseCurrency } from '../services/exchangeRateService';
 import { emitEvent } from '../services/eventService';
+import { cache, CACHE_KEYS } from '../services/cacheService';
 import {
   EXPENSE_SOURCE_TYPES,
   recalculateExpensePayment,
@@ -26,6 +27,12 @@ import {
 const router: Router = Router();
 
 router.use(authenticate);
+
+/** Invalidate dashboard cache so changes reflect immediately */
+function invalidateDashboardCache() {
+  cache.deletePattern(CACHE_KEYS.DASHBOARD_MAIN);
+  cache.deletePattern(CACHE_KEYS.DASHBOARD_FINANCE);
+}
 
 /**
  * Expense categories.
@@ -400,6 +407,9 @@ router.post('/', can('FINANCE_MANAGE'), async (req, res, next) => {
       updatedAt: now,
     };
 
+    // Invalidate dashboard cache so the new expense reflects immediately
+    invalidateDashboardCache();
+
     res.status(201).json({ success: true, data: expense });
   } catch (error) {
     next(error);
@@ -505,6 +515,9 @@ router.put('/:id', can('FINANCE_MANAGE'), async (req, res, next) => {
     
     const expense = results[0] ? addDefaultValues(results[0], state) : null;
 
+    // Invalidate dashboard cache so the changes reflect immediately
+    invalidateDashboardCache();
+
     res.json({ success: true, data: expense });
   } catch (error) {
     next(error);
@@ -573,6 +586,9 @@ router.patch('/:id/status', can('FINANCE_MANAGE'), async (req, res, next) => {
       emitEvent('expense.approved', expense);
     }
 
+    // Invalidate dashboard cache so the status change reflects immediately
+    invalidateDashboardCache();
+
     res.json({ success: true, data: expense });
   } catch (error) {
     next(error);
@@ -590,6 +606,9 @@ router.delete('/:id', can('RECORD_DELETE'), async (req, res, next) => {
 
     // Always use raw SQL to avoid schema mismatch
     await prisma.$executeRaw`DELETE FROM "expenses" WHERE "id" = ${req.params.id}`;
+    
+    // Invalidate dashboard cache so the deletion reflects immediately
+    invalidateDashboardCache();
     
     res.json({ success: true, data: { id: req.params.id } });
   } catch (error) {
@@ -717,6 +736,9 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
 
     if (updated?.status === 'PAID') emitEvent('expense.paid', updated);
 
+    // Invalidate dashboard cache so the payment reflects immediately
+    invalidateDashboardCache();
+
     res.status(201).json({ success: true, data: { payment, expense: updated } });
   } catch (error) {
     next(error);
@@ -768,6 +790,10 @@ router.delete('/:id/payments/:paymentId', can('FINANCE_MANAGE'), async (req, res
     );
     
     const updated = results[0] ? addDefaultValues(results[0], state) : null;
+    
+    // Invalidate dashboard cache so the payment deletion reflects immediately
+    invalidateDashboardCache();
+    
     res.json({ success: true, data: updated });
   } catch (error) {
     next(error);

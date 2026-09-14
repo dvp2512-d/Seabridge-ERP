@@ -23,6 +23,13 @@ import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
 import { startOfFinancialYear, financialYearLabel } from '../utils/period';
+import { cache, CACHE_KEYS } from '../services/cacheService';
+
+/** Invalidate dashboard cache so changes reflect immediately */
+function invalidateDashboardCache() {
+  cache.deletePattern(CACHE_KEYS.DASHBOARD_MAIN);
+  cache.deletePattern(CACHE_KEYS.DASHBOARD_FINANCE);
+}
 
 const router: Router = Router();
 
@@ -410,6 +417,9 @@ router.post('/', can('FINANCE_MANAGE'), async (req: any, res, next) => {
       },
     });
 
+    // Invalidate dashboard cache so the new income reflects immediately
+    invalidateDashboardCache();
+
     res.status(201).json({ success: true, data: entry });
   } catch (error) {
     next(error);
@@ -472,6 +482,9 @@ router.put('/:id', can('FINANCE_MANAGE'), async (req, res, next) => {
       },
     });
 
+    // Invalidate dashboard cache so the changes reflect immediately
+    invalidateDashboardCache();
+
     res.json({ success: true, data: entry });
   } catch (error) {
     next(error);
@@ -498,6 +511,9 @@ router.patch('/:id/status', can('FINANCE_MANAGE'), async (req, res, next) => {
       data: { status: validation.data.status },
     });
 
+    // Invalidate dashboard cache so the status change reflects immediately
+    invalidateDashboardCache();
+
     res.json({ success: true, data: entry });
   } catch (error) {
     next(error);
@@ -516,6 +532,10 @@ router.delete('/:id', can('RECORD_DELETE'), async (req, res, next) => {
     if (!existing) throw new NotFoundError('Income entry');
 
     await prisma.income.delete({ where: { id: req.params.id } });
+    
+    // Invalidate dashboard cache so the deletion reflects immediately
+    invalidateDashboardCache();
+    
     res.json({ success: true, data: { id: existing.id }, message: `${existing.incomeNumber} deleted.` });
   } catch (error) {
     next(error);

@@ -7,7 +7,7 @@ import { useAuthStore } from '@/store/authStore';
 import { can } from '@/lib/permissions';
 import Modal from '@/components/ui/Modal';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
-import ErrorState from '@/components/ui/ErrorState';
+import { ErrorState } from '@/components/ui/ErrorState';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import { refreshAggregates } from '@/lib/queryKeys';
 import { formatCurrency, formatDate } from '@/lib/utils';

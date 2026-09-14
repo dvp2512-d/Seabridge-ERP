@@ -237,7 +237,7 @@ router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
     // Initialize income data with defaults
     let incomeByStatus: any[] = [];
     let incomeByCategory: any[] = [];
-    let allIncomeReceived = { _sum: { amountINR: 0 } };
+    let allIncomeReceived: any = { _sum: { amountINR: 0 } };
 
     // Query income data only if table exists
     if (tables.hasIncomeTable) {
