@@ -9,8 +9,9 @@
  * while someone else is quoting it is not a routine editing action.
  */
 import { Router } from 'express';
+import { z } from 'zod';
 import { authenticate, can } from '../middleware/auth';
-import { AppError } from '../middleware/errorHandler';
+import { AppError, ValidationError } from '../middleware/errorHandler';
 import {
   deactivateRecord,
   reactivateRecord,
@@ -20,6 +21,26 @@ import {
 const router: Router = Router();
 
 router.use(authenticate);
+
+/** Allowed resource types for deactivation/reactivation. */
+const ALLOWED_RESOURCES = [
+  'products',
+  'suppliers',
+  'buyers',
+  'cha',
+  'transporters',
+  'countries',
+  'ports',
+  'currencies',
+  'incoterms',
+  'product-categories',
+] as const;
+
+/** Validate resource and ID parameters */
+const paramsSchema = z.object({
+  resource: z.enum(ALLOWED_RESOURCES),
+  id: z.string().min(1, 'ID is required'),
+});
 
 /** URL segment -> internal type and the label shown to the user. */
 const TYPES: Record<string, { type: string; label: string }> = {
@@ -52,8 +73,11 @@ function resolve(segment: string) {
  */
 router.get('/:resource/:id/preview', can('MASTER_VIEW'), async (req, res, next) => {
   try {
-    const { type } = resolve(req.params.resource);
-    const preview = await previewDeactivation(type, req.params.id);
+    const validation = paramsSchema.safeParse(req.params);
+    if (!validation.success) throw new ValidationError(validation.error.errors);
+    
+    const { type } = resolve(validation.data.resource);
+    const preview = await previewDeactivation(type, validation.data.id);
     res.json({ success: true, data: preview });
   } catch (error) {
     next(error);
@@ -62,8 +86,11 @@ router.get('/:resource/:id/preview', can('MASTER_VIEW'), async (req, res, next) 
 
 router.put('/:resource/:id/deactivate', can('SETTINGS_MANAGE'), async (req, res, next) => {
   try {
-    const { type, label } = resolve(req.params.resource);
-    const result = await deactivateRecord(type, req.params.id, label);
+    const validation = paramsSchema.safeParse(req.params);
+    if (!validation.success) throw new ValidationError(validation.error.errors);
+    
+    const { type, label } = resolve(validation.data.resource);
+    const result = await deactivateRecord(type, validation.data.id, label);
     res.json({ success: true, data: result, message: result.message });
   } catch (error) {
     next(error);
@@ -72,8 +99,11 @@ router.put('/:resource/:id/deactivate', can('SETTINGS_MANAGE'), async (req, res,
 
 router.put('/:resource/:id/reactivate', can('SETTINGS_MANAGE'), async (req, res, next) => {
   try {
-    const { type, label } = resolve(req.params.resource);
-    const result = await reactivateRecord(type, req.params.id, label);
+    const validation = paramsSchema.safeParse(req.params);
+    if (!validation.success) throw new ValidationError(validation.error.errors);
+    
+    const { type, label } = resolve(validation.data.resource);
+    const result = await reactivateRecord(type, validation.data.id, label);
     res.json({ success: true, data: result, message: result.message });
   } catch (error) {
     next(error);

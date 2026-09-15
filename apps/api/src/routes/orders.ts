@@ -196,9 +196,45 @@ router.put('/:id', can('OPERATIONS_MANAGE'), async (req, res, next) => {
 
     const existing = await prisma.exportOrder.findUnique({
       where: { id: req.params.id },
-      select: { id: true, buyerId: true },
+      select: { id: true, status: true, buyerId: true, orderNumber: true },
     });
     if (!existing) throw new NotFoundError('Order');
+
+    /**
+     * Order status state machine.
+     * 
+     * Enforces valid status transitions to prevent impossible states like
+     * jumping from CONFIRMED directly to DELIVERED, or reversing a DELIVERED
+     * order back to IN_PRODUCTION. This maintains data integrity and ensures
+     * the order lifecycle is followed correctly.
+     * 
+     * Allowed transitions:
+     *   CONFIRMED → IN_PRODUCTION, CANCELLED
+     *   IN_PRODUCTION → READY_TO_SHIP, CANCELLED
+     *   READY_TO_SHIP → SHIPPED, IN_PRODUCTION (if shipment fails), CANCELLED
+     *   SHIPPED → DELIVERED, CANCELLED (if returned)
+     *   DELIVERED → (terminal state, no transitions allowed)
+     *   CANCELLED → (terminal state, no transitions allowed)
+     */
+    const ALLOWED_TRANSITIONS: Record<string, string[]> = {
+      'CONFIRMED': ['IN_PRODUCTION', 'CANCELLED'],
+      'IN_PRODUCTION': ['READY_TO_SHIP', 'CANCELLED'],
+      'READY_TO_SHIP': ['SHIPPED', 'IN_PRODUCTION', 'CANCELLED'],
+      'SHIPPED': ['DELIVERED', 'CANCELLED'],
+      'DELIVERED': [], // Terminal state
+      'CANCELLED': [], // Terminal state
+    };
+
+    if (validation.data.status && validation.data.status !== existing.status) {
+      const allowed = ALLOWED_TRANSITIONS[existing.status] || [];
+      if (!allowed.includes(validation.data.status)) {
+        throw new AppError(
+          `Cannot change ${existing.orderNumber} from ${existing.status} to ${validation.data.status}. ` +
+            `Allowed transitions: ${allowed.length > 0 ? allowed.join(', ') : 'none (terminal state)'}.`,
+          400
+        );
+      }
+    }
 
     // Billing the consignee is the default and is expressed by leaving this empty,
     // so naming the same party twice is a mistake worth catching.
@@ -383,12 +419,21 @@ router.post('/:id/procurements', can('OPERATIONS_MANAGE'), async (req, res, next
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
-    // Verify order exists
+    // Verify order exists and is not cancelled
     const order = await prisma.exportOrder.findUnique({
       where: { id: req.params.id },
-      select: { id: true },
+      select: { id: true, status: true, orderNumber: true },
     });
     if (!order) throw new NotFoundError('Order');
+
+    // Cannot add procurement to a cancelled order
+    if (order.status === 'CANCELLED') {
+      throw new AppError(
+        `Cannot add procurement to cancelled order ${order.orderNumber}. ` +
+          `Reactivate the order first or create a new order.`,
+        400
+      );
+    }
 
     // Verify supplier exists
     const supplier = await prisma.supplier.findUnique({
@@ -578,6 +623,87 @@ router.put('/:orderId/procurements/:procId', can('OPERATIONS_MANAGE'), async (re
   }
 });
 
+/**
+ * Get suggested shipment defaults from the order's quotation.
+ * Maps quotation cost types to shipment cost fields for auto-fill.
+ */
+router.get('/:id/shipment-defaults', can('OPERATIONS_VIEW'), async (req, res, next) => {
+  try {
+    const order = await prisma.exportOrder.findUnique({
+      where: { id: req.params.id },
+      include: {
+        quotation: {
+          include: {
+            costs: true,
+            portOfLoading: { select: { id: true, name: true, code: true } },
+            portOfDischarge: { select: { id: true, name: true, code: true } },
+          },
+        },
+        // Ports may be overridden on the order
+        portOfLoading: { select: { id: true, name: true, code: true } },
+        portOfDischarge: { select: { id: true, name: true, code: true } },
+      },
+    });
+
+    if (!order) throw new NotFoundError('Order');
+
+    // Map quotation cost types to shipment fields
+    const costTypeMapping: Record<string, string> = {
+      'CHA': 'chaCharges',
+      'TRANSPORT': 'transportCharges',
+      'FREIGHT': 'freightCost',
+      'PACKAGING': 'packagingCharges',
+      'INSURANCE': 'insuranceCharges',
+      'INSPECTION': 'inspectionCharges',
+      'COMMISSION': 'commissionCharges',
+      'OTHER': 'otherCharges',
+    };
+
+    const suggestedCosts: Record<string, number> = {};
+    const unmappedCosts: Array<{ costType: string; description: string; amount: number }> = [];
+
+    for (const cost of order.quotation?.costs || []) {
+      const shipmentField = costTypeMapping[cost.costType.toUpperCase()];
+      if (shipmentField) {
+        // Sum if multiple costs of same type
+        suggestedCosts[shipmentField] = (suggestedCosts[shipmentField] || 0) + Number(cost.amount);
+      } else {
+        // Costs that don't map directly - add to otherCharges or report separately
+        unmappedCosts.push({
+          costType: cost.costType,
+          description: cost.description,
+          amount: Number(cost.amount),
+        });
+      }
+    }
+
+    // Use order ports, falling back to quotation ports
+    const suggestedPorts = {
+      originPortId: order.portOfLoadingId || order.quotation?.portOfLoadingId || null,
+      originPort: order.portOfLoading || order.quotation?.portOfLoading || null,
+      destinationPortId: order.portOfDischargeId || order.quotation?.portOfDischargeId || null,
+      destinationPort: order.portOfDischarge || order.quotation?.portOfDischarge || null,
+    };
+
+    res.json({
+      success: true,
+      data: {
+        suggestedCosts,
+        suggestedPorts,
+        // Costs that couldn't be auto-mapped
+        unmappedCosts,
+        // Total from quotation for reference
+        quotationCostsTotal: (order.quotation?.costs || []).reduce(
+          (sum, c) => sum + Number(c.amount),
+          0
+        ),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Add shipment
 router.post('/:id/shipments', can('OPERATIONS_MANAGE'), async (req, res, next) => {
   try {
@@ -617,12 +743,21 @@ router.post('/:id/shipments', can('OPERATIONS_MANAGE'), async (req, res, next) =
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
-    // Verify order exists
+    // Verify order exists and is not cancelled
     const order = await prisma.exportOrder.findUnique({
       where: { id: req.params.id },
-      select: { id: true },
+      select: { id: true, status: true, orderNumber: true },
     });
     if (!order) throw new NotFoundError('Order');
+
+    // Cannot add shipment to a cancelled order
+    if (order.status === 'CANCELLED') {
+      throw new AppError(
+        `Cannot add shipment to cancelled order ${order.orderNumber}. ` +
+          `Reactivate the order first or create a new order.`,
+        400
+      );
+    }
 
     const shipmentNumber = await generateCode('SHIPMENT', 'SHP');
 

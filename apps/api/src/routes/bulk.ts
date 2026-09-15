@@ -2,6 +2,9 @@
  * Bulk Operations Routes
  * 
  * Provides bulk update/delete operations for various modules.
+ * 
+ * IMPORTANT: All status/stage updates respect the same state machine transitions
+ * as individual updates. Invalid transitions are rejected with clear error messages.
  */
 import { Router } from 'express';
 import { z } from 'zod';
@@ -13,6 +16,47 @@ import { logger } from '../utils/logger';
 const router: Router = Router();
 
 router.use(authenticate);
+
+/**
+ * Order status state machine.
+ * Mirrors the validation in orders.ts to ensure consistency.
+ */
+const ORDER_ALLOWED_TRANSITIONS: Record<string, string[]> = {
+  'CONFIRMED': ['IN_PRODUCTION', 'CANCELLED'],
+  'IN_PRODUCTION': ['READY_TO_SHIP', 'CANCELLED'],
+  'READY_TO_SHIP': ['SHIPPED', 'CANCELLED'],
+  'SHIPPED': ['DELIVERED', 'CANCELLED'],
+  'DELIVERED': [], // Terminal state
+  'CANCELLED': [], // Terminal state
+};
+
+/**
+ * Inquiry stage state machine.
+ * Mirrors the validation in inquiries.ts to ensure consistency.
+ */
+const INQUIRY_ALLOWED_TRANSITIONS: Record<string, string[]> = {
+  'NEW': ['REQUIREMENT_GATHERED', 'ON_HOLD', 'LOST'],
+  'REQUIREMENT_GATHERED': ['PRICING_IN_PROGRESS', 'ON_HOLD', 'LOST'],
+  'PRICING_IN_PROGRESS': ['QUOTATION_SENT', 'ON_HOLD', 'LOST'],
+  'QUOTATION_SENT': ['NEGOTIATION', 'WON', 'LOST', 'ON_HOLD'],
+  'NEGOTIATION': ['WON', 'LOST', 'ON_HOLD', 'QUOTATION_SENT'],
+  'ON_HOLD': ['NEW', 'REQUIREMENT_GATHERED', 'PRICING_IN_PROGRESS', 'QUOTATION_SENT', 'NEGOTIATION', 'LOST'],
+  'WON': [], // Terminal state
+  'LOST': [], // Terminal state
+};
+
+/**
+ * Invoice status state machine.
+ * Mirrors the validation in invoices.ts to ensure consistency.
+ */
+const INVOICE_ALLOWED_TRANSITIONS: Record<string, string[]> = {
+  'DRAFT': ['SENT', 'CANCELLED'],
+  'SENT': ['OVERDUE', 'CANCELLED'], // PAID/PARTIALLY_PAID only via payments
+  'PARTIALLY_PAID': ['OVERDUE', 'CANCELLED'], // PAID only via payments
+  'OVERDUE': ['SENT', 'CANCELLED'], // Can mark reminders sent
+  'PAID': [], // Terminal state
+  'CANCELLED': [], // Terminal state
+};
 
 // Bulk update order status
 router.put('/orders/status', can('OPERATIONS_MANAGE'), async (req, res, next) => {
@@ -27,16 +71,64 @@ router.put('/orders/status', can('OPERATIONS_MANAGE'), async (req, res, next) =>
 
     const { ids, status } = validation.data;
 
-    const result = await prisma.exportOrder.updateMany({
+    // Fetch current status of all orders to validate transitions
+    const orders = await prisma.exportOrder.findMany({
       where: { id: { in: ids } },
+      select: { id: true, orderNumber: true, status: true },
+    });
+
+    if (orders.length === 0) {
+      throw new AppError('No orders found with the provided IDs', 404);
+    }
+
+    // Validate all transitions before updating any
+    const invalidTransitions: string[] = [];
+    const validIds: string[] = [];
+
+    for (const order of orders) {
+      const allowed = ORDER_ALLOWED_TRANSITIONS[order.status] || [];
+      if (order.status === status) {
+        // Already in target status, skip but don't error
+        continue;
+      }
+      if (!allowed.includes(status)) {
+        invalidTransitions.push(
+          `${order.orderNumber}: cannot change from ${order.status} to ${status}`
+        );
+      } else {
+        validIds.push(order.id);
+      }
+    }
+
+    if (invalidTransitions.length > 0 && validIds.length === 0) {
+      throw new AppError(
+        `No valid transitions. Invalid: ${invalidTransitions.join('; ')}`,
+        400
+      );
+    }
+
+    // Update only the orders with valid transitions
+    const result = await prisma.exportOrder.updateMany({
+      where: { id: { in: validIds } },
       data: { status },
     });
 
-    logger.info('Bulk order status update', { count: result.count, status, userId: req.user!.id });
+    logger.info('Bulk order status update', { 
+      count: result.count, 
+      status, 
+      userId: req.user!.id,
+      skipped: invalidTransitions.length,
+    });
 
     res.json({
       success: true,
-      data: { updated: result.count },
+      data: { 
+        updated: result.count,
+        ...(invalidTransitions.length > 0 && { 
+          skipped: invalidTransitions.length,
+          invalidTransitions,
+        }),
+      },
     });
   } catch (error) {
     next(error);
@@ -60,17 +152,73 @@ router.put('/invoices/status', can('FINANCE_MANAGE'), async (req, res, next) => 
     if (status === 'PAID') {
       throw new AppError('Cannot bulk-mark invoices as PAID. Use payment recording instead.', 400);
     }
+    if (status === 'PARTIALLY_PAID') {
+      throw new AppError('Cannot bulk-mark invoices as PARTIALLY_PAID. Record payments instead.', 400);
+    }
 
-    const result = await prisma.invoice.updateMany({
+    // Fetch current status of all invoices to validate transitions
+    const invoices = await prisma.invoice.findMany({
       where: { id: { in: ids } },
-      data: { status },
+      select: { id: true, invoiceNumber: true, status: true },
     });
 
-    logger.info('Bulk invoice status update', { count: result.count, status, userId: req.user!.id });
+    if (invoices.length === 0) {
+      throw new AppError('No invoices found with the provided IDs', 404);
+    }
+
+    // Validate all transitions before updating any
+    const invalidTransitions: string[] = [];
+    const validIds: string[] = [];
+
+    for (const invoice of invoices) {
+      const allowed = INVOICE_ALLOWED_TRANSITIONS[invoice.status] || [];
+      if (invoice.status === status) {
+        // Already in target status, skip but don't error
+        continue;
+      }
+      if (!allowed.includes(status)) {
+        invalidTransitions.push(
+          `${invoice.invoiceNumber}: cannot change from ${invoice.status} to ${status}`
+        );
+      } else {
+        validIds.push(invoice.id);
+      }
+    }
+
+    if (invalidTransitions.length > 0 && validIds.length === 0) {
+      throw new AppError(
+        `No valid transitions. Invalid: ${invalidTransitions.join('; ')}`,
+        400
+      );
+    }
+
+    // Update only the invoices with valid transitions
+    const updateData: any = { status };
+    if (status === 'SENT') {
+      updateData.sentAt = new Date();
+    }
+
+    const result = await prisma.invoice.updateMany({
+      where: { id: { in: validIds } },
+      data: updateData,
+    });
+
+    logger.info('Bulk invoice status update', { 
+      count: result.count, 
+      status, 
+      userId: req.user!.id,
+      skipped: invalidTransitions.length,
+    });
 
     res.json({
       success: true,
-      data: { updated: result.count },
+      data: { 
+        updated: result.count,
+        ...(invalidTransitions.length > 0 && { 
+          skipped: invalidTransitions.length,
+          invalidTransitions,
+        }),
+      },
     });
   } catch (error) {
     next(error);
@@ -89,6 +237,7 @@ router.put('/expenses/approve', can('FINANCE_MANAGE'), async (req, res, next) =>
 
     const { ids } = validation.data;
 
+    // Only approve PENDING expenses - this is already correct behavior
     const result = await prisma.expense.updateMany({
       where: { 
         id: { in: ids },
@@ -121,16 +270,64 @@ router.put('/inquiries/stage', can('SALES_MANAGE'), async (req, res, next) => {
 
     const { ids, stage } = validation.data;
 
-    const result = await prisma.inquiry.updateMany({
+    // Fetch current stage of all inquiries to validate transitions
+    const inquiries = await prisma.inquiry.findMany({
       where: { id: { in: ids } },
+      select: { id: true, inquiryNumber: true, stage: true },
+    });
+
+    if (inquiries.length === 0) {
+      throw new AppError('No inquiries found with the provided IDs', 404);
+    }
+
+    // Validate all transitions before updating any
+    const invalidTransitions: string[] = [];
+    const validIds: string[] = [];
+
+    for (const inquiry of inquiries) {
+      const allowed = INQUIRY_ALLOWED_TRANSITIONS[inquiry.stage] || [];
+      if (inquiry.stage === stage) {
+        // Already in target stage, skip but don't error
+        continue;
+      }
+      if (!allowed.includes(stage)) {
+        invalidTransitions.push(
+          `${inquiry.inquiryNumber}: cannot change from ${inquiry.stage} to ${stage}`
+        );
+      } else {
+        validIds.push(inquiry.id);
+      }
+    }
+
+    if (invalidTransitions.length > 0 && validIds.length === 0) {
+      throw new AppError(
+        `No valid transitions. Invalid: ${invalidTransitions.join('; ')}`,
+        400
+      );
+    }
+
+    // Update only the inquiries with valid transitions
+    const result = await prisma.inquiry.updateMany({
+      where: { id: { in: validIds } },
       data: { stage },
     });
 
-    logger.info('Bulk inquiry stage update', { count: result.count, stage, userId: req.user!.id });
+    logger.info('Bulk inquiry stage update', { 
+      count: result.count, 
+      stage, 
+      userId: req.user!.id,
+      skipped: invalidTransitions.length,
+    });
 
     res.json({
       success: true,
-      data: { updated: result.count },
+      data: { 
+        updated: result.count,
+        ...(invalidTransitions.length > 0 && { 
+          skipped: invalidTransitions.length,
+          invalidTransitions,
+        }),
+      },
     });
   } catch (error) {
     next(error);

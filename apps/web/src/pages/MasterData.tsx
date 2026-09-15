@@ -6,7 +6,7 @@ import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 import PageHeader from '@/components/ui/PageHeader';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
-import { Plus, Edit2, Search, ChevronLeft, ChevronRight, Power, PowerOff } from 'lucide-react';
+import { Plus, Edit2, Search, ChevronLeft, ChevronRight, Power, PowerOff, AlertCircle, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
 import { can } from '@/lib/permissions';
@@ -259,11 +259,11 @@ function EditCell({
 
   return (
     <td>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center justify-end gap-2">
         {onEdit && (
           <button
             onClick={() => onEdit(item)}
-            className="text-navy-600 hover:text-navy-800"
+            className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-gray-100 rounded transition-colors"
             title="Edit"
             aria-label="Edit"
           >
@@ -274,7 +274,7 @@ function EditCell({
           item.isActive ? (
             <button
               onClick={() => setShowConfirm(true)}
-              className="text-gray-400 hover:text-red-600"
+              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded transition-colors"
               title="Deactivate"
               aria-label="Deactivate"
             >
@@ -284,7 +284,7 @@ function EditCell({
             <button
               onClick={() => reactivate.mutate()}
               disabled={reactivate.isPending}
-              className="text-gray-400 hover:text-green-600"
+              className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-gray-100 rounded transition-colors"
               title="Reactivate"
               aria-label="Reactivate"
             >
@@ -301,9 +301,12 @@ function EditCell({
             {previewQuery.isLoading ? (
               <p className="text-gray-500">Checking dependencies...</p>
             ) : previewData?.blocked ? (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                <p className="text-red-700 font-medium">Cannot deactivate</p>
-                <p className="text-red-600 text-sm mt-1">{previewData.blocked}</p>
+              <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-lg p-4">
+                <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="text-red-700 font-medium">Cannot deactivate</p>
+                  <p className="text-red-600 text-sm mt-1">{previewData.blocked}</p>
+                </div>
               </div>
             ) : (
               <>
@@ -311,18 +314,21 @@ function EditCell({
                   This will hide the record from dropdowns in new documents.
                 </p>
                 {previewData?.dependents?.length > 0 && (
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                    <p className="text-amber-800 font-medium text-sm">
-                      This record is referenced by:
-                    </p>
-                    <ul className="mt-2 text-sm text-amber-700 list-disc list-inside">
-                      {previewData.dependents.map((d: any) => (
-                        <li key={d.label}>{d.count} {d.label}</li>
-                      ))}
-                    </ul>
-                    <p className="mt-2 text-sm text-amber-600">
-                      It will remain on those existing records.
-                    </p>
+                  <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg p-4">
+                    <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-amber-800 font-medium text-sm">
+                        This record is referenced by:
+                      </p>
+                      <ul className="mt-2 text-sm text-amber-700 list-disc list-inside">
+                        {previewData.dependents.map((d: any) => (
+                          <li key={d.label}>{d.count} {d.label}</li>
+                        ))}
+                      </ul>
+                      <p className="mt-2 text-sm text-amber-600">
+                        It will remain on those existing records.
+                      </p>
+                    </div>
                   </div>
                 )}
               </>
@@ -337,7 +343,7 @@ function EditCell({
               <button
                 onClick={() => deactivate.mutate()}
                 disabled={deactivate.isPending || !!previewData?.blocked}
-                className="btn bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                className="btn bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 inline-flex items-center gap-2"
               >
                 {deactivate.isPending ? 'Deactivating...' : 'Deactivate'}
               </button>

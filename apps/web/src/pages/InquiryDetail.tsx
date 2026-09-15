@@ -25,6 +25,7 @@ import {
   ChevronRight,
   MessageSquare,
   Target,
+  Trash2,
 } from 'lucide-react';
 
 const STAGES = [
@@ -52,6 +53,24 @@ export default function InquiryDetail() {
   });
 
   const inquiry = data?.data?.data;
+
+  // Delete item mutation
+  const deleteItemMutation = useMutation({
+    mutationFn: (itemId: string) => inquiriesApi.deleteItem(id!, itemId),
+    onSuccess: () => {
+      toast.success('Item removed');
+      queryClient.invalidateQueries({ queryKey: ['inquiry', id] });
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to delete item');
+    },
+  });
+
+  const handleDeleteItem = (item: any) => {
+    if (window.confirm(`Remove ${item.product?.name} from this inquiry?`)) {
+      deleteItemMutation.mutate(item.id);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -212,6 +231,7 @@ export default function InquiryDetail() {
                     <th>Target Price</th>
                     <th>Packing</th>
                     <th>Specifications</th>
+                    {isOpen && <th className="w-16">Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -236,11 +256,22 @@ export default function InquiryDetail() {
                         )}
                       </td>
                       <td className="max-w-xs truncate">{item.specifications || '-'}</td>
+                      {isOpen && (
+                        <td>
+                          <button
+                            onClick={() => handleDeleteItem(item)}
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded transition-colors"
+                            aria-label="Delete item"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))}
                   {(!inquiry.items || inquiry.items.length === 0) && (
                     <tr>
-                      <td colSpan={5} className="text-center py-8 text-gray-500">
+                      <td colSpan={isOpen ? 6 : 5} className="text-center py-8 text-gray-500">
                         No products added yet
                       </td>
                     </tr>

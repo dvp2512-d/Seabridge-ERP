@@ -37,7 +37,7 @@ import { bulkRouter } from './routes/bulk';
 import { auditLog } from './middleware/auditLog';
 import { logger, requestIdMiddleware } from './utils/logger';
 import { cleanupExpiredTokens } from './services/refreshTokenService';
-import { getRedisClient, RedisStore } from './services/redisService';
+import { getRedisClient, RedisStore, distributedLock } from './services/redisService';
 
 dotenv.config();
 
@@ -87,6 +87,23 @@ async function createRateLimiters() {
 }
 
 // Middleware
+/**
+ * Trust the first proxy (nginx or Docker network).
+ * 
+ * When behind a reverse proxy, Express needs to trust the X-Forwarded-For header
+ * to get the real client IP for:
+ *   - Rate limiting (to limit by actual client, not proxy)
+ *   - Audit logging (to record real IP in audit entries)
+ *   - Security logging (to identify attack sources)
+ * 
+ * Without this, all requests appear to come from the proxy's IP (typically 172.x.x.x),
+ * which breaks per-IP rate limiting and makes audit trails useless.
+ * 
+ * Setting to 1 trusts exactly one proxy hop (the nginx container in our docker-compose).
+ * For multi-proxy setups (e.g., CloudFlare + nginx), increase this number.
+ */
+app.set('trust proxy', 1);
+
 app.use(helmet());
 app.use(compression()); // Enable gzip compression for all responses
 app.use(cors({
@@ -99,9 +116,17 @@ app.use(express.urlencoded({ extended: true }));
 // Request ID tracking - adds unique ID to each request for tracing
 app.use(requestIdMiddleware);
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), requestId: (req as any).requestId });
+// Health check - verifies the API is up and the database is reachable.
+// Returns 503 when the DB ping fails so orchestrators treat it as not-ready.
+app.get('/health', async (req, res) => {
+  const requestId = (req as any).requestId;
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok', database: 'ok', timestamp: new Date().toISOString(), requestId });
+  } catch (error) {
+    logger.error('Health check DB ping failed', { error: (error as Error).message, requestId });
+    res.status(503).json({ status: 'error', database: 'unavailable', timestamp: new Date().toISOString(), requestId });
+  }
 });
 
 // Start server
@@ -168,14 +193,17 @@ const startServer = async () => {
 
     // Schedule token cleanup - runs daily at startup and every 24 hours
     const runTokenCleanup = async () => {
-      try {
-        const count = await cleanupExpiredTokens();
-        if (count > 0) {
-          logger.info('Token cleanup completed', { deletedCount: count });
+      // Use distributed lock to ensure only one instance runs cleanup
+      await distributedLock.withLock('job:token-cleanup', async () => {
+        try {
+          const count = await cleanupExpiredTokens();
+          if (count > 0) {
+            logger.info('Token cleanup completed', { deletedCount: count });
+          }
+        } catch (error) {
+          logger.error('Token cleanup failed', { error: (error as Error).message });
         }
-      } catch (error) {
-        logger.error('Token cleanup failed', { error: (error as Error).message });
-      }
+      }, 5 * 60 * 1000); // 5 minute lock TTL
     };
 
     // Run cleanup on startup (after a short delay to let the server start)
@@ -183,14 +211,110 @@ const startServer = async () => {
     
     // Schedule cleanup to run every 24 hours
     setInterval(runTokenCleanup, 24 * 60 * 60 * 1000);
-    logger.info('Token cleanup scheduled (daily)');
+    logger.info('Token cleanup scheduled (daily, distributed lock enabled)');
+
+    // Schedule webhook retry - runs every 15 minutes to retry failed webhooks with exponential backoff
+    const { retryFailedWebhooks } = await import('./services/eventService');
+    const runWebhookRetry = async () => {
+      // Use distributed lock to prevent duplicate webhook deliveries
+      await distributedLock.withLock('job:webhook-retry', async () => {
+        try {
+          const result = await retryFailedWebhooks();
+          if (result.retried > 0) {
+            logger.info('Webhook retry completed', { retried: result.retried, succeeded: result.succeeded });
+          }
+        } catch (error) {
+          logger.error('Webhook retry failed', { error: (error as Error).message });
+        }
+      }, 10 * 60 * 1000); // 10 minute lock TTL
+    };
     
-    app.listen(PORT, () => {
+    // Run webhook retry after a short delay and every 15 minutes
+    setTimeout(runWebhookRetry, 30000); // 30 sec delay at startup
+    setInterval(runWebhookRetry, 15 * 60 * 1000); // Every 15 minutes
+    logger.info('Webhook retry scheduler initialized (every 15 minutes, distributed lock enabled)');
+
+    // Schedule email queue processor - runs every 5 minutes to send pending emails
+    const { processEmailQueue } = await import('./services/emailService');
+    const runEmailQueue = async () => {
+      // Use distributed lock to prevent duplicate email sends
+      await distributedLock.withLock('job:email-queue', async () => {
+        try {
+          const result = await processEmailQueue(10);
+          if (result.processed > 0) {
+            logger.info('Email queue processed', { processed: result.processed, sent: result.sent, failed: result.failed });
+          }
+        } catch (error) {
+          logger.error('Email queue processing failed', { error: (error as Error).message });
+        }
+      }, 3 * 60 * 1000); // 3 minute lock TTL
+    };
+    
+    // Run email queue processing after a short delay and every 5 minutes
+    setTimeout(runEmailQueue, 60000); // 60 sec delay at startup
+    setInterval(runEmailQueue, 5 * 60 * 1000); // Every 5 minutes
+    logger.info('Email queue processor initialized (every 5 minutes, distributed lock enabled)');
+    
+    const server = app.listen(PORT, () => {
       logger.info('SeaBridge API started', {
         port: PORT,
         environment: process.env.NODE_ENV || 'development',
       });
     });
+
+    /**
+     * Graceful shutdown handler.
+     * 
+     * When the process receives SIGTERM (container stop) or SIGINT (Ctrl+C):
+     * 1. Stop accepting new connections
+     * 2. Wait for in-flight requests to complete (with timeout)
+     * 3. Close database connection pool
+     * 4. Close Redis connection
+     * 5. Exit cleanly
+     * 
+     * This prevents dropped requests during deployments and ensures database
+     * connections are properly released.
+     */
+    const gracefulShutdown = async (signal: string) => {
+      logger.info('Shutdown signal received, closing server gracefully', { signal });
+      
+      // Stop accepting new connections
+      server.close(async (err) => {
+        if (err) {
+          logger.error('Error during server close', { error: err.message });
+        }
+        
+        logger.info('Server closed, cleaning up resources');
+        
+        try {
+          // Close database connection pool
+          await prisma.$disconnect();
+          logger.info('Database disconnected');
+          
+          // Close Redis connection if available
+          const redisClient = await getRedisClient();
+          if (redisClient) {
+            await redisClient.quit();
+            logger.info('Redis disconnected');
+          }
+        } catch (cleanupError) {
+          logger.error('Error during cleanup', { error: (cleanupError as Error).message });
+        }
+        
+        logger.info('Shutdown complete');
+        process.exit(err ? 1 : 0);
+      });
+
+      // Force exit after timeout if connections don't drain
+      setTimeout(() => {
+        logger.warn('Forcefully shutting down after timeout');
+        process.exit(1);
+      }, 30000); // 30 second timeout
+    };
+
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
   } catch (error) {
     logger.error('Failed to start server', { error: (error as Error).message });
     process.exit(1);
@@ -198,16 +322,5 @@ const startServer = async () => {
 };
 
 startServer();
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  await prisma.$disconnect();
-  process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  await prisma.$disconnect();
-  process.exit(0);
-});
 
 export default app;

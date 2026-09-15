@@ -33,6 +33,9 @@ function buildDateFilter(dateRange: DateRange, field: string) {
 
 /**
  * Convert array of objects to CSV string
+ * 
+ * Security: Prefixes cells starting with =, +, -, @, or tab with a single quote
+ * to prevent CSV formula injection attacks when opened in Excel/Sheets.
  */
 export function toCSV(data: Record<string, any>[], columns?: { key: string; header: string }[]): string {
   if (data.length === 0) return '';
@@ -40,18 +43,39 @@ export function toCSV(data: Record<string, any>[], columns?: { key: string; head
   // Auto-detect columns if not provided
   const cols = columns || Object.keys(data[0]).map(key => ({ key, header: key }));
   
+  /**
+   * Escape a value for safe CSV output.
+   * - Wraps in quotes and escapes internal quotes
+   * - Prefixes formula-triggering characters with a single quote to prevent
+   *   Excel/Sheets from interpreting them as formulas (CSV injection defense)
+   */
+  const escapeValue = (value: any): string => {
+    if (value === null || value === undefined) return '""';
+    
+    let str: string;
+    if (value instanceof Date) {
+      str = dayjs(value).format('YYYY-MM-DD HH:mm:ss');
+    } else {
+      str = String(value);
+    }
+    
+    // CSV formula injection prevention: if the value starts with a character
+    // that could trigger formula execution in spreadsheet software, prefix
+    // with a single quote (which displays but neutralizes the formula)
+    if (/^[=+\-@\t\r]/.test(str)) {
+      str = "'" + str;
+    }
+    
+    // Escape double quotes by doubling them
+    return `"${str.replace(/"/g, '""')}"`;
+  };
+  
   // Header row
-  const headerRow = cols.map(c => `"${c.header}"`).join(',');
+  const headerRow = cols.map(c => escapeValue(c.header)).join(',');
   
   // Data rows
   const dataRows = data.map(row => {
-    return cols.map(c => {
-      const value = row[c.key];
-      if (value === null || value === undefined) return '""';
-      if (typeof value === 'string') return `"${value.replace(/"/g, '""')}"`;
-      if (value instanceof Date) return `"${dayjs(value).format('YYYY-MM-DD HH:mm:ss')}"`;
-      return `"${String(value)}"`;
-    }).join(',');
+    return cols.map(c => escapeValue(row[c.key])).join(',');
   });
 
   return [headerRow, ...dataRows].join('\n');

@@ -12,7 +12,7 @@ import { ActivityTimeline } from '@/components/ActivityTimeline';
 import {
   ArrowLeft, Mail, Phone, Globe, Building2, Edit2, Plus,
   User, MessageSquare, FileText, ShoppingCart, IndianRupee,
-  Calendar, MapPin, CreditCard, TrendingUp, Clock
+  Calendar, MapPin, CreditCard, TrendingUp, Clock, Trash2
 } from 'lucide-react';
 
 type TabType = 'overview' | 'contacts' | 'communications' | 'inquiries' | 'orders' | 'invoices' | 'activity';
@@ -41,6 +41,24 @@ export default function BuyerDetail() {
   // totalRevenue is accumulated in the base currency; the buyer's own currency
   // applies to their credit limit and to each order/invoice row.
   const baseCode = data?.data?.summary?.baseCurrency?.code;
+
+  // Delete contact mutation
+  const deleteContactMutation = useMutation({
+    mutationFn: (contactId: string) => buyersApi.deleteContact(id!, contactId),
+    onSuccess: () => {
+      toast.success('Contact deleted');
+      queryClient.invalidateQueries({ queryKey: ['buyer', id] });
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to delete contact');
+    },
+  });
+
+  const handleDeleteContact = (contact: any) => {
+    if (window.confirm(`Delete contact ${contact.firstName} ${contact.lastName}?`)) {
+      deleteContactMutation.mutate(contact.id);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -173,6 +191,7 @@ export default function BuyerDetail() {
           contacts={buyer.contacts || []}
           onAdd={() => { setEditContact(null); setShowContactModal(true); }}
           onEdit={(c) => { setEditContact(c); setShowContactModal(true); }}
+          onDelete={handleDeleteContact}
         />
       )}
       {activeTab === 'communications' && (
@@ -404,7 +423,7 @@ function OverviewTab({ buyer }: { buyer: any }) {
 }
 
 // Contacts Tab
-function ContactsTab({ contacts, onAdd, onEdit }: { contacts: any[]; onAdd: () => void; onEdit: (c: any) => void }) {
+function ContactsTab({ contacts, onAdd, onEdit, onDelete }: { contacts: any[]; onAdd: () => void; onEdit: (c: any) => void; onDelete: (c: any) => void }) {
   return (
     <div className="space-y-4">
       <div className="flex justify-end">
@@ -433,9 +452,20 @@ function ContactsTab({ contacts, onAdd, onEdit }: { contacts: any[]; onAdd: () =
                   )}
                 </div>
               </div>
-              <button onClick={() => onEdit(contact)} className="text-gray-400 hover:text-gray-600" aria-label="Edit contact">
-                <Edit2 className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button onClick={() => onEdit(contact)} className="text-gray-400 hover:text-gray-600 p-1" aria-label="Edit contact">
+                  <Edit2 className="w-4 h-4" />
+                </button>
+                {!contact.isPrimary && (
+                  <button 
+                    onClick={() => onDelete(contact)} 
+                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded transition-colors" 
+                    aria-label="Delete contact"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
             </div>
             <div className="mt-3 space-y-1 text-sm">
               {contact.email && (

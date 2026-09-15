@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
-import { ValidationError, NotFoundError } from '../middleware/errorHandler';
+import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { getBaseCurrency } from '../services/exchangeRateService';
 import { generateCode, contentDisposition } from '../utils/helpers';
 import { optionalEmail } from '../utils/validators';
@@ -87,6 +87,63 @@ router.get('/:id', can('BUYER_VIEW'), async (req, res, next) => {
       summary: {
         // totalRevenue is accumulated in the base currency, not the buyer's own.
         baseCurrency: await getBaseCurrency(),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * Get buyer defaults for auto-filling forms (quotations, invoices).
+ * Returns only the fields relevant for prefilling, including suggested port
+ * of discharge based on buyer's country.
+ */
+router.get('/:id/defaults', can('BUYER_VIEW'), async (req, res, next) => {
+  try {
+    const buyer = await prisma.buyer.findUnique({
+      where: { id: req.params.id },
+      select: {
+        id: true,
+        companyName: true,
+        paymentTerms: true,
+        creditDays: true,
+        currencyId: true,
+        currency: { select: { id: true, code: true, name: true } },
+        country: { 
+          select: { 
+            id: true, 
+            name: true,
+            // Get major ports in buyer's country for suggested port of discharge
+            ports: { 
+              where: { isActive: true },
+              take: 5,
+              orderBy: { name: 'asc' },
+              select: { id: true, name: true, code: true, type: true }
+            }
+          } 
+        },
+      },
+    });
+
+    if (!buyer) throw new NotFoundError('Buyer');
+
+    // Find the default port of discharge (first port in buyer's country)
+    const suggestedPortOfDischarge = buyer.country?.ports?.[0] || null;
+
+    res.json({
+      success: true,
+      data: {
+        buyerId: buyer.id,
+        companyName: buyer.companyName,
+        // Payment and delivery terms for quotation/invoice
+        paymentTerms: buyer.paymentTerms,
+        creditDays: buyer.creditDays,
+        // Currency preference
+        currency: buyer.currency,
+        // Suggested port based on buyer's country
+        suggestedPortOfDischarge,
+        availablePorts: buyer.country?.ports || [],
       },
     });
   } catch (error) {
@@ -226,6 +283,42 @@ router.put('/:id/contacts/:contactId', can('BUYER_MANAGE'), async (req, res, nex
     });
 
     res.json({ success: true, data: contact });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete a contact
+router.delete('/:id/contacts/:contactId', can('BUYER_MANAGE'), async (req, res, next) => {
+  try {
+    // Verify the contact belongs to this buyer
+    const existing = await prisma.buyerContact.findFirst({
+      where: { id: req.params.contactId, buyerId: req.params.id },
+      select: { id: true, isPrimary: true, firstName: true, lastName: true },
+    });
+    if (!existing) throw new NotFoundError('Contact');
+
+    // Don't allow deleting the primary contact if there are other contacts
+    if (existing.isPrimary) {
+      const otherContacts = await prisma.buyerContact.count({
+        where: { buyerId: req.params.id, id: { not: req.params.contactId } },
+      });
+      if (otherContacts > 0) {
+        throw new AppError(
+          'Cannot delete the primary contact. Set another contact as primary first.',
+          400
+        );
+      }
+    }
+
+    await prisma.buyerContact.delete({
+      where: { id: req.params.contactId },
+    });
+
+    res.json({ 
+      success: true, 
+      message: `Contact ${existing.firstName} ${existing.lastName || ''} deleted`.trim(),
+    });
   } catch (error) {
     next(error);
   }

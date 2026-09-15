@@ -216,12 +216,15 @@ export const masterApi = {
 export const buyersApi = {
   list: (params?: any) => api.get('/buyers', { params }),
   get: (id: string) => api.get(`/buyers/${id}`),
+  getDefaults: (id: string) => api.get(`/buyers/${id}/defaults`),
   create: (data: any) => api.post('/buyers', data),
   update: (id: string, data: any) => api.put(`/buyers/${id}`, data),
   delete: (id: string) => api.delete(`/buyers/${id}`),
   addContact: (id: string, data: any) => api.post(`/buyers/${id}/contacts`, data),
   updateContact: (id: string, contactId: string, data: any) =>
     api.put(`/buyers/${id}/contacts/${contactId}`, data),
+  deleteContact: (id: string, contactId: string) =>
+    api.delete(`/buyers/${id}/contacts/${contactId}`),
   addCommunication: (id: string, data: any) => api.post(`/buyers/${id}/communications`, data),
   // Export to CSV - returns blob
   exportCsv: (params?: { status?: string; countryId?: string }) =>
@@ -235,6 +238,8 @@ export const buyersApi = {
 export const productsApi = {
   list: (params?: any) => api.get('/products', { params }),
   get: (id: string) => api.get(`/products/${id}`),
+  getLatestPrice: (id: string, supplierId?: string) => 
+    api.get(`/products/${id}/latest-price`, { params: supplierId ? { supplierId } : undefined }),
   create: (data: any) => api.post('/products', data),
   update: (id: string, data: any) => api.put(`/products/${id}`, data),
 };
@@ -285,6 +290,7 @@ export const inquiriesApi = {
   create: (data: any) => api.post('/inquiries', data),
   update: (id: string, data: any) => api.put(`/inquiries/${id}`, data),
   addItem: (id: string, data: any) => api.post(`/inquiries/${id}/items`, data),
+  deleteItem: (id: string, itemId: string) => api.delete(`/inquiries/${id}/items/${itemId}`),
   addFollowUp: (id: string, data: any) => api.post(`/inquiries/${id}/followups`, data),
 };
 
@@ -323,6 +329,7 @@ export const quotationsApi = {
 export const ordersApi = {
   list: (params?: any) => api.get('/orders', { params }),
   get: (id: string) => api.get(`/orders/${id}`),
+  getShipmentDefaults: (id: string) => api.get(`/orders/${id}/shipment-defaults`),
   create: (data: any) => api.post('/orders', data),
   update: (id: string, data: any) => api.put(`/orders/${id}`, data),
   addProcurement: (id: string, data: any) => api.post(`/orders/${id}/procurements`, data),

@@ -84,7 +84,7 @@ router.use(authenticate);
 // Main founder dashboard
 router.get('/', can('DASHBOARD_FULL'), async (req, res, next) => {
   try {
-    // Real-time data - no caching for guaranteed fresh data on every load
+    // Real-time data - no caching to ensure data accuracy on every load
     const today = new Date();
     const startOfMonth = monthStart(today);
     /**

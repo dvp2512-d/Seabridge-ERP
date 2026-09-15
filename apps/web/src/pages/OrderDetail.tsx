@@ -1,5 +1,5 @@
 // Enhanced OrderDetail Page - Complete Export Operations Management
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
@@ -904,7 +904,7 @@ function PackingModal({
           </p>
         )}
 
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex justify-end gap-3 pt-4 border-t">
           <button className="btn btn-secondary" onClick={onClose} disabled={mutation.isPending}>
             Cancel
           </button>
@@ -1068,7 +1068,7 @@ function DocumentDetailsModal({
           onChange={(e: any) => setForm({ ...form, deliveryTerms: e.target.value })}
         />
 
-        <div className="flex justify-end gap-2 pt-2 border-t">
+        <div className="flex justify-end gap-3 pt-4 border-t">
           <button className="btn btn-secondary" onClick={onClose} disabled={mutation.isPending}>
             Cancel
           </button>
@@ -1238,7 +1238,7 @@ function DocumentsTab({
             <span className={`badge ${getStatusColor(doc.status)}`}>{doc.status}</span>
             <button 
               onClick={() => onUpdate(doc)}
-              className="text-navy-600 hover:text-navy-800 p-1"
+              className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-gray-100 rounded transition-colors"
             >
               <Edit className="w-4 h-4" />
             </button>
@@ -1953,9 +1953,10 @@ function ShipmentModal({
    * Extract cost amounts from quotation costs by type.
    * Quotation costType values: CHA, TRANSPORT, FREIGHT, PACKAGING, OTHER
    */
-  const getQuotedCost = (types: string[]) => {
-    if (!quotationCosts) return '';
-    const cost = quotationCosts.find((c) =>
+  const getQuotedCost = (types: string[], costs?: typeof quotationCosts) => {
+    const source = costs || quotationCosts;
+    if (!source) return '';
+    const cost = source.find((c) =>
       types.some((t) => c.costType.toUpperCase().includes(t))
     );
     return cost ? String(Number(cost.amount)) : '';
@@ -1986,6 +1987,36 @@ function ShipmentModal({
     eta: '',
     notes: '',
   });
+
+  // Fetch shipment defaults from backend if quotation costs not provided
+  useEffect(() => {
+    if (!quotationCosts || quotationCosts.length === 0) {
+      ordersApi.getShipmentDefaults(orderId)
+        .then((response) => {
+          const data = response.data?.data;
+          if (data) {
+            setFormData((prev) => ({
+              ...prev,
+              // Use suggested ports if not already set
+              originPortId: prev.originPortId || data.suggestedPorts?.originPortId || '',
+              destinationPortId: prev.destinationPortId || data.suggestedPorts?.destinationPortId || '',
+              // Use suggested costs from quotation
+              freightCost: prev.freightCost || String(data.suggestedCosts?.freightCost || ''),
+              chaCharges: prev.chaCharges || String(data.suggestedCosts?.chaCharges || ''),
+              transportCharges: prev.transportCharges || String(data.suggestedCosts?.transportCharges || ''),
+              packagingCharges: prev.packagingCharges || String(data.suggestedCosts?.packagingCharges || ''),
+              insuranceCharges: prev.insuranceCharges || String(data.suggestedCosts?.insuranceCharges || ''),
+              inspectionCharges: prev.inspectionCharges || String(data.suggestedCosts?.inspectionCharges || ''),
+              commissionCharges: prev.commissionCharges || String(data.suggestedCosts?.commissionCharges || ''),
+              otherCharges: prev.otherCharges || String(data.suggestedCosts?.otherCharges || ''),
+            }));
+          }
+        })
+        .catch(() => {
+          // Silently fail - costs can be entered manually
+        });
+    }
+  }, [orderId, quotationCosts]);
 
   const { data: chasData } = useQuery({
     queryKey: ['chas-list'],
@@ -2477,7 +2508,7 @@ function AttachmentsSection({ orderId }: { orderId: string }) {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => handleDownload(attachment)}
-                  className="p-2 text-navy-600 hover:bg-navy-100 rounded"
+                  className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-gray-100 rounded transition-colors"
                   title="Download"
                 >
                   <Download className="w-4 h-4" />
@@ -2488,7 +2519,7 @@ function AttachmentsSection({ orderId }: { orderId: string }) {
                       deleteMutation.mutate(attachment.id);
                     }
                   }}
-                  className="p-2 text-red-600 hover:bg-red-100 rounded"
+                  className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded transition-colors"
                   title="Delete"
                 >
                   <Trash2 className="w-4 h-4" />

@@ -303,7 +303,7 @@ export default function Income() {
                         </span>
                       </td>
                       <td className="text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1">
+                        <div className="flex items-center justify-end gap-2">
                           {canManage && (
                             <>
                               {e.status === 'PENDING' && (
@@ -311,7 +311,7 @@ export default function Income() {
                                   onClick={() =>
                                     setStatusMutation.mutate({ id: e.id, next: 'RECEIVED' })
                                   }
-                                  className="p-1 text-gray-400 hover:text-green-600 rounded transition-colors"
+                                  className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-gray-100 rounded transition-colors"
                                   title="Mark received"
                                 >
                                   <Check className="w-4 h-4" />
@@ -322,7 +322,7 @@ export default function Income() {
                                   setEditing(e);
                                   setShowForm(true);
                                 }}
-                                className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors"
+                                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
                                 title="Edit"
                               >
                                 <Edit className="w-4 h-4" />
@@ -332,7 +332,7 @@ export default function Income() {
                           {canDelete && (
                             <button
                               onClick={() => setPendingDelete(e)}
-                              className="p-1 text-gray-400 hover:text-red-600 rounded transition-colors"
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded transition-colors"
                               title="Delete"
                               aria-label="Delete income"
                             >
@@ -732,7 +732,7 @@ function IncomeFormModal({
           placeholder="Any additional details..."
         />
 
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex justify-end gap-3 pt-4 border-t">
           <button type="button" onClick={onClose} className="btn btn-secondary">
             Cancel
           </button>

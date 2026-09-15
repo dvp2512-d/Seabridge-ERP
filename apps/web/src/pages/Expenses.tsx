@@ -620,7 +620,7 @@ function PaymentModal({
           placeholder="Any additional details..."
         />
 
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex justify-end gap-3 pt-4 border-t">
           <button className="btn btn-secondary" onClick={onClose} disabled={isPending}>
             Cancel
           </button>
@@ -699,9 +699,9 @@ function ExpenseActions({
    */
   if (expense.status === 'PAID') {
     return canDelete ? (
-      <div className="flex items-center justify-end gap-1">
+      <div className="flex items-center justify-end gap-2">
         <span className="text-xs text-gray-400 mr-1">paid</span>
-        <button onClick={onDelete} className="p-1 text-gray-400 hover:text-red-600 rounded transition-colors" title="Delete" aria-label="Delete expense">
+        <button onClick={onDelete} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded transition-colors" title="Delete" aria-label="Delete expense">
           <Trash2 className="w-4 h-4" />
         </button>
       </div>
@@ -711,13 +711,13 @@ function ExpenseActions({
   }
 
   return (
-    <div className="flex items-center justify-end gap-1">
+    <div className="flex items-center justify-end gap-2">
       {expense.status === 'PENDING' && (
         <>
-          <button onClick={onApprove} className="p-1 text-gray-400 hover:text-blue-600 rounded transition-colors" title="Approve">
+          <button onClick={onApprove} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-gray-100 rounded transition-colors" title="Approve">
             <Check className="w-4 h-4" />
           </button>
-          <button onClick={onReject} className="p-1 text-gray-400 hover:text-red-600 rounded transition-colors" title="Reject">
+          <button onClick={onReject} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded transition-colors" title="Reject">
             <X className="w-4 h-4" />
           </button>
         </>
@@ -725,7 +725,7 @@ function ExpenseActions({
       {expense.status === 'APPROVED' && (
         <button
           onClick={onPay}
-          className="p-1 text-gray-400 hover:text-green-600 rounded transition-colors"
+          className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-gray-100 rounded transition-colors"
           title={`Record a payment. ${formatCurrency(Number(expense.balanceAmount ?? 0))} outstanding.`}
         >
           <Wallet className="w-4 h-4" />
@@ -733,7 +733,7 @@ function ExpenseActions({
       )}
       <button
         onClick={onEdit}
-        className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors"
+        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
         title={
           expense.isGenerated
             ? 'Edit description and notes. The amount is maintained on the linked record.'
@@ -743,7 +743,7 @@ function ExpenseActions({
         <Edit className="w-4 h-4" />
       </button>
       {canDelete && (
-        <button onClick={onDelete} className="p-1 text-gray-400 hover:text-red-600 rounded transition-colors" title="Delete" aria-label="Delete expense">
+        <button onClick={onDelete} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded transition-colors" title="Delete" aria-label="Delete expense">
           <Trash2 className="w-4 h-4" />
         </button>
       )}
@@ -1013,7 +1013,7 @@ function ExpenseFormModal({
           placeholder="Any additional details..."
         />
 
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex justify-end gap-3 pt-4 border-t">
           <button type="button" onClick={onClose} className="btn btn-secondary">
             Cancel
           </button>

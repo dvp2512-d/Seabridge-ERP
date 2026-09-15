@@ -8,7 +8,7 @@ import { ErrorState } from '@/components/ui/ErrorState';
 import Modal from '@/components/ui/Modal';
 import { FormField, SelectField, TextareaField } from '@/components/ui/FormFields';
 import DeleteRecordButton from '@/components/DeleteRecordButton';
-import { Plus, Search, Edit2 } from 'lucide-react';
+import { Plus, Search, Edit2, Eye } from 'lucide-react';
 import { useDebouncedCallback } from '@/hooks/useDebouncedCallback';
 
 export default function Products() {
@@ -128,7 +128,7 @@ export default function Products() {
                 <th>HSN Code</th>
                 <th>Unit</th>
                 <th>Status</th>
-                <th className="w-20">Actions</th>
+                <th className="w-24">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -154,10 +154,17 @@ export default function Products() {
                     </span>
                   </td>
                   <td>
-                    <div className="flex items-center justify-end gap-1">
+                    <div className="flex items-center justify-end gap-2">
                       <button
                         onClick={() => openEdit(product)}
-                        className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors"
+                        className="p-1.5 text-gray-400 hover:text-navy-600 hover:bg-gray-100 rounded transition-colors"
+                        aria-label="View product"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => openEdit(product)}
+                        className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
                         aria-label="Edit product"
                       >
                         <Edit2 className="w-4 h-4" />

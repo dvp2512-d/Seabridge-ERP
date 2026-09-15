@@ -92,9 +92,9 @@ export default function CHAs() {
                   </td>
                   <td><span className={`badge ${cha.isActive ? 'badge-success' : 'badge-gray'}`}>{cha.isActive ? 'Active' : 'Inactive'}</span></td>
                   <td>
-                    <div className="flex items-center justify-end gap-1">
-                      <button onClick={() => { setSelectedCha(cha); setShowDetailModal(true); }} className="p-1 text-gray-400 hover:text-navy-600 rounded transition-colors" aria-label="View CHA details"><Eye className="w-4 h-4" /></button>
-                      <button onClick={() => { setEditCha(cha); setShowModal(true); }} className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" aria-label="Edit CHA"><Edit2 className="w-4 h-4" /></button>
+                    <div className="flex items-center justify-end gap-2">
+                      <button onClick={() => { setSelectedCha(cha); setShowDetailModal(true); }} className="p-1.5 text-gray-400 hover:text-navy-600 hover:bg-gray-100 rounded transition-colors" aria-label="View CHA details"><Eye className="w-4 h-4" /></button>
+                      <button onClick={() => { setEditCha(cha); setShowModal(true); }} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors" aria-label="Edit CHA"><Edit2 className="w-4 h-4" /></button>
                       <DeleteRecordButton
                         resourceType="cha"
                         recordId={cha.id}

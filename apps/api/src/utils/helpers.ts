@@ -1,11 +1,88 @@
-import { prisma } from '@seabridge/database';
+import { prisma, Prisma } from '@seabridge/database';
 
-// Generate sequential codes like BYR-00001, INQ-00001, etc.
-export async function generateCode(entityType: string, prefix: string): Promise<string> {
-  const sequence = await prisma.numberSequence.upsert({
-    where: { entityType },
+/**
+ * Get the current Indian financial year in FY format (e.g., "2425" for April 2024 - March 2025).
+ * Indian FY runs April 1 to March 31.
+ */
+function getCurrentFY(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth(); // 0-indexed, so March = 2
+  
+  // If before April, we're in the previous FY
+  const fyStart = month < 3 ? year - 1 : year;
+  const fyEnd = fyStart + 1;
+  
+  // Return last 2 digits of each year: 2024-2025 → "2425"
+  return `${String(fyStart).slice(-2)}${String(fyEnd).slice(-2)}`;
+}
+
+/**
+ * Prisma transaction client type for transaction-aware functions.
+ */
+type PrismaClient = typeof prisma;
+type TransactionClient = Omit<PrismaClient, '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'>;
+
+/**
+ * Generate sequential codes like BYR-00001, INQ-00001, etc.
+ * 
+ * Uses atomic upsert to prevent race conditions between concurrent requests.
+ * 
+ * For gap-free sequences, use generateCodeInTx() within a transaction.
+ * 
+ * @param entityType - Unique identifier for the sequence (e.g., 'INVOICE', 'ORDER')
+ * @param prefix - Prefix for the generated code (e.g., 'INV', 'ORD')
+ * @param options.useFY - If true, includes financial year in the code (e.g., INV-2425-00001)
+ * @param options.resetOnFY - If true combined with useFY, resets counter at FY start
+ */
+export async function generateCode(
+  entityType: string, 
+  prefix: string,
+  options?: { useFY?: boolean; resetOnFY?: boolean }
+): Promise<string> {
+  return generateCodeWithClient(prisma, entityType, prefix, options);
+}
+
+/**
+ * Generate sequential codes within a transaction.
+ * 
+ * This version accepts a transaction client, ensuring the sequence increment
+ * and record creation are atomic. If the parent transaction rolls back, the
+ * sequence number is not consumed, preventing gaps.
+ * 
+ * @param tx - Prisma transaction client
+ * @param entityType - Unique identifier for the sequence
+ * @param prefix - Prefix for the generated code
+ * @param options - Optional FY settings
+ */
+export async function generateCodeInTx(
+  tx: TransactionClient,
+  entityType: string, 
+  prefix: string,
+  options?: { useFY?: boolean; resetOnFY?: boolean }
+): Promise<string> {
+  return generateCodeWithClient(tx, entityType, prefix, options);
+}
+
+/**
+ * Internal implementation that works with any Prisma client (main or transaction).
+ */
+async function generateCodeWithClient(
+  client: PrismaClient | TransactionClient,
+  entityType: string,
+  prefix: string,
+  options?: { useFY?: boolean; resetOnFY?: boolean }
+): Promise<string> {
+  const { useFY = false, resetOnFY = false } = options || {};
+  
+  // For FY-aware sequences, include FY in the entityType to get per-FY counters
+  const fy = useFY ? getCurrentFY() : null;
+  const sequenceKey = resetOnFY && fy ? `${entityType}_FY${fy}` : entityType;
+  
+  const sequence = await client.numberSequence.upsert({
+    where: { entityType: sequenceKey },
     create: {
-      entityType,
+      entityType: sequenceKey,
       prefix,
       currentNo: 1,
       padLength: 5,
@@ -16,6 +93,12 @@ export async function generateCode(entityType: string, prefix: string): Promise<
   });
 
   const paddedNo = String(sequence.currentNo).padStart(sequence.padLength, '0');
+  
+  // Include FY in the code if requested: INV-2425-00001
+  if (useFY && fy) {
+    return `${sequence.prefix}-${fy}-${paddedNo}`;
+  }
+  
   return `${sequence.prefix}-${paddedNo}`;
 }
 

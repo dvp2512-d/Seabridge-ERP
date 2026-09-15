@@ -677,81 +677,90 @@ router.post('/:id/payments', can('FINANCE_MANAGE'), async (req, res, next) => {
 
     const data = validation.data;
 
-    // Use raw SQL
-    const expenseResult = await prisma.$queryRaw<any[]>`
-      SELECT "id", "expense_number" as "expenseNumber", "amount", "paid_amount" as "paidAmount", "status"
-      FROM "expenses" WHERE "id" = ${req.params.id} LIMIT 1
-    `;
-    
-    if (expenseResult.length === 0) throw new NotFoundError('Expense');
-    const expense = expenseResult[0];
+    /**
+     * CRITICAL: Use a transaction with FOR UPDATE lock to prevent race conditions
+     * where concurrent payments could both pass overpayment checks and corrupt balances.
+     */
+    const result = await prisma.$transaction(async (tx) => {
+      // Lock the expense row to prevent concurrent payment race conditions
+      const expenseResult = await tx.$queryRaw<any[]>`
+        SELECT "id", "expense_number" as "expenseNumber", "amount", "paid_amount" as "paidAmount", "status"
+        FROM "expenses" WHERE "id" = ${req.params.id}
+        FOR UPDATE
+      `;
+      
+      if (expenseResult.length === 0) throw new NotFoundError('Expense');
+      const expense = expenseResult[0];
 
-    if (expense.status === 'REJECTED') {
-      throw new AppError(
-        `${expense.expenseNumber} was rejected. Reopen it before recording a payment.`,
-        400
-      );
-    }
+      if (expense.status === 'REJECTED') {
+        throw new AppError(
+          `${expense.expenseNumber} was rejected. Reopen it before recording a payment.`,
+          400
+        );
+      }
 
-    const amount = Number(expense.amount);
-    const alreadyPaid = Number(expense.paidAmount);
-    const outstanding = Math.round((amount - alreadyPaid + Number.EPSILON) * 100) / 100;
+      const amount = Number(expense.amount);
+      const alreadyPaid = Number(expense.paidAmount);
+      const outstanding = Math.round((amount - alreadyPaid + Number.EPSILON) * 100) / 100;
 
-    if (data.amount > outstanding + 0.005) {
-      throw new AppError(
-        `That is more than is outstanding. ${expense.expenseNumber} has ` +
-          `INR ${outstanding.toFixed(2)} left to pay of INR ${amount.toFixed(2)}.`,
-        400
-      );
-    }
+      if (data.amount > outstanding + 0.005) {
+        throw new AppError(
+          `That is more than is outstanding. ${expense.expenseNumber} has ` +
+            `INR ${outstanding.toFixed(2)} left to pay of INR ${amount.toFixed(2)}.`,
+          400
+        );
+      }
 
-    // Use raw SQL to avoid Prisma schema mismatch
-    const paymentId = crypto.randomUUID();
-    const paymentDate = new Date(data.paymentDate);
-    const method = data.method ?? 'BANK_TRANSFER';
-    const now = new Date();
+      // Use raw SQL to avoid Prisma schema mismatch
+      const paymentId = crypto.randomUUID();
+      const paymentDate = new Date(data.paymentDate);
+      const method = data.method ?? 'BANK_TRANSFER';
+      const now = new Date();
 
-    // Create payment using raw SQL
-    await prisma.$executeRaw`
-      INSERT INTO "expense_payments" ("id", "expense_id", "amount", "payment_date", "method", "reference", "notes", "created_at", "updated_at")
-      VALUES (${paymentId}, ${expense.id}, ${data.amount}, ${paymentDate}, ${method}, ${data.reference || null}, ${data.notes || null}, ${now}, ${now})
-    `;
+      // Create payment using raw SQL
+      await tx.$executeRaw`
+        INSERT INTO "expense_payments" ("id", "expense_id", "amount", "payment_date", "method", "reference", "notes", "created_at", "updated_at")
+        VALUES (${paymentId}, ${expense.id}, ${data.amount}, ${paymentDate}, ${method}, ${data.reference || null}, ${data.notes || null}, ${now}, ${now})
+      `;
 
-    // Recalculate expense totals using raw SQL
-    const newPaidAmount = alreadyPaid + data.amount;
-    const newBalanceAmount = Math.round((amount - newPaidAmount + Number.EPSILON) * 100) / 100;
-    let newStatus = expense.status;
-    
-    if (newBalanceAmount <= 0) {
-      newStatus = 'PAID';
-    } else if (newPaidAmount > 0) {
-      newStatus = 'APPROVED';
-    }
+      // Recalculate expense totals using raw SQL
+      const newPaidAmount = alreadyPaid + data.amount;
+      const newBalanceAmount = Math.round((amount - newPaidAmount + Number.EPSILON) * 100) / 100;
+      let newStatus = expense.status;
+      
+      if (newBalanceAmount <= 0) {
+        newStatus = 'PAID';
+      } else if (newPaidAmount > 0) {
+        newStatus = 'APPROVED';
+      }
 
-    await prisma.$executeRaw`
-      UPDATE "expenses" 
-      SET "paid_amount" = ${newPaidAmount}, "balance_amount" = ${newBalanceAmount}, "status" = ${newStatus}, "updated_at" = ${now}
-      WHERE "id" = ${expense.id}
-    `;
+      await tx.$executeRaw`
+        UPDATE "expenses" 
+        SET "paid_amount" = ${newPaidAmount}, "balance_amount" = ${newBalanceAmount}, "status" = ${newStatus}, "updated_at" = ${now}
+        WHERE "id" = ${expense.id}
+      `;
 
-    // Fetch the created payment
-    const paymentResult = await prisma.$queryRaw<any[]>`
-      SELECT "id", "expense_id" as "expenseId", "amount", "payment_date" as "paymentDate", "method", "reference", "notes", "created_at" as "createdAt"
-      FROM "expense_payments" WHERE "id" = ${paymentId}
-    `;
-    const payment = paymentResult[0];
+      // Fetch the created payment
+      const paymentResult = await tx.$queryRaw<any[]>`
+        SELECT "id", "expense_id" as "expenseId", "amount", "payment_date" as "paymentDate", "method", "reference", "notes", "created_at" as "createdAt"
+        FROM "expense_payments" WHERE "id" = ${paymentId}
+      `;
+      const payment = paymentResult[0];
 
-    // Fetch updated expense
+      return { payment, expenseId: expense.id };
+    });
+
+    // Fetch updated expense outside transaction for response
     const selectColumns = getSelectColumns(state);
     const updatedResult = await prisma.$queryRawUnsafe<any[]>(
       `SELECT ${selectColumns} FROM "expenses" WHERE "id" = $1`,
-      expense.id
+      result.expenseId
     );
     const updated = updatedResult[0] ? addDefaultValues(updatedResult[0], state) : null;
 
     if (updated?.status === 'PAID') emitEvent('expense.paid', updated);
 
-    res.status(201).json({ success: true, data: { payment, expense: updated } });
+    res.status(201).json({ success: true, data: { payment: result.payment, expense: updated } });
   } catch (error) {
     next(error);
   }

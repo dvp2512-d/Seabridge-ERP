@@ -288,6 +288,8 @@ model SupplierPrice {
   supplier Supplier @relation(fields: [supplierId], references: [id])
   product  Product  @relation(fields: [productId], references: [id])
 
+  @@index([productId])
+  @@index([supplierId])
   @@map("supplier_prices")
 }
 
@@ -470,6 +472,7 @@ model Communication {
   buyer Buyer @relation(fields: [buyerId], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [userId], references: [id])
 
+  @@index([buyerId])
   @@map("communications")
 }
 
@@ -650,6 +653,9 @@ model Quotation {
   orders          ExportOrder[]
   history         QuotationHistory[]
 
+  @@index([status, buyerId])
+  @@index([buyerId])
+  @@index([inquiryId])
   @@map("quotations")
 }
 
@@ -715,6 +721,7 @@ model QuotationItem {
   quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
   product   Product   @relation(fields: [productId], references: [id])
 
+  @@index([quotationId])
   @@map("quotation_items")
 }
 
@@ -732,6 +739,7 @@ model QuotationCost {
   // Relations
   quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
 
+  @@index([quotationId])
   @@map("quotation_costs")
 }
 
@@ -843,6 +851,7 @@ model OrderItem {
   order   ExportOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product Product     @relation(fields: [productId], references: [id])
 
+  @@index([orderId])
   @@map("order_items")
 }
 
@@ -899,6 +908,7 @@ model Procurement {
   supplier Supplier    @relation(fields: [supplierId], references: [id])
   items    ProcurementItem[]
 
+  @@index([orderId])
   @@map("procurements")
 }
 
@@ -1031,6 +1041,7 @@ model Shipment {
   originPort      Port?        @relation("ShipmentOriginPort", fields: [originPortId], references: [id])
   destinationPort Port?        @relation("ShipmentDestinationPort", fields: [destinationPortId], references: [id])
 
+  @@index([orderId])
   @@map("shipments")
 }
 
@@ -1120,6 +1131,7 @@ model Payment {
   // Relations
   invoice Invoice @relation(fields: [invoiceId], references: [id])
 
+  @@index([invoiceId])
   @@map("payments")
 }
 
@@ -1231,6 +1243,7 @@ model Income {
   linkedInvoice Invoice? @relation("InvoiceIncomeEntries", fields: [linkedInvoiceId], references: [id])
   createdBy     User     @relation(fields: [createdById], references: [id])
 
+  @@index([linkedInvoiceId])
   @@map("income")
 }
 

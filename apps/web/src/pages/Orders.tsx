@@ -1,8 +1,9 @@
 // Enhanced Orders Page - Export Operations Management
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ordersApi, exportApi } from '@/lib/api';
+import toast from 'react-hot-toast';
+import { ordersApi, exportApi, bulkApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { ExportButton } from '@/components/ui/ExportButton';
@@ -16,6 +17,8 @@ import {
   CheckCircle,
   TrendingUp,
   AlertTriangle,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 
 const ORDER_STATUSES = [
@@ -29,9 +32,11 @@ const ORDER_STATUSES = [
 
 export default function Orders() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['orders', search, statusFilter, page],
@@ -41,6 +46,21 @@ export default function Orders() {
       page,
       limit: 20,
     }),
+  });
+
+  // Bulk status update mutation
+  const bulkUpdateStatus = useMutation({
+    mutationFn: ({ ids, status }: { ids: string[]; status: string }) =>
+      bulkApi.updateOrderStatus(ids, status),
+    onSuccess: (response: any) => {
+      const updated = response.data?.data?.updated || selectedIds.length;
+      toast.success(`Updated ${updated} order${updated > 1 ? 's' : ''}`);
+      setSelectedIds([]);
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to update orders');
+    },
   });
 
   const orders = data?.data?.data || [];
@@ -138,7 +158,7 @@ export default function Orders() {
       {overdueCount > 0 && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
           <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
-          <div>
+          <div className="flex-1">
             <h3 className="font-semibold text-red-800">
               {overdueCount} Overdue Order{overdueCount > 1 ? 's' : ''}
             </h3>
@@ -192,9 +212,59 @@ export default function Orders() {
         </div>
       ) : (
         <div className="card overflow-hidden">
+          {/* Bulk Actions Toolbar */}
+          {selectedIds.length > 0 && (
+            <div className="bg-navy-50 border-b border-navy-200 p-3 flex items-center gap-4">
+              <span className="text-sm font-medium text-navy-700">
+                {selectedIds.length} order{selectedIds.length > 1 ? 's' : ''} selected
+              </span>
+              <div className="flex gap-2">
+                <select
+                  className="select select-sm"
+                  defaultValue=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      bulkUpdateStatus.mutate({ ids: selectedIds, status: e.target.value });
+                      e.target.value = '';
+                    }
+                  }}
+                >
+                  <option value="">Update Status...</option>
+                  <option value="IN_PRODUCTION">Mark In Production</option>
+                  <option value="READY_TO_SHIP">Mark Ready to Ship</option>
+                  <option value="SHIPPED">Mark Shipped</option>
+                  <option value="DELIVERED">Mark Delivered</option>
+                </select>
+              </div>
+              <button
+                onClick={() => setSelectedIds([])}
+                className="text-sm text-gray-500 hover:text-gray-700 ml-auto"
+              >
+                Clear selection
+              </button>
+            </div>
+          )}
           <table className="table">
             <thead>
               <tr>
+                <th className="w-10">
+                  <button
+                    onClick={() => {
+                      if (selectedIds.length === orders.length) {
+                        setSelectedIds([]);
+                      } else {
+                        setSelectedIds(orders.map((o: any) => o.id));
+                      }
+                    }}
+                    className="p-1 hover:bg-gray-100 rounded"
+                  >
+                    {selectedIds.length === orders.length && orders.length > 0 ? (
+                      <CheckSquare className="w-4 h-4 text-navy-600" />
+                    ) : (
+                      <Square className="w-4 h-4 text-gray-400" />
+                    )}
+                  </button>
+                </th>
                 <th>Order #</th>
                 <th>Buyer</th>
                 <th>Status</th>
@@ -212,13 +282,36 @@ export default function Orders() {
                 const isOverdue =
                   !['DELIVERED', 'CANCELLED'].includes(order.status) &&
                   isPastDue(order.expectedDate);
+                const isSelected = selectedIds.includes(order.id);
                 
                 return (
                   <tr 
                     key={order.id} 
-                    className={cn('cursor-pointer hover:bg-gray-50', isOverdue && 'bg-red-50')}
+                    className={cn(
+                      'cursor-pointer hover:bg-gray-50',
+                      isOverdue && 'bg-red-50',
+                      isSelected && 'bg-navy-50'
+                    )}
                     onClick={() => navigate(`/orders/${order.id}`)}
                   >
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => {
+                          setSelectedIds(prev =>
+                            prev.includes(order.id)
+                              ? prev.filter(id => id !== order.id)
+                              : [...prev, order.id]
+                          );
+                        }}
+                        className="p-1 hover:bg-gray-100 rounded"
+                      >
+                        {isSelected ? (
+                          <CheckSquare className="w-4 h-4 text-navy-600" />
+                        ) : (
+                          <Square className="w-4 h-4 text-gray-400" />
+                        )}
+                      </button>
+                    </td>
                     <td className="font-medium font-mono">{order.orderNumber}</td>
                     <td>
                       <div className="font-medium text-gray-900">{order.buyer?.companyName}</div>

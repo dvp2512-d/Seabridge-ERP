@@ -92,10 +92,10 @@ export default function ConfirmDialog({
     <Modal isOpen={isOpen} onClose={handleClose} title={title} size="sm">
       <div className="p-6">
         <div className="flex items-start gap-4">
-          <div className={`p-3 rounded-full ${colors[effectiveVariant]}`}>
-            <Icon className="w-6 h-6" />
+          <div className={`flex-shrink-0 p-3 rounded-full ${colors[effectiveVariant]}`}>
+            <Icon className="w-5 h-5" />
           </div>
-          <div className="flex-1">
+          <div className="flex-1 pt-1">
             <p className="text-gray-700">{message}</p>
 
             {/* Consequences list, shown when provided */}
@@ -111,7 +111,7 @@ export default function ConfirmDialog({
             {needsTyping && (
               <div className="mt-4">
                 <p className="text-sm text-gray-600 mb-2">
-                  Type <span className="font-mono font-semibold">{requireTyping}</span> to confirm:
+                  Type <span className="font-mono font-semibold text-gray-800">{requireTyping}</span> to confirm:
                 </p>
                 <input
                   type="text"
@@ -126,13 +126,13 @@ export default function ConfirmDialog({
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 mt-6">
+        <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-100">
           <button onClick={handleClose} className="btn btn-secondary" disabled={loading}>
             {cancelText}
           </button>
           <button
             onClick={onConfirm}
-            className={`btn ${buttonColors[effectiveVariant]}`}
+            className={`btn ${buttonColors[effectiveVariant]} inline-flex items-center gap-2`}
             disabled={loading || !typingMatch}
           >
             {loading ? 'Processing...' : actualConfirmText}

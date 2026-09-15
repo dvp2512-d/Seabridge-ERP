@@ -16,6 +16,43 @@ import {
 const router: Router = Router();
 
 /**
+ * Write an audit entry for a security-sensitive auth event.
+ *
+ * The global auditLog middleware is mounted on /api after /api/auth, so auth
+ * routes never pass through it (login bodies carry passwords). Password changes
+ * and session revocations are still security-relevant, so they are recorded
+ * explicitly here. Never store credentials - only the fact that the event
+ * happened. Fire-and-forget: a logging failure must not break the auth action.
+ */
+function recordAuthAudit(
+  req: any,
+  action: string,
+  entityId: string,
+  details?: Record<string, unknown>
+) {
+  const ipAddress =
+    (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ??
+    req.socket?.remoteAddress ??
+    null;
+
+  void prisma.auditLog
+    .create({
+      data: {
+        userId: req.user?.id ?? null,
+        action,
+        entityType: 'AUTH',
+        entityId: String(entityId),
+        newValues: (details ?? null) as any,
+        ipAddress,
+        userAgent: (req.headers['user-agent'] as string) ?? null,
+      },
+    })
+    .catch(() => {
+      // Never rethrow: the auth operation itself already succeeded.
+    });
+}
+
+/**
  * Extract client info from request for session tracking
  */
 function getClientInfo(req: any) {
@@ -280,6 +317,9 @@ router.post('/change-password', authenticate, async (req, res, next) => {
     // Revoke all existing tokens (security: password change invalidates all sessions)
     await revokeAllUserTokens(user.id);
 
+    // Record the password change (no credentials stored, just the event).
+    recordAuthAudit(req, 'PASSWORD_CHANGE', user.id);
+
     // Create new token pair so user stays logged in
     const { userAgent, ipAddress } = getClientInfo(req);
     const tokens = await createTokenPair(user.id, undefined, userAgent, ipAddress);
@@ -336,6 +376,8 @@ router.post('/logout', authenticate, async (req, res, next) => {
   try {
     const revokedCount = await revokeAllUserTokens(req.user!.id);
 
+    recordAuthAudit(req, 'LOGOUT', req.user!.id, { revokedSessions: revokedCount });
+
     res.json({
       success: true,
       message: 'Logged out successfully',
@@ -382,6 +424,8 @@ router.delete('/sessions/:sessionId', authenticate, async (req, res, next) => {
       where: { id: sessionId },
       data: { revokedAt: new Date() },
     });
+
+    recordAuthAudit(req, 'SESSION_REVOKE', sessionId, { userId: req.user!.id });
 
     res.json({
       success: true,

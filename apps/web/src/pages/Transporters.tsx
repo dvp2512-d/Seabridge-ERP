@@ -102,9 +102,9 @@ export default function Transporters() {
                   </td>
                   <td><span className={`badge ${t.isActive ? 'badge-success' : 'badge-gray'}`}>{t.isActive ? 'Active' : 'Inactive'}</span></td>
                   <td>
-                    <div className="flex items-center justify-end gap-1">
-                      <button onClick={() => { setSelectedTransporter(t); setShowDetailModal(true); }} className="p-1 text-gray-400 hover:text-navy-600 rounded transition-colors" aria-label="View transporter details"><Eye className="w-4 h-4" /></button>
-                      <button onClick={() => { setEditTransporter(t); setShowModal(true); }} className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" aria-label="Edit transporter"><Edit2 className="w-4 h-4" /></button>
+                    <div className="flex items-center justify-end gap-2">
+                      <button onClick={() => { setSelectedTransporter(t); setShowDetailModal(true); }} className="p-1.5 text-gray-400 hover:text-navy-600 hover:bg-gray-100 rounded transition-colors" aria-label="View transporter details"><Eye className="w-4 h-4" /></button>
+                      <button onClick={() => { setEditTransporter(t); setShowModal(true); }} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors" aria-label="Edit transporter"><Edit2 className="w-4 h-4" /></button>
                       <DeleteRecordButton
                         resourceType="transporter"
                         recordId={t.id}

@@ -119,4 +119,81 @@ router.put('/:id', can('MASTER_MANAGE'), async (req, res, next) => {
 // NOTE: Product categories are managed via /api/master/product-categories.
 // The routes that used to live here were duplicates and have been removed.
 
+/**
+ * Get the latest/best supplier price for a product.
+ * Used to auto-fill unit cost when adding items to quotations.
+ * Returns the cheapest active price from any supplier, or a specific supplier's price.
+ */
+router.get('/:id/latest-price', can('MASTER_VIEW'), async (req, res, next) => {
+  try {
+    const { supplierId } = req.query;
+    const now = new Date();
+
+    const where: any = {
+      productId: req.params.id,
+      isActive: true,
+      validFrom: { lte: now },
+      OR: [{ validTo: null }, { validTo: { gte: now } }],
+    };
+
+    // If specific supplier requested, filter to that supplier
+    if (supplierId) {
+      where.supplierId = supplierId as string;
+    }
+
+    // Get all valid prices, ordered by price (cheapest first) and date (newest first)
+    const prices = await prisma.supplierPrice.findMany({
+      where,
+      include: { 
+        supplier: { select: { id: true, name: true, code: true } },
+        product: { select: { id: true, name: true, code: true, unit: true } },
+      },
+      orderBy: [{ price: 'asc' }, { validFrom: 'desc' }],
+      take: 5, // Return top 5 options
+    });
+
+    if (prices.length === 0) {
+      return res.json({
+        success: true,
+        data: null,
+        message: 'No active supplier prices found for this product',
+      });
+    }
+
+    // Best price is the first (cheapest and most recent)
+    const bestPrice = prices[0];
+
+    res.json({
+      success: true,
+      data: {
+        bestPrice: {
+          supplierId: bestPrice.supplierId,
+          supplierName: bestPrice.supplier.name,
+          price: Number(bestPrice.price),
+          currency: bestPrice.currency,
+          unit: bestPrice.unit,
+          minQuantity: bestPrice.minQuantity ? Number(bestPrice.minQuantity) : null,
+          validFrom: bestPrice.validFrom,
+          validTo: bestPrice.validTo,
+        },
+        // All available prices for comparison
+        allPrices: prices.map(p => ({
+          supplierId: p.supplierId,
+          supplierName: p.supplier.name,
+          supplierCode: p.supplier.code,
+          price: Number(p.price),
+          currency: p.currency,
+          unit: p.unit,
+          minQuantity: p.minQuantity ? Number(p.minQuantity) : null,
+          validFrom: p.validFrom,
+          validTo: p.validTo,
+        })),
+        product: bestPrice.product,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export { router as productRouter };

@@ -15,6 +15,8 @@ const DELETABLE_RESOURCES: Record<string, {
   model: string;
   label: string;
   cascades: { model: string; foreignKey: string; label: string }[];
+  /** Additional message to show if deletion is blocked */
+  blockingCheck?: { model: string; foreignKey: string; message: string };
 }> = {
   quotation: {
     model: 'quotation',
@@ -22,7 +24,14 @@ const DELETABLE_RESOURCES: Record<string, {
     cascades: [
       { model: 'quotationItem', foreignKey: 'quotationId', label: 'line items' },
       { model: 'quotationCost', foreignKey: 'quotationId', label: 'additional costs' },
+      { model: 'quotationHistory', foreignKey: 'quotationId', label: 'revision history' },
     ],
+    // Orders reference quotations but should NOT be cascade deleted
+    blockingCheck: { 
+      model: 'exportOrder', 
+      foreignKey: 'quotationId', 
+      message: 'This quotation has been converted to an order. Delete the order first, or cancel the order instead.' 
+    },
   },
   order: {
     model: 'exportOrder',
@@ -160,6 +169,20 @@ router.get('/:resource/:id/preview', can('RECORD_DELETE'), async (req, res, next
       }
     }
 
+    // Check for blocking relationships (records that reference this one but shouldn't be cascade deleted)
+    let blocked = false;
+    let blockReason = '';
+    if (config.blockingCheck) {
+      const blockingDelegate = (prisma as any)[config.blockingCheck.model];
+      const blockingCount = await blockingDelegate.count({
+        where: { [config.blockingCheck.foreignKey]: id },
+      });
+      if (blockingCount > 0) {
+        blocked = true;
+        blockReason = config.blockingCheck.message;
+      }
+    }
+
     res.json({
       success: true,
       data: {
@@ -170,9 +193,13 @@ router.get('/:resource/:id/preview', can('RECORD_DELETE'), async (req, res, next
           createdAt: record.createdAt,
         },
         cascadeDeletes: cascadeCounts,
-        warning: cascadeCounts.length > 0 
-          ? `This will permanently delete ${cascadeCounts.map(c => `${c.count} ${c.label}`).join(', ')}`
-          : 'No related records will be affected',
+        blocked,
+        blockReason,
+        warning: blocked 
+          ? blockReason
+          : cascadeCounts.length > 0 
+            ? `This will permanently delete ${cascadeCounts.map(c => `${c.count} ${c.label}`).join(', ')}`
+            : 'No related records will be affected',
       },
     });
   } catch (error) {
@@ -206,6 +233,17 @@ router.delete('/:resource/:id', can('RECORD_DELETE'), async (req, res, next) => 
 
     if (!record) {
       throw new NotFoundError(`${config.label} not found`);
+    }
+
+    // Check for blocking relationships before deletion
+    if (config.blockingCheck) {
+      const blockingDelegate = (prisma as any)[config.blockingCheck.model];
+      const blockingCount = await blockingDelegate.count({
+        where: { [config.blockingCheck.foreignKey]: id },
+      });
+      if (blockingCount > 0) {
+        throw new AppError(config.blockingCheck.message, 400);
+      }
     }
 
     // Delete in transaction with cascade

@@ -145,16 +145,33 @@ export default function NewQuotation() {
 
   // Auto-fill defaults from buyer when selected
   useEffect(() => {
-    if (buyerId && buyersData?.data?.data) {
-      const buyer = buyersData.data.data.find((b: any) => b.id === buyerId);
-      if (buyer) {
-        // Only set if currently empty (don't overwrite user input)
-        if (!paymentTerms && buyer.paymentTerms) {
-          setPaymentTerms(buyer.paymentTerms);
-        }
-      }
+    if (buyerId) {
+      // Fetch buyer defaults for better auto-fill (includes suggested port)
+      buyersApi.getDefaults(buyerId)
+        .then((response) => {
+          const defaults = response.data?.data;
+          if (defaults) {
+            // Only set if currently empty (don't overwrite user input)
+            if (!paymentTerms && defaults.paymentTerms) {
+              setPaymentTerms(defaults.paymentTerms);
+            }
+            // Auto-fill suggested port of discharge based on buyer's country
+            if (!portOfDischargeId && defaults.suggestedPortOfDischarge?.id) {
+              setPortOfDischargeId(defaults.suggestedPortOfDischarge.id);
+            }
+          }
+        })
+        .catch(() => {
+          // Fallback to buyer list data if getDefaults fails
+          if (buyersData?.data?.data) {
+            const buyer = buyersData.data.data.find((b: any) => b.id === buyerId);
+            if (buyer && !paymentTerms && buyer.paymentTerms) {
+              setPaymentTerms(buyer.paymentTerms);
+            }
+          }
+        });
     }
-  }, [buyerId, buyersData]);
+  }, [buyerId]); // Only re-run when buyerId changes
 
   // Quotation totals. Each line already carries its own selling price, derived
   // from its own margin in the item modal, so the rollup only has to add up.
@@ -442,7 +459,7 @@ export default function NewQuotation() {
                           </button>
                           <button
                             onClick={() => setItems(items.filter(i => i.id !== item.id))}
-                            className="text-red-500 hover:text-red-700 p-1"
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded transition-colors"
                             aria-label="Remove item"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -496,7 +513,7 @@ export default function NewQuotation() {
                       <td>
                         <button
                           onClick={() => setAdditionalCosts(additionalCosts.filter(c => c.id !== cost.id))}
-                          className="text-red-500 hover:text-red-700 p-1"
+                          className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded transition-colors"
                           aria-label="Remove cost"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -693,6 +710,27 @@ function ItemCostingModal({
       }
     }
   }, [formData.productId, products]);
+
+  // Auto-fill best supplier price when product is selected (if no supplier/price already set)
+  useEffect(() => {
+    if (formData.productId && !formData.supplierId && !formData.supplierPrice) {
+      productsApi.getLatestPrice(formData.productId)
+        .then((response) => {
+          const data = response.data?.data;
+          if (data?.bestPrice) {
+            setFormData(f => ({
+              ...f,
+              supplierId: data.bestPrice.supplierId,
+              supplierPrice: String(data.bestPrice.price),
+            }));
+            setSelectedSupplier({ id: data.bestPrice.supplierId, name: data.bestPrice.supplierName });
+          }
+        })
+        .catch(() => {
+          // Silently fail - user can still select manually
+        });
+    }
+  }, [formData.productId]);
 
   // Auto-fill supplier price when supplier is selected
   useEffect(() => {

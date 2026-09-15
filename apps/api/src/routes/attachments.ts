@@ -37,6 +37,40 @@ const ALLOWED_MIME_TYPES = [
 // Max file size: 10MB
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
+// Dangerous file extensions that must never be stored or served, even if the
+// declared MIME type looks benign. Blocks executable and browser-interpreted
+// content that could enable XSS or drive-by execution if downloaded/opened.
+const BLOCKED_EXTENSIONS = ['.exe', '.html', '.htm', '.svg', '.js', '.mjs'];
+
+/**
+ * Object-level authorization: verify the parent entity exists before allowing
+ * access to its attachments. Route-level `can()` guards check role, but not
+ * whether the referenced record is real - without this, an authorized user
+ * could enumerate/attach to arbitrary IDs. Throws NotFoundError if absent.
+ */
+async function assertParentEntityExists(entityType: string, entityId: string): Promise<void> {
+  let exists = false;
+  switch (entityType) {
+    case 'ORDER':
+      exists = !!(await prisma.exportOrder.findUnique({ where: { id: entityId }, select: { id: true } }));
+      break;
+    case 'INQUIRY':
+      exists = !!(await prisma.inquiry.findUnique({ where: { id: entityId }, select: { id: true } }));
+      break;
+    case 'QUOTATION':
+      exists = !!(await prisma.quotation.findUnique({ where: { id: entityId }, select: { id: true } }));
+      break;
+    case 'DOCUMENT':
+      exists = !!(await prisma.document.findUnique({ where: { id: entityId }, select: { id: true } }));
+      break;
+    default:
+      throw new AppError(`Unknown entity type: ${entityType}`, 400);
+  }
+  if (!exists) {
+    throw new NotFoundError(entityType.charAt(0) + entityType.slice(1).toLowerCase());
+  }
+}
+
 // List attachments for an entity
 router.get('/', can('OPERATIONS_VIEW'), async (req, res, next) => {
   try {
@@ -45,6 +79,10 @@ router.get('/', can('OPERATIONS_VIEW'), async (req, res, next) => {
     if (!entityType || !entityId) {
       throw new ValidationError([{ message: 'entityType and entityId are required' }]);
     }
+
+    // Object-level authorization: confirm the parent record exists before
+    // listing its attachments.
+    await assertParentEntityExists(entityType as string, entityId as string);
 
     const where: any = {
       entityType: entityType as string,
@@ -89,9 +127,19 @@ router.post('/upload', can('OPERATIONS_MANAGE'), async (req, res, next) => {
 
     const data = validation.data;
 
+    // Object-level authorization: confirm the parent record exists before
+    // accepting an attachment for it.
+    await assertParentEntityExists(data.entityType, data.entityId);
+
     // Validate mime type
     if (!ALLOWED_MIME_TYPES.includes(data.mimeType)) {
       throw new AppError(`File type ${data.mimeType} is not allowed`, 400);
+    }
+
+    // Block dangerous file extensions regardless of declared MIME type.
+    const declaredExt = path.extname(data.fileName).toLowerCase();
+    if (BLOCKED_EXTENSIONS.includes(declaredExt)) {
+      throw new AppError(`File extension ${declaredExt} is not allowed`, 400);
     }
 
     // Decode base64 file
@@ -160,6 +208,10 @@ router.get('/:id/download', can('OPERATIONS_VIEW'), async (req, res, next) => {
 
     if (!attachment) throw new NotFoundError('Attachment');
 
+    // Object-level authorization: confirm the parent record still exists before
+    // serving the file, so orphaned/spoofed references cannot leak content.
+    await assertParentEntityExists(attachment.entityType, attachment.entityId);
+
     const filePath = path.join(UPLOAD_DIR, attachment.filePath);
     
     // Validate resolved path stays within UPLOAD_DIR
@@ -173,6 +225,8 @@ router.get('/:id/download', can('OPERATIONS_VIEW'), async (req, res, next) => {
     }
 
     res.setHeader('Content-Type', attachment.mimeType);
+    // Prevent browsers from MIME-sniffing the response into an executable type.
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Disposition', contentDisposition(attachment.originalName));
     res.setHeader('Content-Length', attachment.fileSize);
 

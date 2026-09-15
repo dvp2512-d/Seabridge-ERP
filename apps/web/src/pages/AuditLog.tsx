@@ -1,10 +1,11 @@
 // Audit Log Viewer - Track all changes made in the system
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { auditApi } from '@/lib/api';
+import { auditApi, exportApi } from '@/lib/api';
 import { formatDate } from '@/lib/utils';
 import { SelectField } from '@/components/ui/FormFields';
 import Modal from '@/components/ui/Modal';
+import { ExportButton } from '@/components/ui/ExportButton';
 import {
   History,
   Search,
@@ -108,6 +109,14 @@ export default function AuditLog() {
             Track all changes made in the system - who did what, when.
           </p>
         </div>
+        <ExportButton
+          onExport={async () => {
+            const response = await exportApi.audit();
+            return response.data;
+          }}
+          filename="audit-log-export"
+          label="Export"
+        />
       </div>
 
       {/* Stats Cards */}

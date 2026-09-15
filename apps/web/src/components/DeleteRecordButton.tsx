@@ -12,7 +12,7 @@ import { recordsApi } from '@/lib/api';
 import { refreshAggregates } from '@/lib/queryKeys';
 import { useAuthStore } from '@/store/authStore';
 import Modal from '@/components/ui/Modal';
-import { Trash2, AlertTriangle, Loader2 } from 'lucide-react';
+import { Trash2, AlertTriangle, Loader2, Info } from 'lucide-react';
 
 interface DeleteRecordButtonProps {
   /** Resource type: quotation, order, invoice, inquiry, expense, income, task, buyer, product, supplier, cha, transporter */
@@ -87,7 +87,7 @@ export default function DeleteRecordButton({
   };
 
   const btnClass = iconOnly
-    ? 'text-gray-400 hover:text-red-600 p-1 rounded transition-colors'
+    ? 'p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded transition-colors inline-flex items-center justify-center'
     : size === 'sm' 
       ? 'btn btn-sm text-red-600 hover:bg-red-50 border-red-200'
       : 'btn text-red-600 hover:bg-red-50 border-red-200';
@@ -114,50 +114,52 @@ export default function DeleteRecordButton({
           title="⚠️ Permanent Deletion"
           size="md"
         >
-          <div className="p-6 space-y-4">
+          <div className="p-6 space-y-5">
             {/* Warning Banner */}
             <div className="flex items-start gap-3 p-4 bg-red-50 border border-red-200 rounded-lg">
-              <AlertTriangle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
-              <div>
+              <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
                 <p className="font-semibold text-red-800">
                   This action cannot be undone!
                 </p>
                 <p className="text-sm text-red-700 mt-1">
-                  You are about to permanently delete <strong>{recordName}</strong>.
-                  This will remove all data associated with this record.
+                  You are about to permanently delete <strong className="font-semibold">{recordName}</strong>. This will remove all data associated with this record.
                 </p>
               </div>
             </div>
 
             {/* Cascade Preview */}
             {previewLoading ? (
-              <div className="flex items-center justify-center py-4">
+              <div className="flex items-center justify-center py-6">
                 <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
-                <span className="ml-2 text-gray-500">Loading preview...</span>
+                <span className="ml-2 text-sm text-gray-500">Loading preview...</span>
               </div>
             ) : preview?.cascadeDeletes && preview.cascadeDeletes.length > 0 ? (
-              <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                <p className="font-medium text-amber-800 mb-2">
-                  The following related records will also be deleted:
-                </p>
-                <ul className="list-disc list-inside text-sm text-amber-700 space-y-1">
-                  {preview.cascadeDeletes.map((item: any, idx: number) => (
-                    <li key={idx}>
-                      {item.count} {item.label}
-                    </li>
-                  ))}
-                </ul>
+              <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                <Info className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-medium text-amber-800 text-sm">
+                    The following related records will also be deleted:
+                  </p>
+                  <ul className="list-disc list-inside text-sm text-amber-700 mt-1 space-y-0.5">
+                    {preview.cascadeDeletes.map((item: any, idx: number) => (
+                      <li key={idx}>
+                        {item.count} {item.label}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             ) : (
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-gray-500">
                 No related records will be affected.
               </p>
             )}
 
             {/* Confirmation Input */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Type <strong className="text-red-600">DELETE</strong> to confirm:
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Type <strong className="text-red-600 font-semibold">DELETE</strong> to confirm:
               </label>
               <input
                 type="text"
@@ -170,7 +172,7 @@ export default function DeleteRecordButton({
             </div>
 
             {/* Actions */}
-            <div className="flex justify-end gap-3 pt-2">
+            <div className="flex justify-end gap-3 pt-3 border-t border-gray-100">
               <button
                 onClick={() => {
                   setShowConfirm(false);
@@ -184,17 +186,17 @@ export default function DeleteRecordButton({
               <button
                 onClick={handleDelete}
                 disabled={confirmText !== 'DELETE' || deleteMutation.isPending}
-                className="btn bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                className="btn bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 inline-flex items-center gap-2"
               >
                 {deleteMutation.isPending ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Deleting...
+                    <span>Deleting...</span>
                   </>
                 ) : (
                   <>
                     <Trash2 className="w-4 h-4" />
-                    Delete Permanently
+                    <span>Delete Permanently</span>
                   </>
                 )}
               </button>

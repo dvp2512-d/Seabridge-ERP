@@ -391,10 +391,10 @@ export default function QuotationDetail() {
                           <td className="text-right font-semibold">{formatCurrency(item.totalPrice, currency)}</td>
                           {quotation.status === 'DRAFT' && (
                             <td className="text-center">
-                              <div className="flex justify-center gap-1">
+                              <div className="flex justify-center gap-2">
                                 <button
                                   onClick={() => setEditingItem({ item, index: idx })}
-                                  className="p-1 text-gray-500 hover:text-navy-600"
+                                  className="p-1.5 text-gray-500 hover:text-navy-600 hover:bg-gray-100 rounded transition-colors"
                                   title="Edit item"
                                 >
                                   <Edit2 className="w-4 h-4" />
@@ -675,7 +675,7 @@ function CostingSummaryCard({
 
         {marginPercent < 10 && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2 mt-4">
-            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+            <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
             <div className="text-sm text-red-700">
               Low margin alert! Consider reviewing pricing.
             </div>

@@ -1,9 +1,9 @@
 // Enhanced Invoices Page - Finance Management
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { invoicesApi, exportApi } from '@/lib/api';
+import { invoicesApi, exportApi, bulkApi } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import { ErrorState } from '@/components/ui/ErrorState';
 import { ExportButton } from '@/components/ui/ExportButton';
@@ -23,6 +23,8 @@ import {
   CheckCircle,
   AlertTriangle,
   Plus,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 
 const INVOICE_STATUSES = [
@@ -39,6 +41,8 @@ export default function Invoices() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [page, setPage] = useState(1);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const queryClient = useQueryClient();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['invoices', search, statusFilter, page],
@@ -48,6 +52,21 @@ export default function Invoices() {
       page,
       limit: 20,
     }),
+  });
+
+  // Bulk status update mutation
+  const bulkUpdateStatus = useMutation({
+    mutationFn: ({ ids, status }: { ids: string[]; status: string }) =>
+      bulkApi.updateInvoiceStatus(ids, status),
+    onSuccess: (response: any) => {
+      const updated = response.data?.data?.updated || selectedIds.length;
+      toast.success(`Updated ${updated} invoice${updated > 1 ? 's' : ''}`);
+      setSelectedIds([]);
+      queryClient.invalidateQueries({ queryKey: ['invoices'] });
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || 'Failed to update invoices');
+    },
   });
 
   const invoices = data?.data?.data || [];
@@ -106,6 +125,14 @@ export default function Invoices() {
         subtitle={`${pagination?.total || invoices.length} invoices • Manage billing and payments`}
         actions={
           <div className="flex items-center gap-2">
+            <ExportButton
+              onExport={async () => {
+                const response = await exportApi.receivables();
+                return response.data;
+              }}
+              filename="receivables-export"
+              label="Receivables"
+            />
             <ExportButton
               onExport={async () => {
                 const response = await exportApi.invoices();
@@ -239,9 +266,58 @@ export default function Invoices() {
         </div>
       ) : (
         <div className="card overflow-hidden">
+          {/* Bulk Actions Toolbar */}
+          {selectedIds.length > 0 && (
+            <div className="bg-navy-50 border-b border-navy-200 p-3 flex items-center gap-4">
+              <span className="text-sm font-medium text-navy-700">
+                {selectedIds.length} invoice{selectedIds.length > 1 ? 's' : ''} selected
+              </span>
+              <div className="flex gap-2">
+                <select
+                  className="select select-sm"
+                  defaultValue=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      bulkUpdateStatus.mutate({ ids: selectedIds, status: e.target.value });
+                      e.target.value = '';
+                    }
+                  }}
+                >
+                  <option value="">Update Status...</option>
+                  <option value="SENT">Mark Sent</option>
+                  <option value="PAID">Mark Paid</option>
+                  <option value="CANCELLED">Mark Cancelled</option>
+                </select>
+              </div>
+              <button
+                onClick={() => setSelectedIds([])}
+                className="text-sm text-gray-500 hover:text-gray-700 ml-auto"
+              >
+                Clear selection
+              </button>
+            </div>
+          )}
           <table className="table">
             <thead>
               <tr>
+                <th className="w-10">
+                  <button
+                    onClick={() => {
+                      if (selectedIds.length === invoices.length) {
+                        setSelectedIds([]);
+                      } else {
+                        setSelectedIds(invoices.map((inv: any) => inv.id));
+                      }
+                    }}
+                    className="p-1 hover:bg-gray-100 rounded"
+                  >
+                    {selectedIds.length === invoices.length && invoices.length > 0 ? (
+                      <CheckSquare className="w-4 h-4 text-navy-600" />
+                    ) : (
+                      <Square className="w-4 h-4 text-gray-400" />
+                    )}
+                  </button>
+                </th>
                 <th>Invoice #</th>
                 <th>Buyer</th>
                 <th>Order</th>
@@ -261,13 +337,36 @@ export default function Invoices() {
                   !isDocumentOnly &&
                   !['PAID', 'CANCELLED'].includes(invoice.status) && isPastDue(invoice.dueDate);
                 const balance = parseFloat(invoice.balanceAmount || 0);
+                const isSelected = selectedIds.includes(invoice.id);
                 
                 return (
                   <tr 
                     key={invoice.id} 
-                    className={cn('cursor-pointer hover:bg-gray-50', isOverdue && 'bg-red-50')}
+                    className={cn(
+                      'cursor-pointer hover:bg-gray-50',
+                      isOverdue && 'bg-red-50',
+                      isSelected && 'bg-navy-50'
+                    )}
                     onClick={() => navigate(`/invoices/${invoice.id}`)}
                   >
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <button
+                        onClick={() => {
+                          setSelectedIds(prev =>
+                            prev.includes(invoice.id)
+                              ? prev.filter(id => id !== invoice.id)
+                              : [...prev, invoice.id]
+                          );
+                        }}
+                        className="p-1 hover:bg-gray-100 rounded"
+                      >
+                        {isSelected ? (
+                          <CheckSquare className="w-4 h-4 text-navy-600" />
+                        ) : (
+                          <Square className="w-4 h-4 text-gray-400" />
+                        )}
+                      </button>
+                    </td>
                     <td className="font-medium font-mono">
                       {invoice.invoiceNumber}
                       {/* Marked in the list so a SENT proforma or sample is not read

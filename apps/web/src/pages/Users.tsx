@@ -435,7 +435,7 @@ function UserFormModal({
           />
         </div>
 
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex justify-end gap-3 pt-4 border-t">
           <button type="button" onClick={onClose} className="btn btn-secondary">
             Cancel
           </button>

@@ -160,3 +160,79 @@ export const cache = {
     return redisClient !== null && redisClient.status === 'ready';
   },
 };
+
+/**
+ * Distributed lock for coordinating scheduled jobs across multiple instances.
+ * 
+ * Uses SET NX (set if not exists) with expiration for simple but effective locking.
+ * If Redis is not available, returns true to allow single-instance operation.
+ */
+export const distributedLock = {
+  /**
+   * Attempt to acquire a lock.
+   * @param lockName - Unique name for the lock (e.g., 'job:token-cleanup')
+   * @param ttlMs - Lock expiration in milliseconds (default 60s)
+   * @returns true if lock acquired, false if already held by another instance
+   */
+  async acquire(lockName: string, ttlMs: number = 60000): Promise<boolean> {
+    if (!redisClient) {
+      // No Redis = single instance mode, always acquire
+      return true;
+    }
+    try {
+      // SET NX with PX (milliseconds expiry)
+      // Returns 'OK' if set, null if key already exists
+      const result = await redisClient.set(
+        `lock:${lockName}`,
+        Date.now().toString(),
+        'PX',
+        ttlMs,
+        'NX'
+      );
+      return result === 'OK';
+    } catch (error) {
+      logger.error('Lock acquire failed', { lockName, error: (error as Error).message });
+      // On error, allow operation to proceed (fail-open for availability)
+      return true;
+    }
+  },
+
+  /**
+   * Release a lock.
+   * @param lockName - Unique name for the lock
+   */
+  async release(lockName: string): Promise<void> {
+    if (!redisClient) return;
+    try {
+      await redisClient.del(`lock:${lockName}`);
+    } catch (error) {
+      logger.error('Lock release failed', { lockName, error: (error as Error).message });
+    }
+  },
+
+  /**
+   * Execute a function with a distributed lock.
+   * Only one instance across the cluster will execute the function.
+   * 
+   * @param lockName - Unique name for the lock
+   * @param fn - Function to execute if lock is acquired
+   * @param ttlMs - Lock expiration in milliseconds
+   * @returns Result of fn if lock acquired, undefined otherwise
+   */
+  async withLock<T>(
+    lockName: string,
+    fn: () => Promise<T>,
+    ttlMs: number = 60000
+  ): Promise<T | undefined> {
+    const acquired = await this.acquire(lockName, ttlMs);
+    if (!acquired) {
+      logger.debug('Lock not acquired, skipping', { lockName });
+      return undefined;
+    }
+    try {
+      return await fn();
+    } finally {
+      await this.release(lockName);
+    }
+  },
+};

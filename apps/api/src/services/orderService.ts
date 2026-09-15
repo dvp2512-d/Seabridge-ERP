@@ -1,6 +1,6 @@
 import { prisma } from '@seabridge/database';
 import { AppError, NotFoundError } from '../middleware/errorHandler';
-import { generateCode } from '../utils/helpers';
+import { generateCode, generateCodeInTx } from '../utils/helpers';
 import { calculateInclusiveUnitPrices } from './inclusivePricing';
 import { logger } from '../utils/logger';
 
@@ -208,6 +208,16 @@ export async function createOrderFromQuotation(
 
   if (!quotation) throw new NotFoundError('Quotation');
 
+  // Only allow conversion from quotations that have been sent to the buyer.
+  // DRAFT quotations haven't been approved or sent; REJECTED/EXPIRED are dead.
+  const CONVERTIBLE_STATUSES = ['SENT', 'REVISED', 'ACCEPTED'] as const;
+  if (!CONVERTIBLE_STATUSES.includes(quotation.status as typeof CONVERTIBLE_STATUSES[number])) {
+    throw new AppError(
+      `Cannot convert a ${quotation.status} quotation to an order. Only SENT, REVISED, or ACCEPTED quotations can be converted.`,
+      400
+    );
+  }
+
   if (quotation.items.length === 0) {
     throw new AppError('Cannot create an order from a quotation with no items', 400);
   }
@@ -223,8 +233,6 @@ export async function createOrderFromQuotation(
       409
     );
   }
-
-  const orderNumber = await generateCode('ORDER', 'ORD');
 
   /**
    * Fold the quotation's additional costs into the unit prices.
@@ -262,7 +270,15 @@ export async function createOrderFromQuotation(
     });
   }
 
+  /**
+   * Wrap all database mutations in a transaction to ensure:
+   * 1. Order number generation is atomic with order creation (no gaps)
+   * 2. Quotation and inquiry status updates are part of the same transaction
+   * 3. If anything fails, no partial state is left behind
+   */
   return prisma.$transaction(async (tx) => {
+    const orderNumber = await generateCodeInTx(tx, 'ORDER', 'ORD');
+    
     const order = await tx.exportOrder.create({
       data: {
         orderNumber,

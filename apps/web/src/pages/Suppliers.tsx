@@ -117,11 +117,11 @@ export default function Suppliers() {
                     </span>
                   </td>
                   <td>
-                    <div className="flex items-center justify-end gap-1">
-                      <button onClick={() => viewDetails(supplier)} className="p-1 text-gray-400 hover:text-navy-600 rounded transition-colors" aria-label="View supplier details">
+                    <div className="flex items-center justify-end gap-2">
+                      <button onClick={() => viewDetails(supplier)} className="p-1.5 text-gray-400 hover:text-navy-600 hover:bg-gray-100 rounded transition-colors" aria-label="View supplier details">
                         <Eye className="w-4 h-4" />
                       </button>
-                      <button onClick={() => { setEditSupplier(supplier); setShowModal(true); }} className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors" aria-label="Edit supplier">
+                      <button onClick={() => { setEditSupplier(supplier); setShowModal(true); }} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors" aria-label="Edit supplier">
                         <Edit2 className="w-4 h-4" />
                       </button>
                       <DeleteRecordButton

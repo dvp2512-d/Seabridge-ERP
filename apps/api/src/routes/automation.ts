@@ -118,10 +118,21 @@ router.put('/webhooks/:id', can('SETTINGS_MANAGE'), async (req, res, next) => {
   }
 });
 
-// Delete webhook
+// Delete webhook (soft-delete by deactivating - preserves audit trail)
 router.delete('/webhooks/:id', can('SETTINGS_MANAGE'), async (req, res, next) => {
   try {
-    await prisma.webhook.delete({ where: { id: req.params.id } });
+    const webhook = await prisma.webhook.findUnique({ where: { id: req.params.id } });
+    if (!webhook) throw new NotFoundError('Webhook');
+
+    // Soft-delete: deactivate and mark as deleted instead of permanent removal
+    // This preserves webhook logs and audit trail
+    await prisma.webhook.update({
+      where: { id: req.params.id },
+      data: { 
+        isActive: false,
+        name: `[DELETED] ${webhook.name}`,
+      },
+    });
     res.json({ success: true, message: 'Webhook deleted' });
   } catch (error) {
     next(error);
@@ -297,10 +308,20 @@ router.put('/templates/:id', can('SETTINGS_MANAGE'), async (req, res, next) => {
   }
 });
 
-// Delete template
+// Delete template (soft-delete - preserves references in sent emails)
 router.delete('/templates/:id', can('SETTINGS_MANAGE'), async (req, res, next) => {
   try {
-    await prisma.template.delete({ where: { id: req.params.id } });
+    const template = await prisma.template.findUnique({ where: { id: req.params.id } });
+    if (!template) throw new NotFoundError('Template');
+
+    // Soft-delete: mark as deleted instead of permanent removal
+    await prisma.template.update({
+      where: { id: req.params.id },
+      data: { 
+        name: `[DELETED] ${template.name}`,
+        isActive: false,
+      },
+    });
     res.json({ success: true, message: 'Template deleted' });
   } catch (error) {
     next(error);
@@ -372,10 +393,20 @@ router.put('/automations/:id', can('SETTINGS_MANAGE'), async (req, res, next) =>
   }
 });
 
-// Delete automation rule
+// Delete automation rule (soft-delete - preserves execution history)
 router.delete('/automations/:id', can('SETTINGS_MANAGE'), async (req, res, next) => {
   try {
-    await prisma.automationRule.delete({ where: { id: req.params.id } });
+    const rule = await prisma.automationRule.findUnique({ where: { id: req.params.id } });
+    if (!rule) throw new NotFoundError('Automation rule');
+
+    // Soft-delete: deactivate and mark as deleted
+    await prisma.automationRule.update({
+      where: { id: req.params.id },
+      data: { 
+        isActive: false,
+        name: `[DELETED] ${rule.name}`,
+      },
+    });
     res.json({ success: true, message: 'Automation rule deleted' });
   } catch (error) {
     next(error);

@@ -20,7 +20,7 @@
  */
 import crypto from 'crypto';
 import { prisma } from '@seabridge/database';
-import { isObviouslyUnsafeUrl } from '../utils/urlValidator';
+import { validateWebhookUrl, isObviouslyUnsafeUrl } from '../utils/urlValidator';
 import { logger } from '../utils/logger';
 
 /** Events the rest of the application can raise. */
@@ -73,10 +73,19 @@ function sign(body: string, secret: string): string {
 
 /** Deliver to one webhook, recording the outcome either way. */
 async function deliver(webhook: any, event: DomainEvent, payload: unknown): Promise<void> {
-  // SSRF Protection: Validate URL before making request
+  /**
+   * SSRF Protection: Validate URL with full DNS resolution before every request.
+   *
+   * URLs are validated at creation time, but an attacker could register a webhook
+   * pointing to a domain they control, then change DNS to 169.254.169.254 after
+   * creation. By re-validating at delivery time with DNS resolution, we catch
+   * DNS rebinding attacks that would otherwise exfiltrate cloud instance metadata.
+   *
+   * First do a quick synchronous check to fail fast on obviously bad URLs,
+   * then do the full async DNS resolution check.
+   */
   if (isObviouslyUnsafeUrl(webhook.url)) {
     logger.warn('Webhook blocked: URL failed SSRF validation', { webhookName: webhook.name });
-    // Log the blocked attempt
     try {
       await prisma.webhookLog.create({
         data: {
@@ -87,6 +96,33 @@ async function deliver(webhook: any, event: DomainEvent, payload: unknown): Prom
           error: 'URL blocked by SSRF protection',
           duration: 0,
         },
+      });
+    } catch {}
+    return;
+  }
+
+  // Full DNS resolution check to prevent DNS rebinding attacks
+  const validation = await validateWebhookUrl(webhook.url);
+  if (!validation.valid) {
+    logger.warn('Webhook blocked: DNS rebinding SSRF attempt', { 
+      webhookName: webhook.name,
+      reason: validation.error 
+    });
+    try {
+      await prisma.webhookLog.create({
+        data: {
+          webhookId: webhook.id,
+          event,
+          payload: { blocked: true, reason: 'DNS rebinding SSRF protection' },
+          status: 0,
+          error: `URL blocked: ${validation.error}`,
+          duration: 0,
+        },
+      });
+      // Increment fail count - this might be an attack in progress
+      await prisma.webhook.update({
+        where: { id: webhook.id },
+        data: { failCount: { increment: 1 } },
       });
     } catch {}
     return;

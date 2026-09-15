@@ -26,6 +26,11 @@ import { auditLog } from './middleware/auditLog';
 import { lifecycleRouter } from './routes/lifecycle';
 import { recordDeletionRouter } from './routes/recordDeletion';
 import { attachmentRouter } from './routes/attachments';
+import { emailRouter } from './routes/email';
+import { exportRouter } from './routes/export';
+import { searchRouter } from './routes/search';
+import { timelineRouter } from './routes/timeline';
+import { bulkRouter } from './routes/bulk';
 
 const app = express();
 
@@ -75,6 +80,11 @@ app.use('/api/audit', auditRouter);
 app.use('/api/lifecycle', lifecycleRouter);
 app.use('/api/records', recordDeletionRouter);
 app.use('/api/attachments', attachmentRouter);
+app.use('/api/email', emailRouter);
+app.use('/api/export', exportRouter);
+app.use('/api/search', searchRouter);
+app.use('/api/timeline', timelineRouter);
+app.use('/api/bulk', bulkRouter);
 
 // Error handling
 // 404 for anything that didn't match a route above, then the error handler.

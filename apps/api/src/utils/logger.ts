@@ -6,6 +6,9 @@
  *
  * In development, outputs human-readable logs with colors for easy debugging.
  *
+ * Security: All log context is automatically redacted for sensitive fields
+ * (passwords, tokens, secrets, API keys) to prevent credential leakage.
+ *
  * Usage:
  *   import { logger } from './utils/logger';
  *   logger.info('Server started', { port: 4000 });
@@ -35,6 +38,50 @@ export function setRequestId(id: string | undefined) {
 
 export function getRequestId(): string | undefined {
   return currentRequestId;
+}
+
+/** Field names whose values must never appear in logs. Case-insensitive partial match. */
+const SENSITIVE_KEYS = [
+  'password',
+  'passwordhash',
+  'token',
+  'secret',
+  'jwt',
+  'authorization',
+  'apikey',
+  'api_key',
+  'bearer',
+  'credential',
+  'private',
+];
+
+/**
+ * Recursively redact sensitive values from log context.
+ * 
+ * Matches field names case-insensitively and replaces values with '[REDACTED]'.
+ * Handles nested objects and arrays up to 6 levels deep to prevent infinite loops.
+ */
+function redactSensitive(value: unknown, depth = 0): unknown {
+  if (depth > 6 || value === null || value === undefined) return value;
+
+  if (Array.isArray(value)) {
+    return value.map((v) => redactSensitive(v, depth + 1));
+  }
+
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      const keyLower = key.toLowerCase();
+      if (SENSITIVE_KEYS.some((s) => keyLower.includes(s))) {
+        out[key] = '[REDACTED]';
+      } else {
+        out[key] = redactSensitive(val, depth + 1);
+      }
+    }
+    return out;
+  }
+
+  return value;
 }
 
 // ANSI colors for development
@@ -70,12 +117,15 @@ function formatProd(entry: LogEntry): string {
 }
 
 function log(level: LogLevel, message: string, context?: Record<string, unknown>): void {
+  // Redact sensitive fields from context before logging
+  const safeContext = context ? redactSensitive(context) as Record<string, unknown> : undefined;
+  
   const entry: LogEntry = {
     timestamp: new Date().toISOString(),
     level,
     message,
     ...(currentRequestId && { requestId: currentRequestId }),
-    ...context,
+    ...safeContext,
   };
 
   const output = isProduction ? formatProd(entry) : formatDev(entry);

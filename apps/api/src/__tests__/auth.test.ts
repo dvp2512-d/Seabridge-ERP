@@ -441,14 +441,15 @@ describe('POST /api/users', () => {
 // STATIC CHECKS
 // ===========================================================================
 describe('Static checks', () => {
-  it('auth login route has authLimiter middleware applied', () => {
-    const authRouteSource = fs.readFileSync(
-      path.resolve(__dirname, '../routes/auth.ts'),
+  it('auth routes have rate limiting applied at mount level in index.ts', () => {
+    const indexSource = fs.readFileSync(
+      path.resolve(__dirname, '../index.ts'),
       'utf-8'
     );
 
-    // Verify that the login route uses authLimiter
-    expect(authRouteSource).toMatch(/router\.post\(['"]\/login['"],\s*authLimiter/);
+    // Verify that auth routes are mounted with authLimiter middleware
+    // The pattern is: app.use('/api/auth', authLimiter, authRouter)
+    expect(indexSource).toMatch(/app\.use\(['"]\/api\/auth['"]\s*,\s*authLimiter/);
   });
 
   it('index.ts validates JWT_SECRET at startup (process.exit if missing or short)', () => {
@@ -460,6 +461,6 @@ describe('Static checks', () => {
     // Verify the validateEnv function exists and checks JWT_SECRET
     expect(indexSource).toContain('JWT_SECRET');
     expect(indexSource).toContain('process.exit(1)');
-    expect(indexSource).toMatch(/jwtSecret\.length\s*<\s*32/);
+    expect(indexSource).toMatch(/JWT_SECRET\.length\s*<\s*32/);
   });
 });

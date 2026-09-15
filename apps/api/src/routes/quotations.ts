@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma, Prisma, InquiryStage } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
 import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
-import { generateCode, calculateMarginPercent, contentDisposition } from '../utils/helpers';
+import { generateCode, generateCodeInTx, calculateMarginPercent, contentDisposition } from '../utils/helpers';
 import { generateQuotationPDF } from '../services/pdfService';
 import {
   BASE_CURRENCY_CODE,
@@ -147,7 +147,6 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
     const { items, costs, ...data } = validation.data;
-    const quotationNumber = await generateCode('QUOTATION', 'QT');
 
     /**
      * Quotation totals.
@@ -192,33 +191,45 @@ router.post('/', can('SALES_MANAGE'), async (req, res, next) => {
     const grandTotal = subtotal + additionalCosts;
     const marginPercent = calculateMarginPercent(itemsCost, subtotal);
 
-    const quotation = await prisma.quotation.create({
-      data: {
-        ...data,
-        quotationNumber,
-        subtotal,
-        totalCost,
-        totalMargin,
-        marginPercent,
-        grandTotal,
-        items: { create: processedItems },
-        costs: costs ? { create: costs } : undefined,
-      },
-      include: {
-        buyer: true,
-        incoterm: true,
-        items: { include: { product: true } },
-        costs: true,
-      },
-    });
+    /**
+     * Wrap quotation creation in a transaction to ensure:
+     * 1. Number sequence increment and quotation creation are atomic
+     * 2. Inquiry stage update is part of the same transaction
+     * 3. If anything fails, no partial state is left behind
+     */
+    const quotation = await prisma.$transaction(async (tx) => {
+      const quotationNumber = await generateCodeInTx(tx, 'QUOTATION', 'QT');
 
-    // Update inquiry stage if linked
-    if (data.inquiryId) {
-      await prisma.inquiry.update({
-        where: { id: data.inquiryId },
-        data: { stage: 'QUOTATION_SENT' },
+      const created = await tx.quotation.create({
+        data: {
+          ...data,
+          quotationNumber,
+          subtotal,
+          totalCost,
+          totalMargin,
+          marginPercent,
+          grandTotal,
+          items: { create: processedItems },
+          costs: costs ? { create: costs } : undefined,
+        },
+        include: {
+          buyer: true,
+          incoterm: true,
+          items: { include: { product: true } },
+          costs: true,
+        },
       });
-    }
+
+      // Update inquiry stage if linked (within same transaction)
+      if (data.inquiryId) {
+        await tx.inquiry.update({
+          where: { id: data.inquiryId },
+          data: { stage: 'QUOTATION_SENT' },
+        });
+      }
+
+      return created;
+    });
 
     emitEvent('quotation.created', quotation);
     
@@ -282,9 +293,40 @@ router.patch('/:id/status', can('SALES_MANAGE'), async (req, res, next) => {
 
     const existing = await prisma.quotation.findUnique({
       where: { id: req.params.id },
-      select: { id: true, notes: true },
+      select: { id: true, status: true, quotationNumber: true, notes: true },
     });
     if (!existing) throw new NotFoundError('Quotation');
+
+    /**
+     * Quotation status state machine.
+     * 
+     * Enforces valid status transitions to maintain workflow integrity:
+     *   DRAFT → SENT, EXPIRED (draft can be sent or expire without sending)
+     *   SENT → REVISED, ACCEPTED, REJECTED, EXPIRED
+     *   REVISED → SENT, ACCEPTED, REJECTED, EXPIRED (revised version follows same flow)
+     *   ACCEPTED → (terminal - use revise endpoint to create new version)
+     *   REJECTED → (terminal)
+     *   EXPIRED → REVISED (can revive by creating a revision)
+     */
+    const ALLOWED_TRANSITIONS: Record<string, string[]> = {
+      'DRAFT': ['SENT', 'EXPIRED'],
+      'SENT': ['REVISED', 'ACCEPTED', 'REJECTED', 'EXPIRED'],
+      'REVISED': ['SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED'],
+      'ACCEPTED': [], // Terminal state - quotation is now an order
+      'REJECTED': [], // Terminal state
+      'EXPIRED': ['REVISED'], // Can revive by revising
+    };
+
+    if (status !== existing.status) {
+      const allowed = ALLOWED_TRANSITIONS[existing.status] || [];
+      if (!allowed.includes(status)) {
+        throw new AppError(
+          `Cannot change ${existing.quotationNumber} from ${existing.status} to ${status}. ` +
+            `Allowed transitions: ${allowed.length > 0 ? allowed.join(', ') : 'none (terminal state)'}.`,
+          400
+        );
+      }
+    }
 
     const updateData: Prisma.QuotationUpdateInput = { status };
     if (status === 'SENT') updateData.sentAt = new Date();

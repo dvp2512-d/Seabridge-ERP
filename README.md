@@ -2,7 +2,7 @@
 
 **Master Enterprise Edition V1.0**
 
-A complete business management system for Indian export trading companies — managing buyers, inquiries, quotations, orders, shipments, and finances in one connected platform. Built specifically for exporters with CBIC exchange rates, multi-currency support, and port-based logistics.
+A complete business management system for Indian export trading companies — managing buyers, inquiries, quotations, orders, shipments, and finances in one connected platform. Built specifically for exporters with multi-currency support, advisory market exchange rate lookup, and port-based logistics.
 
 ---
 
@@ -32,7 +32,7 @@ A complete business management system for Indian export trading companies — ma
 
 ### Quotations & Pricing
 - **Auto Costing** — Pull pricing from supplier rates, CHA charges, and transport rates
-- **Multi-currency** — Quote in USD, EUR, GBP, or any currency with live CBIC rates
+- **Multi-currency** — Quote in USD, EUR, GBP, or any currency, with an advisory market rate lookup to sanity-check the rate entered on the document
 - **Margin Analysis** — Real-time margin and grand total calculations
 - **Port Selection** — Port of Loading and Port of Discharge on quotations
 - **PDF Generation** — Professional branded quotation documents
@@ -48,7 +48,7 @@ A complete business management system for Indian export trading companies — ma
 - **Payment Recording** — Partial payments, forex gain tracking
 - **Receivables Report** — Multi-currency receivables converted to base currency
 - **Expenses & Income** — Full P&L visibility
-- **Exchange Rates** — CBIC notification-based rates with market comparison
+- **Exchange Rates** — Advisory market rate lookup (from open.er-api.com) to sanity-check the rate entered on a document
 
 ### Administration
 - **Audit Log** — Full system activity log with filtering (who did what, when)
@@ -252,7 +252,7 @@ seabridge-ERP/
 ├── apps/
 │   ├── api/                    # Express backend
 │   │   ├── src/
-│   │   │   ├── routes/         # 22 API route files
+│   │   │   ├── routes/         # 28 API route files
 │   │   │   │   ├── auth.ts
 │   │   │   │   ├── buyers.ts
 │   │   │   │   ├── quotations.ts
@@ -262,7 +262,7 @@ seabridge-ERP/
 │   │   │   │   ├── audit.ts
 │   │   │   │   ├── recordDeletion.ts
 │   │   │   │   ├── lifecycle.ts
-│   │   │   │   └── ... (13 more)
+│   │   │   │   └── ... (19 more)
 │   │   │   ├── middleware/
 │   │   │   │   ├── auth.ts     # JWT authentication
 │   │   │   │   ├── auditLog.ts # Automatic change tracking
@@ -296,7 +296,7 @@ seabridge-ERP/
 ├── packages/
 │   └── database/
 │       └── prisma/
-│           ├── schema.prisma   # 46 database models
+│           ├── schema.prisma   # 49 database models
 │           ├── migrations/
 │           └── seed.ts
 ├── scripts/                    # Verification scripts
@@ -311,15 +311,22 @@ seabridge-ERP/
 
 ## 🔐 Default Login
 
-The seed creates two accounts with password `admin123`:
+The seed creates two accounts. Passwords are **generated randomly at seed time** and printed **once** to the seed output (console) — they are never stored in the repository or committed anywhere. Copy them from the seed log when you run `deploy.cmd` or `npm run db:seed`.
 
 | Email | Role | Purpose |
 |-------|------|---------|
 | `founder@seabridge.com` | FOUNDER | Full access including permanent deletion |
 | `hiren@seabridge.com` | SALES | Example sales user |
 
-> **Change both passwords immediately after first login.**
-> Settings → Profile → Change Password
+To set your own passwords instead of random ones, provide them via environment variables before seeding:
+
+| Variable | Sets password for |
+|----------|-------------------|
+| `SEED_FOUNDER_PASSWORD` | `founder@seabridge.com` |
+| `SEED_SALES_PASSWORD` | `hiren@seabridge.com` |
+
+> **The generated passwords are shown only once at seed time.** If you miss them, re-seed (`deploy.cmd reset`) or set the `SEED_*` variables above.
+> **Change both passwords after first login.** Settings → Profile → Change Password
 
 ---
 
@@ -371,12 +378,11 @@ The seed creates two accounts with password `admin123`:
 - PDF download
 
 ### 7. Exchange Rates
-- CBIC notification-based rate entry
-- Import and Export rates separately
-- Market rate comparison (advisory, from open.er-api.com)
-- Difference percentage with warning for >5% variance
-- Rate history per currency
-- Coverage check — which currencies lack rates
+- Advisory market rate lookup only (from open.er-api.com) — no rates are stored in the system
+- All amounts are stored in the base currency (INR); a currency and rate are chosen when a quotation or invoice PDF is generated, then recorded on that document
+- The lookup exists to suggest a sensible number in that dialog so a transposed digit is obvious before the document goes out
+- A provider outage returns "unavailable" rather than failing — the operator's typed rate is always what gets used
+- Rates are inverted to base-per-foreign-unit (e.g. "1 USD = 95.65") and cached for 15 minutes
 
 ### 8. Finance
 - **Expenses** — Record and categorize business expenses
@@ -399,7 +405,7 @@ The seed creates two accounts with password `admin123`:
 ### 11. Settings
 - Company profile (name, address, GST, IEC, bank details)
 - User management (invite, roles, deactivate)
-- Number sequences (quotation, order, invoice prefixes)
+- Number sequences (auto-managed: quotation, order, invoice, payment, etc. prefixes are set at seed time)
 - Webhook configuration
 
 ---
@@ -449,14 +455,14 @@ Authorization: Bearer <JWT_TOKEN>
 | Quotations | `/quotations` | CRUD, PDF, status updates, convert to order |
 | Orders | `/orders` | CRUD, shipments, documents, procurement |
 | Invoices | `/invoices` | CRUD, payments, PDF, receivables report |
-| Exchange Rates | `/exchange-rates` | current, history, notification entry, market check |
+| Exchange Rates | `/exchange-rates` | market-check (advisory lookup only) |
 | Dashboard | `/dashboard` | main, sales, operations, finance |
 | Expenses | `/expenses` | CRUD, status, payments |
 | Income | `/income` | CRUD, forex gain |
 | Tasks | `/tasks` | CRUD, complete, reopen |
 | Users | `/users` | CRUD, deactivate, reactivate |
 | Master Data | `/master` | countries, currencies, ports, incoterms, dropdowns |
-| Settings | `/settings` | company profile, number sequences |
+| Settings | `/settings` | company profile |
 | Audit | `/audit` | list, entity history, stats, options |
 | Records | `/records` | preview delete, permanent delete (Founder only) |
 | Lifecycle | `/lifecycle` | deactivate, reactivate master data |
@@ -551,7 +557,7 @@ GET /health
 
 ## 🗄️ Database
 
-**46 Prisma models** across these domains:
+**49 Prisma models** across these domains:
 
 | Domain | Models |
 |--------|--------|

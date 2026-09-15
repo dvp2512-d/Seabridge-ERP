@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { prisma } from '@seabridge/database';
 import { authenticate, can } from '../middleware/auth';
-import { ValidationError, NotFoundError } from '../middleware/errorHandler';
+import { AppError, ValidationError, NotFoundError } from '../middleware/errorHandler';
 import { generateCode } from '../utils/helpers';
 import { PACKAGE_TYPES } from '../utils/packageTypes';
 import { getBaseCurrency } from '../services/exchangeRateService';
@@ -183,6 +183,61 @@ router.put('/:id', can('SALES_MANAGE'), async (req, res, next) => {
     const validation = schema.safeParse(req.body);
     if (!validation.success) throw new ValidationError(validation.error.errors);
 
+    // Get current inquiry to validate stage transitions
+    const existing = await prisma.inquiry.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, inquiryNumber: true, stage: true },
+    });
+    if (!existing) throw new NotFoundError('Inquiry');
+
+    /**
+     * Inquiry stage state machine.
+     * 
+     * Enforces valid stage transitions to maintain sales pipeline integrity:
+     *   NEW → REQUIREMENT_GATHERED, ON_HOLD, LOST
+     *   REQUIREMENT_GATHERED → PRICING_IN_PROGRESS, ON_HOLD, LOST
+     *   PRICING_IN_PROGRESS → QUOTATION_SENT, ON_HOLD, LOST
+     *   QUOTATION_SENT → NEGOTIATION, WON, LOST, ON_HOLD
+     *   NEGOTIATION → WON, LOST, ON_HOLD, QUOTATION_SENT (if price revised)
+     *   ON_HOLD → any previous stage (unfreezes to where it was)
+     *   WON → (terminal - quotation converted to order)
+     *   LOST → (terminal - create new inquiry to retry)
+     */
+    if (validation.data.stage) {
+      const current = existing.stage;
+      const newStage = validation.data.stage;
+      
+      const ALLOWED_STAGE_TRANSITIONS: Record<string, string[]> = {
+        'NEW': ['REQUIREMENT_GATHERED', 'ON_HOLD', 'LOST'],
+        'REQUIREMENT_GATHERED': ['PRICING_IN_PROGRESS', 'ON_HOLD', 'LOST'],
+        'PRICING_IN_PROGRESS': ['QUOTATION_SENT', 'ON_HOLD', 'LOST'],
+        'QUOTATION_SENT': ['NEGOTIATION', 'WON', 'LOST', 'ON_HOLD'],
+        'NEGOTIATION': ['WON', 'LOST', 'ON_HOLD', 'QUOTATION_SENT'],
+        'ON_HOLD': ['NEW', 'REQUIREMENT_GATHERED', 'PRICING_IN_PROGRESS', 'QUOTATION_SENT', 'NEGOTIATION', 'LOST'],
+        'WON': [], // Terminal state
+        'LOST': [], // Terminal state
+      };
+
+      if (newStage !== current) {
+        const allowed = ALLOWED_STAGE_TRANSITIONS[current] || [];
+        if (!allowed.includes(newStage)) {
+          throw new AppError(
+            `Cannot change ${existing.inquiryNumber} from ${current.replace(/_/g, ' ')} to ${newStage.replace(/_/g, ' ')}. ` +
+              `Allowed transitions: ${allowed.length > 0 ? allowed.map(s => s.replace(/_/g, ' ')).join(', ') : 'none (closed)'}.`,
+            400
+          );
+        }
+      }
+      
+      // LOST requires a reason
+      if (newStage === 'LOST' && !validation.data.lostReason) {
+        throw new AppError(
+          'Please provide a reason for marking this inquiry as lost.',
+          400
+        );
+      }
+    }
+
     const updateData: any = { ...validation.data };
     if (validation.data.stage === 'WON' || validation.data.stage === 'LOST') {
       updateData.closedAt = new Date();
@@ -222,6 +277,42 @@ router.post('/:id/items', can('SALES_MANAGE'), async (req, res, next) => {
     });
 
     res.status(201).json({ success: true, data: item });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Delete inquiry item
+router.delete('/:id/items/:itemId', can('SALES_MANAGE'), async (req, res, next) => {
+  try {
+    // Verify the item belongs to this inquiry
+    const existing = await prisma.inquiryItem.findFirst({
+      where: { id: req.params.itemId, inquiryId: req.params.id },
+      include: { product: { select: { name: true } } },
+    });
+    if (!existing) throw new NotFoundError('Inquiry item');
+
+    // Check if inquiry has been converted to a quotation
+    const quotation = await prisma.quotation.findFirst({
+      where: { inquiryId: req.params.id },
+      select: { quotationNumber: true },
+    });
+    if (quotation) {
+      throw new AppError(
+        `Cannot delete items from an inquiry that has quotation ${quotation.quotationNumber}. ` +
+          `Edit the quotation instead.`,
+        400
+      );
+    }
+
+    await prisma.inquiryItem.delete({
+      where: { id: req.params.itemId },
+    });
+
+    res.json({ 
+      success: true, 
+      message: `Item "${existing.product.name}" removed from inquiry`,
+    });
   } catch (error) {
     next(error);
   }

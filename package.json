@@ -16,6 +16,8 @@
     "build:web": "npm run build -w apps/web",
     "typecheck": "npm run typecheck -w apps/api && npm run typecheck -w apps/web",
     "verify": "npm run typecheck && npm run verify:contract && npm run verify:pdf && npm run verify:logic",
+    "test": "npm run test -w apps/api",
+    "test:watch": "npm run test:watch -w apps/api",
     "verify:contract": "node scripts/check-api-contract.mjs",
     "verify:pdf": "npx tsx scripts/verify-pdf.ts",
     "verify:logic": "npx tsx scripts/verify-logic.ts",

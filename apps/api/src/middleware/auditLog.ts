@@ -125,7 +125,12 @@ export function auditLog(req: Request, res: Response, next: NextFunction) {
     if (action !== 'UPDATE' && action !== 'DELETE') return;
     
     const entityType = entityTypeFor(req.path);
-    const entityId = req.params?.id ?? Object.values(req.params ?? {})[0];
+    // For sub-resources like /orders/:orderId/shipments/:shipmentId the id that
+    // matches the entity type is the last route param, not `id` (which would be
+    // the parent order). Fall back to `id` / the first param for top-level routes.
+    const paramValues = Object.values(req.params ?? {});
+    const entityId =
+      req.params?.id ?? paramValues[paramValues.length - 1] ?? paramValues[0];
     
     if (!entityId) return;
 
@@ -143,14 +148,22 @@ export function auditLog(req: Request, res: Response, next: NextFunction) {
       INCOME: 'income',
       TASKS: 'task',
       WEBHOOKS: 'webhook',
-      CHA: 'cha',
+      // Prisma generates the accessor for `model CHA` as `cHA` (only the first
+      // letter is lowercased), so this must match exactly or old-value capture
+      // silently no-ops.
+      CHA: 'cHA',
       TRANSPORTERS: 'transporter',
       COUNTRIES: 'country',
       PORTS: 'port',
       CURRENCIES: 'currency',
       INCOTERMS: 'incoterm',
       PRODUCT_CATEGORIES: 'productCategory',
-      EXCHANGE_RATES: 'exchangeRate',
+      // Note: no EXCHANGE_RATES entry — exchange rates are advisory-only and
+      // never stored (there is no ExchangeRate model), and the route is
+      // read-only, so it never produces a write audit entry anyway.
+      PAYMENTS: 'payment',
+      SHIPMENTS: 'shipment',
+      PROCUREMENTS: 'procurement',
     };
 
     const model = modelMap[entityType];

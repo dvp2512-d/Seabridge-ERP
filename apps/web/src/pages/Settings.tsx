@@ -283,7 +283,7 @@ function PasswordChangeModal({ onClose }: { onClose: () => void }) {
         {formData.confirmPassword && formData.newPassword !== formData.confirmPassword && (
           <p className="text-xs text-red-600">Passwords do not match</p>
         )}
-        <div className="flex justify-end gap-3 pt-4">
+        <div className="flex justify-end gap-3 pt-4 border-t">
           <button onClick={onClose} className="btn btn-secondary">Cancel</button>
           <button 
             onClick={handleSubmit} 
@@ -603,14 +603,14 @@ function TemplatesSettings() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => { setSelectedTemplate(template); setShowModal(true); }}
-                    className="p-2 text-gray-400 hover:text-gray-600"
+                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-gray-100 rounded transition-colors"
                     aria-label="Edit template"
                   >
                     <Edit className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => deleteMutation.mutate(template.id)}
-                    className="p-2 text-gray-400 hover:text-red-600"
+                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded transition-colors"
                     aria-label="Delete template"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -845,14 +845,14 @@ function WebhooksSettings() {
                     </button>
                     <button
                       onClick={() => { setSelectedWebhook(webhook); setShowModal(true); }}
-                      className="p-2 text-gray-400 hover:text-gray-600"
+                      className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-gray-100 rounded transition-colors"
                       aria-label="Edit webhook"
                     >
                       <Edit className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => deleteMutation.mutate(webhook.id)}
-                      className="p-2 text-gray-400 hover:text-red-600"
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded transition-colors"
                       aria-label="Delete webhook"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -965,7 +965,7 @@ function WebhookModal({
               <button
                 type="button"
                 onClick={() => setShowSecret(!showSecret)}
-                className="p-2 text-gray-400 hover:text-gray-600"
+                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
                 aria-label={showSecret ? 'Hide secret' : 'Show secret'}
               >
                 {showSecret ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -973,7 +973,7 @@ function WebhookModal({
               <button
                 type="button"
                 onClick={() => { navigator.clipboard.writeText(webhook.secret); toast.success('Copied!'); }}
-                className="p-2 text-gray-400 hover:text-gray-600"
+                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
                 aria-label="Copy secret to clipboard"
               >
                 <Copy className="w-4 h-4" />
@@ -1145,14 +1145,14 @@ function AutomationsSettings() {
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => { setSelectedAutomation(automation); setShowModal(true); }}
-                    className="p-2 text-gray-400 hover:text-gray-600"
+                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-gray-100 rounded transition-colors"
                     aria-label="Edit automation"
                   >
                     <Edit className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => deleteMutation.mutate(automation.id)}
-                    className="p-2 text-gray-400 hover:text-red-600"
+                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded transition-colors"
                     aria-label="Delete automation"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -1182,7 +1182,7 @@ function AutomationsSettings() {
                 Rules can be created and managed via the API.
               </p>
               <div className="mt-2 text-xs font-mono bg-white rounded p-2 border">
-                POST /api/automation/rules<br/>
+                POST /api/automation/automations<br/>
                 {`{ "name": "...", "trigger": "inquiry.created",`}<br/>
                 {`  "actions": { "type": "CREATE_TASK", "title": "Follow up",`}<br/>
                 {`    "assigneeId": "...", "dueInDays": 3 } }`}

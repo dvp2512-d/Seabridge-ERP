@@ -291,8 +291,8 @@ export default function InvoiceDetail() {
       {/* Overdue Alert */}
       {isOverdue && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-          <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0" />
-          <div>
+          <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
             <h3 className="font-semibold text-red-800">Payment Overdue</h3>
             <p className="text-sm text-red-600">
               This invoice was due on {formatDate(invoice.dueDate)}. Balance: {formatCurrency(balanceAmount)}

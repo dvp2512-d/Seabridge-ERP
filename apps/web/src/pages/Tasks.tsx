@@ -237,13 +237,13 @@ export default function Tasks() {
                         </select>
                       </td>
                       <td className="text-right whitespace-nowrap">
-                        <div className="flex items-center justify-end gap-1">
+                        <div className="flex items-center justify-end gap-2">
                           <button
                             onClick={() => {
                               setEditing(t);
                               setShowForm(true);
                             }}
-                            className="p-1 text-gray-400 hover:text-gray-600 rounded transition-colors"
+                            className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded transition-colors"
                             title="Edit"
                           >
                             <Edit className="w-4 h-4" />
@@ -257,7 +257,7 @@ export default function Tasks() {
                               onClick={() => {
                                 if (confirm(`Delete "${t.title}"?`)) remove.mutate(t.id);
                               }}
-                              className="p-1 text-gray-400 hover:text-red-600 rounded transition-colors"
+                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-gray-100 rounded transition-colors"
                               title="Delete"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -419,7 +419,7 @@ function TaskFormModal({
           onChange={(e) => setForm({ ...form, notes: e.target.value })}
         />
 
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex justify-end gap-3 pt-4 border-t">
           <button type="button" onClick={onClose} className="btn btn-secondary">
             Cancel
           </button>

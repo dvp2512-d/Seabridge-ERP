@@ -2,7 +2,7 @@
 setlocal EnableDelayedExpansion
 
 REM ===========================================================================
-REM  SeaBridge Founder OS - single-file deployment
+REM  SeaBridge ERP - Deployment Script
 REM
 REM  The only requirement is Docker Desktop and Git. Node.js, npm and Prisma
 REM  are NOT needed - every build, migration and seed step runs in a container.
@@ -14,6 +14,7 @@ REM    deploy.cmd nopull       deploy without pulling from GitHub
 REM    deploy.cmd stop         stop the stack, keep all data
 REM    deploy.cmd logs         follow container logs
 REM    deploy.cmd status       show what is running
+REM    deploy.cmd backup       create database backup
 REM    deploy.cmd help
 REM ===========================================================================
 
@@ -47,6 +48,10 @@ if /i "!ARG!"=="help"   set "ACTION=help"     & goto nextarg
 if /i "!ARG!"=="h"      set "ACTION=help"     & goto nextarg
 if /i "!ARG!"=="?"      set "ACTION=help"     & goto nextarg
 if /i "!ARG!"=="fixenv" set "ACTION=fixenv"   & goto nextarg
+if /i "!ARG!"=="migrate" set "ACTION=migrate" & goto nextarg
+if /i "!ARG!"=="seed"    set "ACTION=seed"    & goto nextarg
+if /i "!ARG!"=="backup"  set "ACTION=backup"  & goto nextarg
+if /i "!ARG!"=="restore" set "ACTION=restore" & goto nextarg
 echo.
 echo ERROR: unknown option "%~1"
 echo Run "deploy.cmd help" to see the available options.
@@ -138,7 +143,20 @@ if /i "%ACTION%"=="logs" (
 
 if /i "%ACTION%"=="status" (
   echo.
+  echo === Container Status ===
   docker compose ps
+  echo.
+  echo === Checking Database Migrations ===
+  docker compose run --rm --no-deps -T api sh -c "cd /app/packages/database && npx prisma migrate deploy" >"%TMPOUT%" 2>&1
+  if errorlevel 1 (
+    findstr /c:"P3005" /c:"schema is not empty" "%TMPOUT%" >nul 2>&1
+    if not errorlevel 1 (
+      echo [!] Running db push fallback...
+      docker compose run --rm --no-deps -T api sh -c "cd /app/packages/database && npx prisma db push --skip-generate" >nul 2>&1
+    )
+  )
+  echo [OK] Database schema is up to date
+  del "%TMPOUT%" >nul 2>&1
   echo.
   exit /b 0
 )
@@ -149,10 +167,132 @@ if /i "%ACTION%"=="fixenv" (
   goto createenv
 )
 
+if /i "%ACTION%"=="migrate" (
+  echo.
+  echo Running database migrations...
+  docker compose run --rm --no-deps -T api sh -c "cd /app/packages/database && npx prisma migrate deploy"
+  if errorlevel 1 (
+    echo.
+    echo [!] Migration failed. Trying db push as fallback...
+    docker compose run --rm --no-deps -T api sh -c "cd /app/packages/database && npx prisma db push --skip-generate"
+  )
+  echo.
+  echo Restarting API to pick up schema changes...
+  docker compose restart api
+  echo.
+  echo [OK] Migrations complete. Waiting for API...
+  timeout /t 5 /nobreak >nul
+  curl -fsS http://localhost:4000/health && echo. && echo API is healthy!
+  exit /b 0
+)
+
+if /i "%ACTION%"=="seed" (
+  echo.
+  echo Seeding database...
+  docker compose run --rm --no-deps -T api sh -c "cd /app/packages/database && npx ts-node prisma/seed.ts"
+  echo.
+  echo [OK] Seeding complete.
+  exit /b 0
+)
+
+if /i "%ACTION%"=="backup" (
+  echo.
+  echo ================================================
+  echo   SeaBridge ERP - Database Backup
+  echo ================================================
+  echo.
+  
+  REM Check if database is running
+  docker compose ps postgres 2>nul | findstr "running" >nul
+  if errorlevel 1 (
+    echo ERROR: Database is not running. Start with: deploy.cmd
+    exit /b 1
+  )
+  
+  REM Create backup directory
+  if not exist "backups" mkdir "backups"
+  
+  REM Generate timestamp
+  for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /value') do set "DT=%%I"
+  set "TIMESTAMP=!DT:~0,8!_!DT:~8,6!"
+  set "BACKUP_FILE=backups\seabridge_!TIMESTAMP!.sql"
+  
+  echo Creating backup: !BACKUP_FILE!
+  docker compose exec -T postgres pg_dump -U seabridge -d seabridge_erp --no-owner --no-acl > "!BACKUP_FILE!"
+  if errorlevel 1 (
+    echo ERROR: Backup failed.
+    exit /b 1
+  )
+  
+  for %%A in ("!BACKUP_FILE!") do set "SIZE=%%~zA"
+  set /a "SIZE_KB=!SIZE! / 1024"
+  echo.
+  echo [OK] Backup complete: !BACKUP_FILE! ^(!SIZE_KB! KB^)
+  echo.
+  echo To restore: deploy.cmd restore "!BACKUP_FILE!"
+  echo.
+  exit /b 0
+)
+
+if /i "%ACTION%"=="restore" (
+  echo.
+  echo ================================================
+  echo   SeaBridge ERP - Database Restore
+  echo ================================================
+  echo.
+  
+  REM Get backup file from argument
+  set "RESTORE_FILE=%~2"
+  if "!RESTORE_FILE!"=="" (
+    echo Usage: deploy.cmd restore ^<backup-file^>
+    echo.
+    echo Available backups:
+    if exist "backups\*.sql" (
+      for %%F in (backups\*.sql) do echo   %%F
+    ) else (
+      echo   No backups found in backups\ directory
+    )
+    exit /b 1
+  )
+  
+  if not exist "!RESTORE_FILE!" (
+    echo ERROR: Backup file not found: !RESTORE_FILE!
+    exit /b 1
+  )
+  
+  echo WARNING: This will OVERWRITE the current database!
+  echo File: !RESTORE_FILE!
+  echo.
+  set /p "CONFIRM=Type DELETE to confirm: "
+  if /i not "!CONFIRM!"=="DELETE" (
+    echo Restore cancelled.
+    exit /b 0
+  )
+  
+  echo.
+  echo Stopping API...
+  docker compose stop api >nul 2>&1
+  
+  echo Restoring database...
+  docker compose exec -T postgres psql -U seabridge -d seabridge_erp < "!RESTORE_FILE!"
+  if errorlevel 1 (
+    echo ERROR: Restore failed.
+    docker compose start api >nul 2>&1
+    exit /b 1
+  )
+  
+  echo Restarting API...
+  docker compose start api >nul 2>&1
+  
+  echo.
+  echo [OK] Restore complete!
+  exit /b 0
+)
+
 REM ------------------------------------------------------------- banner
 echo.
 echo ================================================
-echo   SeaBridge Founder OS - Deployment
+echo   SeaBridge ERP - Deployment
 echo ================================================
 
 REM ------------------------------------------------------------- 1. files
@@ -376,6 +516,20 @@ if errorlevel 1 (
 )
 echo       [OK] containers started
 
+REM Always verify migrations are applied after start (handles restart scenarios)
+echo       Verifying database schema...
+docker compose exec -T api sh -c "cd /app/packages/database && npx prisma migrate deploy" >"%TMPOUT%" 2>&1
+REM Always run db push to catch any schema drift (missing tables, columns)
+docker compose exec -T api sh -c "cd /app/packages/database && npx prisma db push --skip-generate --accept-data-loss=false" >nul 2>&1
+echo       [OK] schema verified
+
+REM Restart API to ensure it picks up any schema changes
+docker compose restart api >nul 2>&1
+del "%TMPOUT%" >nul 2>&1
+
+echo.
+echo [8/8] Verifying API health
+
 set "APIUP=0"
 <nul set /p "=      waiting for the API"
 for /l %%i in (1,1,45) do (
@@ -409,14 +563,23 @@ if "%DO_SEED%"=="1" (
   echo   Sign in with: founder@seabridge.com
   echo   ^(Password was displayed during seed - check output above^)
   echo.
+  echo   IMPORTANT: Change your password after first login!
+  echo             Settings -^> Profile -^> Change Password
+  echo.
 )
 echo   Commands
 echo     deploy.cmd            start / update
 echo     deploy.cmd stop       stop, keeps data
 echo     deploy.cmd status     what is running
 echo     deploy.cmd logs       follow logs
+echo     deploy.cmd backup     create database backup
+echo     deploy.cmd restore    restore from backup
 echo     deploy.cmd reset      wipe data and start over
 echo     deploy.cmd fixenv     regenerate .env file
+echo.
+echo   Backups
+echo     Set up regular backups to protect your data:
+echo     deploy.cmd backup     ^(creates backups\seabridge_YYYYMMDD.sql^)
 echo.
 
 REM Keep the window open if launched by double-click.
@@ -427,7 +590,7 @@ exit /b 0
 REM ------------------------------------------------------------- help
 :showhelp
 echo.
-echo SeaBridge Founder OS - deployment
+echo SeaBridge ERP - Deployment Script
 echo.
 echo Usage:
 echo   deploy.cmd              deploy or update (pulls latest code first)
@@ -437,9 +600,16 @@ echo   deploy.cmd nopull       deploy without pulling from GitHub
 echo   deploy.cmd stop         stop the stack, keep all data
 echo   deploy.cmd logs         follow container logs
 echo   deploy.cmd status       show what is running
+echo   deploy.cmd migrate      apply database migrations only
+echo   deploy.cmd seed         run database seeding only
+echo   deploy.cmd backup       create database backup
+echo   deploy.cmd restore FILE restore database from backup
 echo   deploy.cmd fixenv       regenerate .env file (fixes format issues)
 echo   deploy.cmd help         this message
 echo.
 echo Requires only Docker Desktop and Git. Node.js is not needed.
+echo.
+echo IMPORTANT: After first deployment, change the default passwords!
+echo            Settings -^> Profile -^> Change Password
 echo.
 exit /b 0

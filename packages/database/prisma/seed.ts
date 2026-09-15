@@ -1,20 +1,45 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 
 const prisma = new PrismaClient();
+
+/**
+ * Generate a cryptographically secure random password.
+ * Uses alphanumeric characters for compatibility with all systems.
+ */
+function generateSecurePassword(length = 16): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  let password = '';
+  const bytes = crypto.randomBytes(length);
+  for (let i = 0; i < length; i++) {
+    password += chars[bytes[i] % chars.length];
+  }
+  return password;
+}
 
 async function main() {
   console.log('🌱 Seeding database...');
 
-  // Create admin user
-  const passwordHash = await bcrypt.hash('admin123', 12);
+  /**
+   * SECURITY: Generate random passwords for seed users.
+   * 
+   * Previous versions used 'admin123' which is a security risk if seed data
+   * makes it to production. Random passwords are displayed once and must be
+   * changed on first login.
+   */
+  const founderPassword = process.env.SEED_FOUNDER_PASSWORD || generateSecurePassword();
+  const salesPassword = process.env.SEED_SALES_PASSWORD || generateSecurePassword();
+  
+  const founderHash = await bcrypt.hash(founderPassword, 12);
+  const salesHash = await bcrypt.hash(salesPassword, 12);
   
   const founder = await prisma.user.upsert({
     where: { email: 'founder@seabridge.com' },
     update: {},
     create: {
       email: 'founder@seabridge.com',
-      passwordHash,
+      passwordHash: founderHash,
       firstName: 'Dhruvil',
       lastName: 'Patel',
       role: 'FOUNDER',
@@ -29,7 +54,7 @@ async function main() {
     update: {},
     create: {
       email: 'hiren@seabridge.com',
-      passwordHash,
+      passwordHash: salesHash,
       firstName: 'Hiren',
       lastName: 'Shah',
       role: 'SALES',
@@ -37,6 +62,26 @@ async function main() {
     },
   });
   console.log('✅ Created sales user:', salesUser.email);
+
+  // Display generated passwords (only if not provided via env)
+  if (!process.env.SEED_FOUNDER_PASSWORD || !process.env.SEED_SALES_PASSWORD) {
+    console.log('');
+    console.log('╔════════════════════════════════════════════════════════════════╗');
+    console.log('║  🔐 GENERATED CREDENTIALS - SAVE THESE NOW!                    ║');
+    console.log('╠════════════════════════════════════════════════════════════════╣');
+    if (!process.env.SEED_FOUNDER_PASSWORD) {
+      console.log(`║  Founder: founder@seabridge.com                                ║`);
+      console.log(`║  Password: ${founderPassword.padEnd(48)}║`);
+    }
+    if (!process.env.SEED_SALES_PASSWORD) {
+      console.log(`║  Sales: hiren@seabridge.com                                    ║`);
+      console.log(`║  Password: ${salesPassword.padEnd(48)}║`);
+    }
+    console.log('╠════════════════════════════════════════════════════════════════╣');
+    console.log('║  ⚠️  Change these passwords immediately after first login!     ║');
+    console.log('╚════════════════════════════════════════════════════════════════╝');
+    console.log('');
+  }
 
   // Seed Countries
   const countries = [
@@ -209,9 +254,8 @@ async function main() {
   console.log('✅ Seeded number sequences');
 
   console.log('🎉 Database seeding completed!');
-  console.log('\n📋 Login credentials:');
-  console.log('   Email: founder@seabridge.com');
-  console.log('   Password: admin123');
+  console.log('\n📋 Login credentials are displayed in the box above.');
+  console.log('   If you missed them, re-run the seed or set SEED_FOUNDER_PASSWORD in .env');
 }
 
 main()

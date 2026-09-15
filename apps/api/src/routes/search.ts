@@ -9,6 +9,7 @@
  * - MASTER_VIEW required for products and suppliers
  */
 import { Router } from 'express';
+import { z } from 'zod';
 import { authenticate, PERMISSIONS } from '../middleware/auth';
 import { globalSearch } from '../services/searchService';
 import { UserRole } from '@seabridge/database';
@@ -61,9 +62,23 @@ function getAllowedSearchTypes(role: UserRole): string[] {
 // Global search endpoint
 router.get('/', async (req: any, res, next) => {
   try {
-    const { q, limit, types } = req.query;
+    const querySchema = z.object({
+      q: z.string().max(200, 'Search query too long (max 200 characters)').optional(),
+      limit: z.string().transform(Number).pipe(z.number().min(1).max(100)).optional(),
+      types: z.string().max(200).optional(),
+    });
+
+    const validation = querySchema.safeParse(req.query);
+    if (!validation.success) {
+      return res.status(400).json({
+        success: false,
+        message: validation.error.errors[0]?.message || 'Invalid search parameters',
+      });
+    }
+
+    const { q, limit, types } = validation.data;
     
-    if (!q || typeof q !== 'string') {
+    if (!q || q.trim().length === 0) {
       return res.json({
         success: true,
         data: {
@@ -81,7 +96,7 @@ router.get('/', async (req: any, res, next) => {
     // If user requested specific types, filter to only allowed ones
     let typeFilter: string[] | undefined;
     if (types) {
-      const requestedTypes = (types as string).split(',');
+      const requestedTypes = types.split(',');
       typeFilter = requestedTypes.filter(t => allowedTypes.includes(t));
       // If no requested types are allowed, return empty results
       if (typeFilter.length === 0) {
@@ -101,7 +116,7 @@ router.get('/', async (req: any, res, next) => {
     }
     
     const results = await globalSearch(q, {
-      limit: limit ? parseInt(limit as string) : 20,
+      limit: limit || 20,
       types: typeFilter,
     });
 
